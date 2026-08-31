@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Reused the running Windows window when another Markdown file is opened from Explorer, adding or activating a tab instead of creating a second window
+
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
 ## 0.1.0

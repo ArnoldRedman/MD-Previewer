@@ -12,7 +12,7 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 ## What it does
 
 - Opens Markdown and text files from the command line, file picker, drag and drop, or OS file associations.
-- Keeps multiple documents in tabs and restores the previous session.
+- Keeps multiple documents in tabs and restores the previous session; opening another Markdown file from Windows Explorer reuses the running window.
 - Reloads previews when another editor changes the file.
 - Supports tables, task lists, syntax highlighting, GitHub alerts, KaTeX, Mermaid, local images, and local document links.
 - Includes preview search, content zoom, print, source editing, and reliable autosave.

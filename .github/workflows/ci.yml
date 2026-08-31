@@ -29,6 +29,9 @@ jobs:
           if ([System.Text.Encoding]::Unicode.GetString($bytes) -notmatch "MD Previewer") {
             throw "new product metadata is missing"
           }
+      - name: Verify Windows single-instance file forwarding
+        shell: powershell
+        run: ./scripts/verify-windows-single-instance.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: md-previewer-windows-x64

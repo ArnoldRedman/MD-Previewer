@@ -4,6 +4,7 @@
 )]
 
 mod session;
+mod single_instance;
 
 use notify::{Event, RecursiveMode, Watcher};
 use pulldown_cmark::{html, CowStr, Event as MdEvent, Options, Parser, Tag, TagEnd};
@@ -3406,6 +3407,10 @@ fn main() {
 
     let lang = detect_lang();
     let strings = Strings::for_lang(lang);
+    let instance = match single_instance::prepare(&config_dir(), &cli_paths, edit_from_cli) {
+        single_instance::Startup::Primary(server) => server,
+        single_instance::Startup::Forwarded => return,
+    };
     register_as_default(lang);
     register_finder_extension();
     bench_log("after_register");
@@ -3417,6 +3422,7 @@ fn main() {
 
     let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    instance.start(proxy.clone());
     let initial_theme = load_theme_choice();
     install_macos_menu(proxy.clone(), initial_theme);
 
@@ -3740,6 +3746,7 @@ fn main() {
     let mut pending_external_change: Option<PathBuf> = None;
 
     event_loop.run(move |event, _, control_flow| {
+        let _keep_single_instance_lock = &instance;
         *control_flow = ControlFlow::Wait;
 
         match event {
@@ -3800,6 +3807,12 @@ fn main() {
                 }
             }
             TaoEvent::UserEvent(UserEvent::OpenPaths(paths, edit_on_open)) => {
+                window.set_minimized(false);
+                window.set_visible(true);
+                window.set_focus();
+                if paths.is_empty() {
+                    return;
+                }
                 let mut session = session_for_event.lock().unwrap();
                 let previous_active = session.active_id;
                 let preserve_active = session.active().map(|tab| tab.dirty).unwrap_or(false);
