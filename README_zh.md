@@ -20,6 +20,24 @@ MD Previewer 是一个体积小、本地优先的 Markdown 阅读器和快速编
 
 渲染资源全部离线内置。**自动更新当前已禁用**，等本 fork 建立独立且可信的签名发布通道后再启用。
 
+## Windows 一键构建
+
+在 Windows 上直接双击仓库根目录的：
+
+```text
+build-windows.cmd
+```
+
+脚本会依次运行 Rust 测试、Release 构建、安装包生成，以及隔离目录中的安装/卸载自测。产物位于 `dist`：
+
+```text
+dist\MD-Previewer-windows-x64.exe   单文件便携版
+dist\MD-Previewer-Setup.exe         当前用户安装包
+dist\SHA256SUMS.txt                 SHA-256 校验值
+```
+
+安装包不需要管理员权限，默认安装到 `%LOCALAPPDATA%\Programs\MD Previewer`，并创建开始菜单入口、卸载入口和 Markdown“打开方式”。它依赖系统 WebView2，不会把 WebView2 打进安装包。命令行或 CI 可用 `build-windows.cmd --no-pause` 跳过结束暂停。
+
 ## 构建
 
 ```bash

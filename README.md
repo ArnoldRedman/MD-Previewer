@@ -20,6 +20,24 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 
 All rendering assets are bundled locally. **Automatic updates are disabled** until this fork has its own signed release channel.
 
+## Windows one-click build
+
+On Windows, double-click the repository-root file:
+
+```text
+build-windows.cmd
+```
+
+It runs Rust tests, creates the release executable, builds the installer, and verifies installation/uninstallation in an isolated directory. Outputs are written to `dist`:
+
+```text
+dist\MD-Previewer-windows-x64.exe   portable single-file build
+dist\MD-Previewer-Setup.exe         per-user installer
+dist\SHA256SUMS.txt                 SHA-256 checksums
+```
+
+The installer does not require administrator rights. It installs to `%LOCALAPPDATA%\Programs\MD Previewer`, creates Start Menu and uninstall entries, and registers Markdown in the “Open with” list. It uses the system WebView2 runtime and does not bundle WebView2. Use `build-windows.cmd --no-pause` from a terminal or CI.
+
 ## Build
 
 ```bash
