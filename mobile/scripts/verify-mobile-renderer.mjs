@@ -23,9 +23,9 @@ page.on('console', message => {
 await page.goto(preview);
 await page.waitForLoadState('domcontentloaded');
 await page.evaluate(() => {
-  window.MDPreview.render({
+  window.MDPreviewer.render({
     name: 'mobile-fixture.md',
-    baseHref: 'file:///tmp/md-preview-docs/',
+    baseHref: 'file:///tmp/md-previewer-docs/',
     markdown: [
       '# Mobile fixture',
       '',

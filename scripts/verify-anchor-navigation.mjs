@@ -16,7 +16,7 @@ await page.setContent(`<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
-    <base href="file:///tmp/md-preview-anchor-fixture/">
+    <base href="file:///tmp/md-previewer-anchor-fixture/">
     <style>
       body { margin: 0; font: 16px system-ui, sans-serif; }
       #preview { padding: 24px; }
@@ -41,7 +41,7 @@ await page.setContent(`<!doctype html>
       <div class="spacer"></div>
     </div>
     <script>
-      window.__mdPreviewFeatureFlags = { math: false, mermaid: false };
+      window.__mdPreviewerFeatureFlags = { math: false, mermaid: false };
       window.__ipcMessages = [];
       window.ipc = { postMessage: message => window.__ipcMessages.push(message) };
     </script>
@@ -63,7 +63,7 @@ const result = await page.evaluate(() => ({
   clientAlertBody: document.querySelector('#client-alert p:not(.markdown-alert-title)')?.textContent.trim(),
 }));
 
-if (result.href.startsWith('file:///tmp/md-preview-anchor-fixture/')) {
+if (result.href.startsWith('file:///tmp/md-previewer-anchor-fixture/')) {
   throw new Error(`anchor click followed base href instead of staying in page: ${result.href}`);
 }
 
@@ -89,7 +89,7 @@ if (localLinkResult.href !== result.href) {
   throw new Error(`local document link navigated the page: ${localLinkResult.href}`);
 }
 if (localLinkResult.ipcMessages.length !== 1 ||
-    localLinkResult.ipcMessages[0] !== 'open-local-link:file:///tmp/md-preview-anchor-fixture/folder/another%20doc.md#part') {
+    localLinkResult.ipcMessages[0] !== 'open-local-link:file:///tmp/md-previewer-anchor-fixture/folder/another%20doc.md#part') {
   throw new Error(`local document link was not routed through IPC: ${JSON.stringify(localLinkResult.ipcMessages)}`);
 }
 

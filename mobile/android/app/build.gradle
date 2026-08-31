@@ -3,23 +3,23 @@ plugins {
 }
 
 android {
-    namespace = "app.mdpreview.mobile"
+    namespace = "io.github.arnoldredman.mdpreviewer"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.mdpreview.mobile"
+        applicationId = "io.github.arnoldredman.mdpreviewer.mobile"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.0.9"
+        versionCode = 1
+        versionName = "0.1.0"
     }
 
     signingConfigs {
         release {
-            def keystorePath = System.getenv("MD_PREVIEW_ANDROID_KEYSTORE")
-            def keystorePassword = System.getenv("MD_PREVIEW_ANDROID_KEYSTORE_PASSWORD")
-            def keyAliasValue = System.getenv("MD_PREVIEW_ANDROID_KEY_ALIAS")
-            def keyPasswordValue = System.getenv("MD_PREVIEW_ANDROID_KEY_PASSWORD")
+            def keystorePath = System.getenv("MD_PREVIEWER_ANDROID_KEYSTORE")
+            def keystorePassword = System.getenv("MD_PREVIEWER_ANDROID_KEYSTORE_PASSWORD")
+            def keyAliasValue = System.getenv("MD_PREVIEWER_ANDROID_KEY_ALIAS")
+            def keyPasswordValue = System.getenv("MD_PREVIEWER_ANDROID_KEY_PASSWORD")
             if (keystorePath && keystorePassword && keyAliasValue && keyPasswordValue) {
                 storeFile = file(keystorePath)
                 storePassword = keystorePassword
@@ -31,7 +31,7 @@ android {
 
     buildTypes {
         release {
-            if (System.getenv("MD_PREVIEW_ANDROID_KEYSTORE")) {
+            if (System.getenv("MD_PREVIEWER_ANDROID_KEYSTORE")) {
                 signingConfig = signingConfigs.release
             }
             minifyEnabled = false

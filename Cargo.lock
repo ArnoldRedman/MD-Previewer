@@ -1671,8 +1671,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2532096657941c2fea9c289d370a250971c689d4f143798ff67113ec042024a5"
 
 [[package]]
-name = "md-preview"
-version = "1.4.0"
+name = "md-previewer"
+version = "0.1.0"
 dependencies = [
  "image",
  "notify",

@@ -18,12 +18,12 @@ fail() {
 
 echo "[release-readiness] root: $ROOT"
 
-test -f mobile/ios/MDPreviewMobile/PrivacyInfo.xcprivacy || fail "missing iOS privacy manifest"
-plutil -lint mobile/ios/MDPreviewMobile/Info.plist mobile/ios/MDPreviewMobile/PrivacyInfo.xcprivacy >/dev/null
-python3 -m json.tool mobile/ios/MDPreviewMobile/Assets.xcassets/Contents.json >/dev/null
-python3 -m json.tool mobile/ios/MDPreviewMobile/Assets.xcassets/AppIcon.appiconset/Contents.json >/dev/null
+test -f mobile/ios/MDPreviewerMobile/PrivacyInfo.xcprivacy || fail "missing iOS privacy manifest"
+plutil -lint mobile/ios/MDPreviewerMobile/Info.plist mobile/ios/MDPreviewerMobile/PrivacyInfo.xcprivacy >/dev/null
+python3 -m json.tool mobile/ios/MDPreviewerMobile/Assets.xcassets/Contents.json >/dev/null
+python3 -m json.tool mobile/ios/MDPreviewerMobile/Assets.xcassets/AppIcon.appiconset/Contents.json >/dev/null
 
-ANDROID_ACTIVITY="mobile/android/app/src/main/java/app/mdpreview/mobile/MainActivity.java"
+ANDROID_ACTIVITY="mobile/android/app/src/main/java/io/github/arnoldredman/mdpreviewer/MainActivity.java"
 grep -F 'intent.setType("text/*")' "$ANDROID_ACTIVITY" >/dev/null || fail "Android Open File picker must request text MIME"
 if grep -F 'intent.setType("*/*")' "$ANDROID_ACTIVITY" >/dev/null; then
   fail "Android Open File picker must not request */*"
@@ -54,7 +54,7 @@ if [ -n "$AAPT" ]; then
 fi
 
 APKSIGNER="$(find "$HOME/Library/Android/sdk/build-tools" -name apksigner -type f | sort | tail -1 || true)"
-if [ -n "${MD_PREVIEW_ANDROID_KEYSTORE:-}" ]; then
+if [ -n "${MD_PREVIEWER_ANDROID_KEYSTORE:-}" ]; then
   if [ -n "$APKSIGNER" ]; then
     "$APKSIGNER" verify --verbose "$APK" >/dev/null || fail "Android release APK is not signed"
   fi
@@ -73,8 +73,8 @@ fi
 if command -v xcrun >/dev/null 2>&1; then
   echo "[release-readiness] iOS Swift parse"
   xcrun --sdk iphoneos swiftc -parse \
-    mobile/ios/MDPreviewMobile/AppDelegate.swift \
-    mobile/ios/MDPreviewMobile/PreviewViewController.swift
+    mobile/ios/MDPreviewerMobile/AppDelegate.swift \
+    mobile/ios/MDPreviewerMobile/PreviewViewController.swift
 fi
 
 echo "[release-readiness] OK"

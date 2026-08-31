@@ -1,8 +1,8 @@
 import Cocoa
 import FinderSync
 
-@objc(MDPreviewFinderSync)
-final class MDPreviewFinderSync: FIFinderSync {
+@objc(MDPreviewerFinderSync)
+final class MDPreviewerFinderSync: FIFinderSync {
     override init() {
         super.init()
         var directories = [
@@ -56,7 +56,7 @@ final class MDPreviewFinderSync: FIFinderSync {
             return
         }
         var components = URLComponents()
-        components.scheme = "mdpreview"
+        components.scheme = "mdpreviewer"
         components.host = "finder"
         components.queryItems = [
             URLQueryItem(name: "action", value: action),

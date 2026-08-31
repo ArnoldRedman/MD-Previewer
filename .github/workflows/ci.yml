@@ -13,54 +13,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Build (release)
-        run: cargo build --release
-
-      - name: Verify GUI subsystem (no console window)
+      - name: Test and build
+        run: |
+          cargo test
+          cargo build --release
+      - name: Verify Windows identity and GUI subsystem
         shell: pwsh
         run: |
-          $exe = "target/release/md-preview.exe"
+          $exe = "target/release/md-previewer.exe"
           if (-not (Test-Path $exe)) { throw "exe missing: $exe" }
           $bytes = [System.IO.File]::ReadAllBytes($exe)
           $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3C)
           $subsystem = [System.BitConverter]::ToInt16($bytes, $peOffset + 0x5C)
-          Write-Host "PE subsystem = $subsystem  (2 = Windows GUI, 3 = Console)"
-          if ($subsystem -ne 2) { throw "Expected GUI subsystem (2), got $subsystem" }
-
-      - name: Verify icon resource is embedded
-        shell: pwsh
-        run: |
-          $exe = "target/release/md-preview.exe"
-          # winresource splits icon.ico into per-size RT_ICON entries (PNG bytes are preserved).
-          # Count PNG signatures inside the exe — our ico has 6 PNG-encoded images.
-          $bytes = [System.IO.File]::ReadAllBytes($exe)
-          $sig = [System.Text.Encoding]::Latin1.GetString([byte[]](0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A))
-          $hay = [System.Text.Encoding]::Latin1.GetString($bytes)
-          $count = 0; $idx = 0
-          while (($idx = $hay.IndexOf($sig, $idx)) -ge 0) { $count++; $idx++ }
-          Write-Host "PNG signatures found in exe: $count (expected >= 6)"
-          if ($count -lt 6) { throw "icon resource not embedded (found $count PNG signatures)" }
-
-      - name: Verify standalone self-updater wiring
-        shell: pwsh
-        run: |
-          Select-String -Path src/main.rs -Pattern 'Get-FileHash' | Out-Null
-          Select-String -Path src/main.rs -Pattern 'Copy-Item -LiteralPath \$tmp -Destination \$target -Force' | Out-Null
-          Select-String -Path assets/enhance/update-check.js -Pattern 'MD-Preview-windows-x64\\.exe' | Out-Null
-
+          if ($subsystem -ne 2) { throw "Expected GUI subsystem 2, got $subsystem" }
+          if ([System.Text.Encoding]::Unicode.GetString($bytes) -notmatch "MD Previewer") {
+            throw "new product metadata is missing"
+          }
       - uses: actions/upload-artifact@v4
         with:
-          name: md-preview-windows-x64
-          path: target/release/md-preview.exe
+          name: md-previewer-windows-x64
+          path: target/release/md-previewer.exe
 
   build-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build (release)
-        run: cargo build --release
+      - name: Test and build
+        run: |
+          cargo test
+          cargo build --release
 
   build-linux:
     runs-on: ubuntu-latest
@@ -71,5 +53,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build (release)
-        run: cargo build --release
+      - name: Verify and build
+        run: |
+          ./scripts/verify.sh
+          cargo build --release

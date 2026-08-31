@@ -1,31 +1,30 @@
-name: MDPreviewMobile
+name: MDPreviewerMobile
 options:
-  bundleIdPrefix: app.mdpreview
+  bundleIdPrefix: io.github.arnoldredman
   deploymentTarget:
     iOS: "16.0"
 settings:
   base:
-    MARKETING_VERSION: "1.0.7"
-    CURRENT_PROJECT_VERSION: "8"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "6.0"
 targets:
-  MDPreviewMobile:
+  MDPreviewerMobile:
     type: application
     platform: iOS
     sources:
-      - path: MDPreviewMobile
+      - path: MDPreviewerMobile
       - path: ../shared
         name: shared
         type: folder
         buildPhase: resources
     resources:
-      - path: MDPreviewMobile/PrivacyInfo.xcprivacy
+      - path: MDPreviewerMobile/PrivacyInfo.xcprivacy
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.mdpreview.mobile
-        DEVELOPMENT_TEAM: BUR55497B4
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.arnoldredman.mdpreviewer.mobile
         CODE_SIGN_STYLE: Automatic
-        INFOPLIST_FILE: MDPreviewMobile/Info.plist
+        INFOPLIST_FILE: MDPreviewerMobile/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: false

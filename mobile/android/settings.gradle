@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MDPreviewMobile"
+rootProject.name = "MDPreviewerMobile"
 include ":app"

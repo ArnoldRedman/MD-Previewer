@@ -1,7 +1,11 @@
 [package]
-name = "md-preview"
-version = "1.4.0"
+name = "md-previewer"
+version = "0.1.0"
 edition = "2021"
+authors = ["ArnoldRedman"]
+description = "A lightweight, local-first Markdown reader"
+license = "MIT"
+repository = "https://github.com/ArnoldRedman/md-preview"
 
 [dependencies]
 wry = "0.50"

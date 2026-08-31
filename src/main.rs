@@ -33,6 +33,7 @@ struct SelfWriteRecord {
     content: String,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug)]
 enum UserEvent {
     NewFile,
@@ -50,24 +51,11 @@ enum UserEvent {
     ToggleEdit,
     ShowFind,
     Print, // route print through wry's native API (WKWebView ignores window.print())
-    CheckUpdates,
-    UpdateCheckResult(UpdateCheckResult),
     SetTheme(ThemeChoice),
     OpenUrl(&'static str),
     Quit,
     RecentChanged,
     Ready, // first paint landed: inject hljs now; if bench mode, also exit
-}
-
-#[derive(Debug)]
-enum UpdateCheckResult {
-    Available {
-        tag: String,
-        url: String,
-        digest: Option<String>,
-    },
-    UpToDate,
-    Failed,
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
@@ -122,7 +110,7 @@ fn is_help_arg(arg: &str) -> bool {
 
 fn print_help() {
     println!(
-        "MD Preview {}\n\nUsage:\n  md-preview [file.md]\n\nOptions:\n  -h, --help    Show this help message",
+        "MD Previewer {}\n\nUsage:\n  md-previewer [file.md]\n\nOptions:\n  -h, --help    Show this help message",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -161,7 +149,6 @@ struct Strings {
     btn_open: &'static str,
     btn_search: &'static str,
     btn_print: &'static str,
-    btn_update: &'static str,
     btn_zoom: &'static str,
     btn_zoom_out: &'static str,
     btn_zoom_reset: &'static str,
@@ -190,7 +177,6 @@ impl Strings {
                 btn_open: "Open File (Cmd/Ctrl+O)",
                 btn_search: "搜索 (Cmd/Ctrl+F)",
                 btn_print: "打印 (Cmd/Ctrl+P)",
-                btn_update: "Update",
                 btn_zoom: "正文缩放",
                 btn_zoom_out: "缩小正文 (Cmd/Ctrl+-)",
                 btn_zoom_reset: "重置正文缩放 (Cmd/Ctrl+0)",
@@ -215,7 +201,6 @@ impl Strings {
                 btn_open: "Open File (Cmd/Ctrl+O)",
                 btn_search: "Find (Cmd/Ctrl+F)",
                 btn_print: "Print (Cmd/Ctrl+P)",
-                btn_update: "Update",
                 btn_zoom: "Content zoom",
                 btn_zoom_out: "Zoom out (Cmd/Ctrl+-)",
                 btn_zoom_reset: "Reset zoom (Cmd/Ctrl+0)",
@@ -229,7 +214,7 @@ impl Strings {
 }
 
 fn config_dir() -> PathBuf {
-    if let Some(path) = std::env::var_os("MD_PREVIEW_CONFIG_DIR") {
+    if let Some(path) = std::env::var_os("MD_PREVIEWER_CONFIG_DIR") {
         return PathBuf::from(path);
     }
     #[cfg(target_os = "windows")]
@@ -238,14 +223,14 @@ fn config_dir() -> PathBuf {
             .or_else(|| std::env::var_os("APPDATA"))
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("md-preview")
+            .join("md-previewer")
     }
     #[cfg(not(target_os = "windows"))]
     {
         std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_default()
-            .join(".config/md-preview")
+            .join(".config/md-previewer")
     }
 }
 
@@ -277,6 +262,7 @@ fn save_theme_choice(choice: ThemeChoice) {
     let _ = fs::write(dir.join("theme.txt"), choice.as_str());
 }
 
+#[cfg(target_os = "macos")]
 fn show_info_dialog(title: &str, description: &str) {
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Info)
@@ -291,23 +277,6 @@ fn show_warning_dialog(title: &str, description: &str) {
         .set_title(title)
         .set_description(description)
         .show();
-}
-
-fn confirm_open_update(tag: &str) -> bool {
-    matches!(
-        rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Info)
-            .set_title("Update Available")
-            .set_description(format!(
-                "MD Preview {tag} is available. Open the release page to download it?"
-            ))
-            .set_buttons(rfd::MessageButtons::OkCancelCustom(
-                "Open Release".to_string(),
-                "Cancel".to_string(),
-            ))
-            .show(),
-        rfd::MessageDialogResult::Custom(label) if label == "Open Release"
-    )
 }
 
 fn load_window_geom() -> Option<WindowGeom> {
@@ -746,7 +715,6 @@ const HLJS_EXTRA_LANGS: &str = concat!(
     include_str!("../assets/hljs/delphi.min.js"),
 );
 const PREVIEW_ENHANCE_JS: &str = include_str!("../assets/enhance/preview-enhance.js");
-const UPDATE_CHECK_JS: &str = include_str!("../assets/enhance/update-check.js");
 const KATEX_JS: &str = include_str!("../assets/katex/katex.min.js");
 const KATEX_CSS: &str = include_str!("../assets/katex/katex.inline.css");
 const MERMAID_JS: &str = include_str!("../assets/mermaid/mermaid.min.js");
@@ -1060,7 +1028,6 @@ fn build_page(
     flags: EnhanceFlags,
     s: &Strings,
     empty: bool,
-    native_updater: bool,
 ) -> String {
     let body_class = if empty { "empty" } else { "" };
     let base_tag = base_href
@@ -1248,7 +1215,7 @@ body.has-tabs {{ --chrome-top: 50px; }}
 	.missing-actions button {{ min-height: 36px; padding: 0 13px; border: 1px solid #d8d8d8; border-radius: 7px; background: #fff; color: #333; cursor: pointer; font: inherit; }}
 	.missing-actions button:hover {{ background: #f4f4f4; }}
 
-/* Floating toolbar (top-right) — hover-reveal, hidden in empty state unless an update exists */
+/* Floating toolbar (top-right) — hover-reveal, hidden in empty state */
 .toolbar {{
   position: fixed; top: var(--chrome-top); right: 12px;
   display: flex; gap: 6px; z-index: 100;
@@ -1256,9 +1223,7 @@ body.has-tabs {{ --chrome-top: 50px; }}
   transition: opacity 0.18s ease;
 }}
 html:hover .toolbar {{ opacity: 1; pointer-events: auto; }}
-body.empty .toolbar:not(.has-update) {{ display: none !important; }}
-body.empty .toolbar.has-update {{ opacity: 1; pointer-events: auto; }}
-body.empty .toolbar.has-update button:not(.update-btn) {{ display: none !important; }}
+body.empty .toolbar {{ display: none !important; }}
 .toolbar button {{
   width: 34px; height: 34px; padding: 0;
   background: rgba(255,255,255,0.8);
@@ -1286,11 +1251,6 @@ body.empty .toolbar.has-update button:not(.update-btn) {{ display: none !importa
 	.toolbar .zoom-popover .zoom-reset {{
 	  width: 52px; font-size: 11px; font-variant-numeric: tabular-nums;
 	}}
-	.toolbar .update-btn {{
-	  width: auto; min-width: 76px; padding: 0 11px; grid-auto-flow: column; gap: 5px;
-	  font-size: 13px; font-weight: 600; color: #0969da;
-	}}
-	.toolbar .update-mark {{ font-size: 17px; line-height: 1; transform: translateY(-0.5px); }}
 	.findbar {{
 	  position: fixed; top: var(--chrome-top); left: 50%; transform: translateX(-50%);
 	  display: none; align-items: center; gap: 6px; z-index: 101;
@@ -1344,7 +1304,6 @@ body.empty .toolbar.has-update button:not(.update-btn) {{ display: none !importa
 	  .toolbar button:hover {{ color: #fff; background: rgba(55,55,55,1); }}
 	  .zoom-popover {{ background: rgba(34,34,34,.96); border-color: rgba(255,255,255,.12); }}
 	  .toolbar .zoom-popover button:hover {{ background: rgba(255,255,255,.1); }}
-	  .toolbar .update-btn {{ color: #6cb6ff; }}
 		  .empty-open {{ background: #242424; border-color: #444; color: #ddd; }}
 		  .empty-open:hover {{ background: #2d2d2d; color: #fff; }}
 		  .recent-name {{ color: #ddd; }}
@@ -1407,7 +1366,6 @@ body.editing #btn-print {{ display: none; }}
 	      <button id="btn-zoom-in" title="{btn_zoom_in}" aria-label="{btn_zoom_in}">+</button>
 	    </div>
 	  </div>
-	  <button id="btn-update" class="update-btn" hidden title="{btn_update}" aria-label="{btn_update}"></button>
 	</div>
 	<div class="findbar" role="search">
 	  <input id="find-input" type="search" placeholder="{search_placeholder}" aria-label="{search_placeholder}">
@@ -1442,7 +1400,6 @@ body.editing #btn-print {{ display: none; }}
 	  var btnZoomReset = document.getElementById('btn-zoom-reset');
 	  var btnZoomIn = document.getElementById('btn-zoom-in');
 	  var zoomControl = document.getElementById('zoom-control');
-	  var btnUpdate = document.getElementById('btn-update');
 	  var findInput = document.getElementById('find-input');
 	  var findState = document.getElementById('find-state');
 	  var findPrev = document.getElementById('find-prev');
@@ -1465,7 +1422,7 @@ body.editing #btn-print {{ display: none; }}
 	  var lastFindQuery = '';
 	  var STAT_WORDS = '{stat_words_js}';
 	  var STAT_CHARS = '{stat_chars_js}';
-	  var ZOOM_STORAGE_KEY = 'md-preview-content-zoom-v1';
+	  var ZOOM_STORAGE_KEY = 'md-previewer-content-zoom-v1';
 	  var ZOOM_MIN = 70;
 	  var ZOOM_MAX = 200;
 	  var ZOOM_STEP = 10;
@@ -1476,7 +1433,6 @@ body.editing #btn-print {{ display: none; }}
 	  btnToggle.innerHTML = ICON_EDIT;
 	  btnPrint.innerHTML = ICON_PRINT;
 	  btnZoom.innerHTML = ICON_ZOOM;
-	  btnUpdate.innerHTML = '<span class="update-mark">↻</span><span class="update-label">{btn_update}</span>';
 	  findPrev.innerHTML = ICON_UP;
 	  findNext.innerHTML = ICON_DOWN;
 	  findClose.innerHTML = ICON_CLOSE;
@@ -1562,7 +1518,7 @@ body.editing #btn-print {{ display: none; }}
 	      if (dirty) save();
 	    }}, AUTOSAVE_DEBOUNCE_MS);
 	  }}
-	  window.__mdPreviewSave = save;
+	  window.__mdPreviewerSave = save;
 	  function requestTabAction(action, id) {{
 	    cancelPendingAutosave();
 	    var message = 'tab-action:' + action + ':' + id;
@@ -1573,19 +1529,19 @@ body.editing #btn-print {{ display: none; }}
 	    if (inEdit()) leaveEdit();
 	    window.ipc.postMessage('open');
 	  }}
-	  window.__mdPreviewOpenFile = openFile;
+	  window.__mdPreviewerOpenFile = openFile;
 	  function newFile() {{
 	    if (inEdit()) leaveEdit();
 	    window.ipc.postMessage('new-file');
 	  }}
-	  window.__mdPreviewNewFile = newFile;
+	  window.__mdPreviewerNewFile = newFile;
 	  function showFind() {{
 	    if (document.body.classList.contains('empty')) return;
 	    if (inEdit()) return;
 	    document.body.classList.add('finding');
 	    setTimeout(function(){{ findInput.focus(); findInput.select(); }}, 0);
 	  }}
-	  window.__mdPreviewShowFind = showFind;
+	  window.__mdPreviewerShowFind = showFind;
 	  function hideFind() {{
 	    document.body.classList.remove('finding');
 	    findInput.value = '';
@@ -1740,18 +1696,15 @@ body.editing #btn-print {{ display: none; }}
     btnToggle.setAttribute('aria-label', L_EDIT);
     restoreScrollProgress(progress);
   }}
-  window.__mdPreviewToggleEdit = function() {{
+  window.__mdPreviewerToggleEdit = function() {{
     if (inEdit()) leaveEdit(); else enterEdit();
   }};
-	window.__mdPreviewEnterEdit = function() {{
+	window.__mdPreviewerEnterEdit = function() {{
 	  if (!inEdit()) enterEdit();
 	}};
-	window.__mdPreviewCloseActiveTab = function() {{
+	window.__mdPreviewerCloseActiveTab = function() {{
 	  if (activeTabId) requestTabAction('close', activeTabId);
 	}};
-  window.__mdPreviewCheckUpdates = function() {{
-    if (btnUpdate) btnUpdate.click();
-  }};
 
 	  btnOpen.addEventListener('click', openFile);
 	  tabOpen.addEventListener('click', newFile);
@@ -1804,7 +1757,7 @@ body.editing #btn-print {{ display: none; }}
 	  findClose.addEventListener('click', hideFind);
 
 	  btnToggle.addEventListener('click', function() {{
-	    window.__mdPreviewToggleEdit();
+	    window.__mdPreviewerToggleEdit();
 	  }});
 	  btnZoom.addEventListener('click', function(e) {{
 	    e.stopPropagation();
@@ -1918,11 +1871,11 @@ body.editing #btn-print {{ display: none; }}
 	  autosavePaused = false;
 	  setDirty(false);
 	}};
-	window.__mdPreviewPauseAutosave = function() {{
+	window.__mdPreviewerPauseAutosave = function() {{
 	  cancelPendingAutosave();
 	  autosavePaused = true;
 	}};
-	window.__mdPreviewResolveExternalChange = function() {{
+	window.__mdPreviewerResolveExternalChange = function() {{
 	  cancelPendingAutosave();
 	  window.ipc.postMessage('external-change:' + (dirty ? 'dirty' : 'clean'));
 	}};
@@ -2028,18 +1981,9 @@ body.editing #btn-print {{ display: none; }}
     }});
   }});
 }})();
-window.__mdPreviewFeatureFlags = {{ math: {needs_math}, mermaid: {needs_mermaid} }};
+window.__mdPreviewerFeatureFlags = {{ math: {needs_math}, mermaid: {needs_mermaid} }};
 {preview_enhance_js}
 if(window.__enhancePreview)window.__enhancePreview();
-{update_check_js}
-window.__mdPreviewInstallUpdateCheck({{
-  currentVersion: '{app_version}',
-  buttonLabel: '{btn_update_js}',
-  nativeUpdater: {native_updater},
-  apiUrl: 'https://api.github.com/repos/vorojar/md-preview/releases?per_page=20',
-  latestUrl: 'https://github.com/vorojar/md-preview/releases/latest'
-}});
-{test_update_release_js}
 </script>
 </body></html>"#,
         css_light = HLJS_LIGHT,
@@ -2053,23 +1997,17 @@ window.__mdPreviewInstallUpdateCheck({{
         btn_edit = s.btn_edit,
         btn_preview = s.btn_preview,
         btn_print = s.btn_print,
-        btn_update = s.btn_update,
         btn_zoom = s.btn_zoom,
         btn_zoom_out = s.btn_zoom_out,
         btn_zoom_reset = s.btn_zoom_reset,
         btn_zoom_in = s.btn_zoom_in,
         search_placeholder = s.search_placeholder,
-        btn_update_js = escape_js(s.btn_update),
         stat_words_js = escape_js(s.stat_words),
         stat_chars_js = escape_js(s.stat_chars),
-        app_version = update_current_version(),
-        test_update_release_js = test_update_release_js(),
-        native_updater = native_updater,
         body_class = body_class,
         needs_math = flags.math,
         needs_mermaid = flags.mermaid,
         preview_enhance_js = PREVIEW_ENHANCE_JS,
-        update_check_js = UPDATE_CHECK_JS,
     )
 }
 
@@ -2078,214 +2016,6 @@ fn escape_js(s: &str) -> String {
         .replace('\'', "\\'")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
-}
-
-fn is_allowed_update_url(url: &str) -> bool {
-    url == "https://github.com/vorojar/md-preview/releases/latest"
-        || url.starts_with("https://github.com/vorojar/md-preview/releases/tag/")
-        || url.starts_with("https://github.com/vorojar/md-preview/releases/download/")
-}
-
-fn update_current_version() -> String {
-    #[cfg(debug_assertions)]
-    {
-        if let Ok(version) = std::env::var("MD_PREVIEW_TEST_CURRENT_VERSION") {
-            return version;
-        }
-    }
-
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct UpdateRelease {
-    tag: String,
-    url: String,
-    digest: Option<String>,
-}
-
-fn parse_version(value: &str) -> Option<Vec<u64>> {
-    let cleaned = value
-        .trim()
-        .trim_start_matches(['v', 'V'])
-        .split(['+', '-'])
-        .next()?;
-    if cleaned.is_empty() {
-        return None;
-    }
-    let mut parts = Vec::new();
-    for part in cleaned.split('.') {
-        if part.is_empty() || !part.chars().all(|ch| ch.is_ascii_digit()) {
-            return None;
-        }
-        parts.push(part.parse().ok()?);
-    }
-    Some(parts)
-}
-
-fn is_newer_version(candidate: &str, current: &str) -> bool {
-    let Some(next) = parse_version(candidate) else {
-        return false;
-    };
-    let Some(now) = parse_version(current) else {
-        return false;
-    };
-    let len = next.len().max(now.len());
-    for index in 0..len {
-        let a = *next.get(index).unwrap_or(&0);
-        let b = *now.get(index).unwrap_or(&0);
-        if a > b {
-            return true;
-        }
-        if a < b {
-            return false;
-        }
-    }
-    false
-}
-
-fn is_desktop_release_tag(tag: &str) -> bool {
-    let Some(version) = tag.trim().strip_prefix('v') else {
-        return false;
-    };
-    version.contains('.')
-        && version.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
-        && parse_version(tag).is_some()
-}
-
-fn preferred_update_asset_name() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "MD-Preview-macOS-universal.dmg"
-    } else if cfg!(target_os = "windows") {
-        "MD-Preview-windows-x64.exe"
-    } else {
-        "MD-Preview-linux-x64.tar.gz"
-    }
-}
-
-fn select_update_release(payload: &str, current_version: &str) -> Option<UpdateRelease> {
-    let releases: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let releases = releases.as_array()?;
-    let asset_name = preferred_update_asset_name();
-    let mut best: Option<UpdateRelease> = None;
-
-    for release in releases {
-        if release
-            .get("draft")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-            || release
-                .get("prerelease")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-        {
-            continue;
-        }
-        let Some(tag) = release.get("tag_name").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        if !is_desktop_release_tag(tag) || !is_newer_version(tag, current_version) {
-            continue;
-        }
-
-        let html_url = release
-            .get("html_url")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(GITHUB_URL);
-        let mut url = html_url;
-        let mut digest = None;
-        if let Some(assets) = release.get("assets").and_then(serde_json::Value::as_array) {
-            for asset in assets {
-                if asset.get("name").and_then(serde_json::Value::as_str) == Some(asset_name) {
-                    if let Some(download_url) = asset
-                        .get("browser_download_url")
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        url = download_url;
-                    }
-                    digest = asset
-                        .get("digest")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string);
-                    break;
-                }
-            }
-        }
-
-        let candidate = UpdateRelease {
-            tag: tag.to_string(),
-            url: url.to_string(),
-            digest,
-        };
-        if best
-            .as_ref()
-            .map(|current| is_newer_version(&candidate.tag, &current.tag))
-            .unwrap_or(true)
-        {
-            best = Some(candidate);
-        }
-    }
-
-    best
-}
-
-fn check_github_updates() -> UpdateCheckResult {
-    let output = std::process::Command::new("curl")
-        .args([
-            "-fsSL",
-            "--connect-timeout",
-            "5",
-            "--max-time",
-            "10",
-            "-H",
-            "Accept: application/vnd.github+json",
-            "https://api.github.com/repos/vorojar/md-preview/releases?per_page=20",
-        ])
-        .output();
-    let Ok(output) = output else {
-        return UpdateCheckResult::Failed;
-    };
-    if !output.status.success() {
-        return UpdateCheckResult::Failed;
-    }
-    let Ok(payload) = String::from_utf8(output.stdout) else {
-        return UpdateCheckResult::Failed;
-    };
-    match select_update_release(&payload, env!("CARGO_PKG_VERSION")) {
-        Some(release) => UpdateCheckResult::Available {
-            tag: release.tag,
-            url: release.url,
-            digest: release.digest,
-        },
-        None => UpdateCheckResult::UpToDate,
-    }
-}
-
-fn test_update_release_js() -> String {
-    #[cfg(debug_assertions)]
-    {
-        let Ok(tag) = std::env::var("MD_PREVIEW_TEST_UPDATE_TAG") else {
-            return String::new();
-        };
-        let tag = tag.trim();
-        if tag.is_empty() {
-            return String::new();
-        }
-        let escaped_tag = escape_js(tag);
-        return format!(
-            r#"if(window.__mdPreviewApplyUpdateRelease)window.__mdPreviewApplyUpdateRelease({{
-  tag_name: '{tag}',
-  html_url: 'https://github.com/vorojar/md-preview/releases/tag/{tag}',
-  download_url: 'https://github.com/vorojar/md-preview/releases/download/{tag}/MD-Preview-macOS-universal.dmg'
-}});"#,
-            tag = escaped_tag
-        );
-    }
-
-    #[cfg(not(debug_assertions))]
-    {
-        String::new()
-    }
 }
 
 fn watch_scope_for_file(path: &Path) -> &Path {
@@ -2326,8 +2056,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir =
-            std::env::temp_dir().join(format!("md-preview-{name}-{}-{unique}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "md-previewer-{name}-{}-{unique}",
+            std::process::id()
+        ));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -2512,7 +2244,6 @@ mod tests {
             EnhanceFlags::default(),
             &strings,
             false,
-            true,
         );
 
         assert!(page.contains("document.addEventListener('contextmenu'"));
@@ -2520,12 +2251,12 @@ mod tests {
         assert!(page.contains("id=\"btn-open\""));
         assert!(page.contains("id=\"btn-search\""));
         assert!(page.contains("window.ipc.postMessage('open')"));
-        assert!(page.contains("window.__mdPreviewOpenFile = openFile"));
-        assert!(page.contains("window.__mdPreviewShowFind = showFind"));
-        assert!(page.contains("window.__mdPreviewToggleEdit"));
-        assert!(page.contains("window.__mdPreviewCheckUpdates"));
-        assert!(page.contains("update-check-result:available"));
-        assert!(page.contains("update-check-result:"));
+        assert!(page.contains("window.__mdPreviewerOpenFile = openFile"));
+        assert!(page.contains("window.__mdPreviewerShowFind = showFind"));
+        assert!(page.contains("window.__mdPreviewerToggleEdit"));
+        assert!(!page.contains("id=\"btn-update\""));
+        assert!(!page.contains("api.github.com"));
+        assert!(!page.contains("check-updates"));
         assert!(page.contains("Cmd/Ctrl+F"));
         assert!(page
             .contains("if (inEdit()) return;\n\t      e.preventDefault();\n\t      showFind();"));
@@ -2539,8 +2270,6 @@ mod tests {
         assert!(
             !page.contains("window.ipc.postMessage('save:' + ta.value);\n\t    setDirty(false);")
         );
-        assert!(page.contains("releases?per_page=20"));
-        assert!(page.contains("nativeUpdater: true"));
         assert!(page.contains("compositionstart"));
         assert!(page.contains("e.isComposing"));
         assert!(page.contains("focusFindInput"));
@@ -2551,7 +2280,7 @@ mod tests {
         assert!(page.contains("#preview mark.search-hit.current"));
         assert!(page.contains("restoreFindInput(selectionStart, selectionEnd)"));
         assert!(page.contains("findInput.setSelectionRange(selectionStart, selectionEnd)"));
-        assert!(page.contains("body.empty .toolbar.has-update"));
+        assert!(page.contains("body.empty .toolbar"));
         assert!(page.contains("bindAnchorNavigation"));
         assert!(page.contains("event.target.closest('#preview a[href]')"));
         assert!(page.contains("window.ipc.postMessage('open-local-link:' + resolved)"));
@@ -2574,7 +2303,6 @@ mod tests {
             EnhanceFlags::default(),
             &strings,
             false,
-            true,
         );
 
         assert!(page.contains("window.ipc.postMessage('new-file')"));
@@ -2583,13 +2311,13 @@ mod tests {
         assert!(page.contains("AUTOSAVE_DEBOUNCE_MS = 700"));
         assert!(page.contains("pendingAutosaveTimer = setTimeout"));
         assert!(page.contains("window.__markSaved = function(savedRaw)"));
-        assert!(page.contains("window.__mdPreviewResolveExternalChange"));
+        assert!(page.contains("window.__mdPreviewerResolveExternalChange"));
         assert!(page.contains("'external-change:' + (dirty ? 'dirty' : 'clean')"));
         assert!(page.contains("(e.key === 'n' || e.key === 'N')"));
         assert!(page.contains("id=\"doc-stats\""));
         assert!(page.contains("updateDocumentStats"));
         assert!(page.contains("restoreScrollProgress"));
-        assert!(page.contains("md-preview-content-zoom-v1"));
+        assert!(page.contains("md-previewer-content-zoom-v1"));
         assert!(page.contains("id=\"btn-zoom-in\""));
         assert!(page.contains("id=\"btn-zoom-out\""));
         assert!(page.contains("id=\"btn-zoom-reset\""));
@@ -2605,7 +2333,6 @@ mod tests {
             EnhanceFlags::default(),
             &strings,
             false,
-            true,
         );
         let empty_start = page.find("window.__setEmptyPreview = function").unwrap();
         let missing_start = page.find("window.__setMissing = function").unwrap();
@@ -2641,53 +2368,11 @@ mod tests {
             EnhanceFlags::default(),
             &strings,
             false,
-            false,
         );
 
         assert!(page.contains("mdp-table-wrap"));
         assert!(page.contains("width: min(calc(100vw - 64px), 1280px)"));
         assert!(page.contains("if(window.__enhancePreview)window.__enhancePreview();"));
-        assert!(page.contains("nativeUpdater: false"));
-    }
-
-    #[test]
-    fn update_download_urls_are_allowed() {
-        assert!(is_allowed_update_url(
-            "https://github.com/vorojar/md-preview/releases/download/v1.1.9/MD-Preview-macOS-universal.dmg"
-        ));
-        assert!(!is_allowed_update_url(
-            "https://github.com/other/project/releases/download/v1.0.0/app.dmg"
-        ));
-    }
-
-    #[test]
-    fn update_versions_compare_semver_tags() {
-        assert!(is_newer_version("v1.1.21", "1.1.20"));
-        assert!(is_newer_version("v1.2.0", "1.1.99"));
-        assert!(!is_newer_version("v1.1.20", "1.1.21"));
-        assert!(!is_newer_version("v1.1.21", "1.1.21"));
-        assert!(!is_newer_version("not-a-version", "1.1.21"));
-    }
-
-    #[test]
-    fn update_release_selection_ignores_older_and_prerelease_versions() {
-        let payload = r#"[
-          {"tag_name":"v1.1.22-beta","draft":false,"prerelease":true,"html_url":"https://example.invalid/beta","assets":[]},
-          {"tag_name":"v1.1.20","draft":false,"prerelease":false,"html_url":"https://example.invalid/old","assets":[]},
-          {"tag_name":"v1.1.22","draft":false,"prerelease":false,"html_url":"https://example.invalid/new","assets":[
-            {"name":"MD-Preview-macOS-universal.dmg","browser_download_url":"https://example.invalid/app.dmg","digest":"sha256:abc"}
-          ]}
-        ]"#;
-
-        let release = select_update_release(payload, "1.1.21").unwrap();
-        assert_eq!(release.tag, "v1.1.22");
-        if cfg!(target_os = "macos") {
-            assert_eq!(release.url, "https://example.invalid/app.dmg");
-            assert_eq!(release.digest.as_deref(), Some("sha256:abc"));
-        } else {
-            assert_eq!(release.url, "https://example.invalid/new");
-        }
-        assert!(select_update_release(payload, "1.1.22").is_none());
     }
 
     #[test]
@@ -2704,15 +2389,7 @@ mod tests {
         assert!(html.contains(r#"<div class="icon">#</div>"#));
         assert!(!html.contains("empty-mark"));
 
-        let page = build_page(
-            &html,
-            "",
-            None,
-            EnhanceFlags::default(),
-            &strings,
-            true,
-            false,
-        );
+        let page = build_page(&html, "", None, EnhanceFlags::default(), &strings, true);
         assert!(page.contains(".empty.has-recent"));
         assert!(!page.contains(".empty.has-recent .recent { max-height"));
     }
@@ -2773,7 +2450,7 @@ mod tests {
     fn finder_action_parses_encoded_folder_and_kind() {
         assert_eq!(
             parse_finder_action(
-                "mdpreview://finder?action=create&path=%2Ftmp%2FMy%20Notes&kind=md"
+                "mdpreviewer://finder?action=create&path=%2Ftmp%2FMy%20Notes&kind=md"
             ),
             Some(FinderAction::Create {
                 folder: PathBuf::from("/tmp/My Notes"),
@@ -2807,7 +2484,7 @@ fn load_window_icon() -> Option<tao::window::Icon> {
 #[cfg(target_os = "macos")]
 fn register_as_default(_lang: Lang) {
     use std::process::Command;
-    let marker = config_dir().join(".md-preview-registered");
+    let marker = config_dir().join(".md-previewer-registered");
     if marker.exists() {
         return;
     }
@@ -2818,7 +2495,7 @@ fn register_as_default(_lang: Lang) {
         .and_then(|mut child| {
             use std::io::Write;
             if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(b"import Foundation\nimport CoreServices\nlet _ = LSSetDefaultRoleHandlerForContentType(\"net.daringfireball.markdown\" as NSString, .viewer, \"com.mdpreview.app\" as NSString)\n");
+                let _ = stdin.write_all(b"import Foundation\nimport CoreServices\nlet _ = LSSetDefaultRoleHandlerForContentType(\"net.daringfireball.markdown\" as NSString, .viewer, \"io.github.arnoldredman.mdpreviewer\" as NSString)\n");
             }
             child.wait()
         });
@@ -2835,7 +2512,7 @@ fn register_as_default(_lang: Lang) {
     use winreg::RegKey;
 
     let marker_dir = config_dir();
-    let marker = marker_dir.join(".md-preview-registered");
+    let marker = marker_dir.join(".md-previewer-registered");
     if marker.exists() {
         return;
     }
@@ -2844,10 +2521,10 @@ fn register_as_default(_lang: Lang) {
         return;
     };
     let exe_str = exe.to_string_lossy().to_string();
-    let progid = "MDPreview.md";
+    let progid = "MDPreviewer.md";
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-    // Advertise MD Preview as a choice for these extensions.
+    // Advertise MD Previewer as a choice for these extensions.
     for ext in [".md", ".markdown", ".mdown", ".mkd"] {
         let path = format!(r"Software\Classes\{ext}\OpenWithProgids");
         if let Ok((key, _)) = hkcu.create_subkey(&path) {
@@ -2872,7 +2549,7 @@ fn register_as_default(_lang: Lang) {
     if let Some(exe_name) = exe.file_name().map(|n| n.to_string_lossy().to_string()) {
         let app_root = format!(r"Software\Classes\Applications\{exe_name}");
         if let Ok((k, _)) = hkcu.create_subkey(&app_root) {
-            let _ = k.set_value("FriendlyAppName", &"MD Preview".to_string());
+            let _ = k.set_value("FriendlyAppName", &"MD Previewer".to_string());
         }
         if let Ok((k, _)) = hkcu.create_subkey(format!(r"{app_root}\shell\open\command")) {
             let _ = k.set_value("", &format!("\"{exe_str}\" \"%1\""));
@@ -2886,7 +2563,7 @@ fn register_as_default(_lang: Lang) {
 
     let _ = fs::create_dir_all(&marker_dir);
     let _ = fs::write(&marker, "");
-    // Intentionally no dialog: users can pick MD Preview via "Open with"
+    // Intentionally no dialog: users can pick MD Previewer via "Open with"
     // whenever they want, and Win10+ blocks silent default-handler changes
     // anyway — asking them to click through Settings on first launch is noise.
 }
@@ -2894,10 +2571,8 @@ fn register_as_default(_lang: Lang) {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn register_as_default(_lang: Lang) {}
 
-const WEBSITE_URL: &str = "https://vorojar.github.io/md-preview/";
-const GITHUB_URL: &str = "https://github.com/vorojar/md-preview";
 #[cfg(target_os = "macos")]
-const RELEASES_URL: &str = "https://github.com/vorojar/md-preview/releases/latest";
+const GITHUB_URL: &str = "https://github.com/ArnoldRedman/md-preview";
 
 #[cfg(target_os = "macos")]
 thread_local! {
@@ -2949,24 +2624,12 @@ fn macos_menu_controller_class() -> &'static objc2::runtime::AnyClass {
         send_macos_menu_event(UserEvent::Print);
     }
 
-    extern "C" fn check_updates(_: &AnyObject, _: Sel, _: &AnyObject) {
-        send_macos_menu_event(UserEvent::CheckUpdates);
-    }
-
     extern "C" fn quit(_: &AnyObject, _: Sel, _: &AnyObject) {
         send_macos_menu_event(UserEvent::Quit);
     }
 
-    extern "C" fn open_website(_: &AnyObject, _: Sel, _: &AnyObject) {
-        send_macos_menu_event(UserEvent::OpenUrl(WEBSITE_URL));
-    }
-
     extern "C" fn open_github(_: &AnyObject, _: Sel, _: &AnyObject) {
         send_macos_menu_event(UserEvent::OpenUrl(GITHUB_URL));
-    }
-
-    extern "C" fn open_releases(_: &AnyObject, _: Sel, _: &AnyObject) {
-        send_macos_menu_event(UserEvent::OpenUrl(RELEASES_URL));
     }
 
     extern "C" fn set_theme(_: &AnyObject, _: Sel, sender: &NSMenuItem) {
@@ -3037,45 +2700,23 @@ fn macos_menu_controller_class() -> &'static objc2::runtime::AnyClass {
 
         let alert = NSAlert::new(mtm);
         alert.setAlertStyle(NSAlertStyle::Informational);
-        alert.setMessageText(&NSString::from_str("MD Preview"));
+        alert.setMessageText(&NSString::from_str("MD Previewer"));
         alert.setInformativeText(&NSString::from_str(&format!(
             "Version {}\n\nFollow local document links between lightweight tabs, keep your reading position between preview and source, and inspect character counts or zoom the content without changing the app chrome.",
             env!("CARGO_PKG_VERSION")
         )));
 
-        let accessory = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, 94.0, 28.0));
-        let home = symbol_button(
-            "house",
-            "Home",
-            "Home",
-            sel!(mdPreviewOpenWebsite:),
-            controller,
-            mtm,
-        );
-        home.setFrame(rect(4.0, 1.0, 26.0, 26.0));
-        accessory.addSubview(&home);
-
+        let accessory = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, 34.0, 28.0));
         let github = symbol_button(
             "chevron.left.forwardslash.chevron.right",
             "GitHub",
             "GitHub",
-            sel!(mdPreviewOpenGitHub:),
+            sel!(mdPreviewerOpenGitHub:),
             controller,
             mtm,
         );
-        github.setFrame(rect(34.0, 1.0, 26.0, 26.0));
+        github.setFrame(rect(4.0, 1.0, 26.0, 26.0));
         accessory.addSubview(&github);
-
-        let releases = symbol_button(
-            "sparkles",
-            "New",
-            "What's New",
-            sel!(mdPreviewOpenReleases:),
-            controller,
-            mtm,
-        );
-        releases.setFrame(rect(64.0, 1.0, 26.0, 26.0));
-        accessory.addSubview(&releases);
         alert.setAccessoryView(Some(&accessory));
         alert.addButtonWithTitle(&NSString::from_str("OK"));
 
@@ -3084,56 +2725,48 @@ fn macos_menu_controller_class() -> &'static objc2::runtime::AnyClass {
 
     static REGISTER_CLASS: Once = Once::new();
     REGISTER_CLASS.call_once(|| {
-        let mut builder = ClassBuilder::new(c"MDPreviewMenuController", NSObject::class()).unwrap();
+        let mut builder =
+            ClassBuilder::new(c"MDPreviewerMenuController", NSObject::class()).unwrap();
         unsafe {
             builder.add_method(
-                sel!(mdPreviewOpenFile:),
+                sel!(mdPreviewerOpenFile:),
                 open_file as extern "C" fn(_, _, _),
             );
-            builder.add_method(sel!(mdPreviewNewFile:), new_file as extern "C" fn(_, _, _));
             builder.add_method(
-                sel!(mdPreviewCloseTab:),
+                sel!(mdPreviewerNewFile:),
+                new_file as extern "C" fn(_, _, _),
+            );
+            builder.add_method(
+                sel!(mdPreviewerCloseTab:),
                 close_tab as extern "C" fn(_, _, _),
             );
             builder.add_method(
-                sel!(mdPreviewShowFind:),
+                sel!(mdPreviewerShowFind:),
                 show_find as extern "C" fn(_, _, _),
             );
             builder.add_method(
-                sel!(mdPreviewToggleEdit:),
+                sel!(mdPreviewerToggleEdit:),
                 toggle_edit as extern "C" fn(_, _, _),
             );
-            builder.add_method(sel!(mdPreviewPrint:), print as extern "C" fn(_, _, _));
+            builder.add_method(sel!(mdPreviewerPrint:), print as extern "C" fn(_, _, _));
+            builder.add_method(sel!(mdPreviewerQuit:), quit as extern "C" fn(_, _, _));
             builder.add_method(
-                sel!(mdPreviewCheckUpdates:),
-                check_updates as extern "C" fn(_, _, _),
-            );
-            builder.add_method(sel!(mdPreviewQuit:), quit as extern "C" fn(_, _, _));
-            builder.add_method(
-                sel!(mdPreviewOpenWebsite:),
-                open_website as extern "C" fn(_, _, _),
-            );
-            builder.add_method(
-                sel!(mdPreviewOpenGitHub:),
+                sel!(mdPreviewerOpenGitHub:),
                 open_github as extern "C" fn(_, _, _),
             );
             builder.add_method(
-                sel!(mdPreviewOpenReleases:),
-                open_releases as extern "C" fn(_, _, _),
-            );
-            builder.add_method(
-                sel!(mdPreviewSetTheme:),
+                sel!(mdPreviewerSetTheme:),
                 set_theme as extern "C" fn(_, _, _),
             );
             builder.add_method(
-                sel!(mdPreviewShowAbout:),
+                sel!(mdPreviewerShowAbout:),
                 show_about as extern "C" fn(_, _, _),
             );
         }
         let _ = builder.register();
     });
 
-    AnyClass::get(c"MDPreviewMenuController").unwrap()
+    AnyClass::get(c"MDPreviewerMenuController").unwrap()
 }
 
 #[cfg(target_os = "macos")]
@@ -3198,36 +2831,20 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     let controller_ptr = Retained::into_raw(controller);
     let controller = unsafe { &*controller_ptr };
 
-    let app_menu = menu("MD Preview", mtm);
+    let app_menu = menu("MD Previewer", mtm);
     app_menu.setAutoenablesItems(false);
     app_menu.addItem(&command_item(
-        "About MD Preview",
-        sel!(mdPreviewShowAbout:),
+        "About MD Previewer",
+        sel!(mdPreviewerShowAbout:),
         "",
         NSEventModifierFlags::empty(),
         controller,
         mtm,
     ));
     app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    app_menu.addItem(&command_item(
-        "MD Preview Website",
-        sel!(mdPreviewOpenWebsite:),
-        "",
-        NSEventModifierFlags::empty(),
-        controller,
-        mtm,
-    ));
     app_menu.addItem(&command_item(
         "GitHub Repository",
-        sel!(mdPreviewOpenGitHub:),
-        "",
-        NSEventModifierFlags::empty(),
-        controller,
-        mtm,
-    ));
-    app_menu.addItem(&command_item(
-        "Check for Updates...",
-        sel!(mdPreviewCheckUpdates:),
+        sel!(mdPreviewerOpenGitHub:),
         "",
         NSEventModifierFlags::empty(),
         controller,
@@ -3235,14 +2852,14 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     ));
     app_menu.addItem(&NSMenuItem::separatorItem(mtm));
     app_menu.addItem(&command_item(
-        "Quit MD Preview",
-        sel!(mdPreviewQuit:),
+        "Quit MD Previewer",
+        sel!(mdPreviewerQuit:),
         "q",
         NSEventModifierFlags::Command,
         controller,
         mtm,
     ));
-    let app_menu_item = item("MD Preview", None, "", NSEventModifierFlags::empty(), mtm);
+    let app_menu_item = item("MD Previewer", None, "", NSEventModifierFlags::empty(), mtm);
     app_menu_item.setSubmenu(Some(&app_menu));
     main_menu.addItem(&app_menu_item);
 
@@ -3250,7 +2867,7 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     file_menu.setAutoenablesItems(false);
     file_menu.addItem(&command_item(
         "New Markdown...",
-        sel!(mdPreviewNewFile:),
+        sel!(mdPreviewerNewFile:),
         "n",
         NSEventModifierFlags::Command,
         controller,
@@ -3258,7 +2875,7 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     ));
     file_menu.addItem(&command_item(
         "Open...",
-        sel!(mdPreviewOpenFile:),
+        sel!(mdPreviewerOpenFile:),
         "o",
         NSEventModifierFlags::Command,
         controller,
@@ -3266,7 +2883,7 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     ));
     file_menu.addItem(&command_item(
         "Close Tab",
-        sel!(mdPreviewCloseTab:),
+        sel!(mdPreviewerCloseTab:),
         "w",
         NSEventModifierFlags::Command,
         controller,
@@ -3275,7 +2892,7 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     file_menu.addItem(&NSMenuItem::separatorItem(mtm));
     file_menu.addItem(&command_item(
         "Print...",
-        sel!(mdPreviewPrint:),
+        sel!(mdPreviewerPrint:),
         "p",
         NSEventModifierFlags::Command,
         controller,
@@ -3337,7 +2954,7 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     view_menu.setAutoenablesItems(false);
     view_menu.addItem(&command_item(
         "Find",
-        sel!(mdPreviewShowFind:),
+        sel!(mdPreviewerShowFind:),
         "",
         NSEventModifierFlags::empty(),
         controller,
@@ -3345,7 +2962,7 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     ));
     view_menu.addItem(&command_item(
         "Toggle Edit Mode",
-        sel!(mdPreviewToggleEdit:),
+        sel!(mdPreviewerToggleEdit:),
         "e",
         NSEventModifierFlags::Command,
         controller,
@@ -3361,7 +2978,7 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
     ] {
         let theme_item = command_item(
             label,
-            sel!(mdPreviewSetTheme:),
+            sel!(mdPreviewerSetTheme:),
             "",
             NSEventModifierFlags::empty(),
             controller,
@@ -3387,364 +3004,6 @@ fn install_macos_menu(proxy: EventLoopProxy<UserEvent>, theme: ThemeChoice) {
 
 #[cfg(not(target_os = "macos"))]
 fn install_macos_menu(_proxy: EventLoopProxy<UserEvent>, _theme: ThemeChoice) {}
-
-#[cfg(target_os = "macos")]
-mod macos_updater {
-    use objc2::msg_send;
-    use objc2::runtime::{AnyClass, AnyObject, Bool};
-    use std::ffi::{c_char, c_void, CStr, CString};
-    use std::path::{Path, PathBuf};
-    use std::sync::OnceLock;
-
-    static CONTROLLER: OnceLock<usize> = OnceLock::new();
-    static FRAMEWORK_HANDLE: OnceLock<usize> = OnceLock::new();
-
-    const RTLD_NOW: i32 = 0x2;
-    const RTLD_GLOBAL: i32 = 0x8;
-
-    unsafe extern "C" {
-        fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
-    }
-
-    fn bundled_framework_path() -> Option<CString> {
-        let exe = std::env::current_exe().ok()?;
-        let path: PathBuf = exe
-            .parent()?
-            .join("../Frameworks/Sparkle.framework/Sparkle");
-        if !path.exists() {
-            return None;
-        }
-        CString::new(path.to_string_lossy().as_bytes()).ok()
-    }
-
-    fn app_bundle_for_exe_path(exe: &Path) -> Option<PathBuf> {
-        exe.ancestors()
-            .find(|path| {
-                path.extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| ext.eq_ignore_ascii_case("app"))
-                    .unwrap_or(false)
-            })
-            .map(Path::to_path_buf)
-    }
-
-    fn is_applications_bundle(bundle: &Path, home: Option<&Path>) -> bool {
-        let Some(parent) = bundle.parent() else {
-            return false;
-        };
-        if parent == Path::new("/Applications") {
-            return true;
-        }
-        home.map(|home| parent == home.join("Applications"))
-            .unwrap_or(false)
-    }
-
-    fn allow_non_applications_updater() -> bool {
-        std::env::var("MD_PREVIEW_ALLOW_NON_APPLICATIONS_UPDATER")
-            .map(|value| value == "1")
-            .unwrap_or(false)
-    }
-
-    pub fn installer_enabled() -> bool {
-        std::env::var("MD_PREVIEW_ENABLE_SPARKLE_INSTALLER")
-            .map(|value| value == "1")
-            .unwrap_or(false)
-    }
-
-    pub fn can_install_updates() -> bool {
-        if !installer_enabled() {
-            return false;
-        }
-        if bundled_framework_path().is_none() {
-            return false;
-        }
-        if allow_non_applications_updater() {
-            return true;
-        }
-
-        let Some(exe) = std::env::current_exe().ok() else {
-            return false;
-        };
-        let Some(bundle) = app_bundle_for_exe_path(&exe) else {
-            return false;
-        };
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        is_applications_bundle(&bundle, home.as_deref())
-    }
-
-    fn load_framework() -> bool {
-        if FRAMEWORK_HANDLE.get().is_some() {
-            return true;
-        }
-        let Some(path) = bundled_framework_path() else {
-            return false;
-        };
-        let handle = unsafe { dlopen(path.as_ptr(), RTLD_NOW | RTLD_GLOBAL) };
-        if handle.is_null() {
-            return false;
-        }
-        let _ = FRAMEWORK_HANDLE.set(handle as usize);
-        true
-    }
-
-    pub fn start() -> bool {
-        if CONTROLLER.get().is_some() {
-            return true;
-        }
-        if !can_install_updates() {
-            return false;
-        }
-        if !load_framework() {
-            return false;
-        }
-
-        let Some(controller_class) =
-            AnyClass::get(CStr::from_bytes_with_nul(b"SPUStandardUpdaterController\0").unwrap())
-        else {
-            return false;
-        };
-
-        let controller: *mut AnyObject = unsafe {
-            let allocated: *mut AnyObject = msg_send![controller_class, alloc];
-            msg_send![
-                allocated,
-                initWithStartingUpdater: Bool::YES,
-                updaterDelegate: Option::<&AnyObject>::None,
-                userDriverDelegate: Option::<&AnyObject>::None
-            ]
-        };
-        if controller.is_null() {
-            return false;
-        }
-        let _ = CONTROLLER.set(controller as usize);
-        true
-    }
-
-    pub fn check_for_updates() -> bool {
-        if !start() {
-            return false;
-        }
-        let Some(ptr) = CONTROLLER.get().copied() else {
-            return false;
-        };
-        let controller = ptr as *mut AnyObject;
-        unsafe {
-            let _: () = msg_send![controller, checkForUpdates: Option::<&AnyObject>::None];
-        }
-        true
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use std::path::Path;
-
-        #[test]
-        fn finds_bundle_from_executable_path() {
-            let bundle = app_bundle_for_exe_path(Path::new(
-                "/Applications/MD Preview.app/Contents/MacOS/md-preview",
-            ));
-
-            assert_eq!(bundle, Some(PathBuf::from("/Applications/MD Preview.app")));
-        }
-
-        #[test]
-        fn allows_system_and_user_applications_locations() {
-            assert!(is_applications_bundle(
-                Path::new("/Applications/MD Preview.app"),
-                None,
-            ));
-            assert!(is_applications_bundle(
-                Path::new("/Users/me/Applications/MD Preview.app"),
-                Some(Path::new("/Users/me")),
-            ));
-            assert!(!is_applications_bundle(
-                Path::new("/Volumes/MD Preview/MD Preview.app"),
-                Some(Path::new("/Users/me")),
-            ));
-            assert!(!is_applications_bundle(
-                Path::new("/Users/me/Downloads/MD Preview.app"),
-                Some(Path::new("/Users/me")),
-            ));
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-mod windows_updater {
-    use super::{config_dir, is_allowed_update_url, APP_DIRTY};
-    use std::fs;
-    use std::path::PathBuf;
-    use std::process::Command;
-    use std::sync::atomic::Ordering;
-
-    pub fn start() -> bool {
-        true
-    }
-
-    fn ps_quote(value: &str) -> String {
-        format!("'{}'", value.replace('\'', "''"))
-    }
-
-    fn valid_digest(digest: &str) -> bool {
-        digest
-            .strip_prefix("sha256:")
-            .map(|hash| hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()))
-            .unwrap_or(false)
-    }
-
-    fn relaunch_args(file: Option<PathBuf>) -> String {
-        let Some(path) = file else {
-            return "@()".to_string();
-        };
-        format!("@({})", ps_quote(&path.to_string_lossy()))
-    }
-
-    pub fn check_for_updates(
-        download_url: Option<&str>,
-        digest: Option<&str>,
-        relaunch_file: Option<PathBuf>,
-    ) -> bool {
-        if APP_DIRTY.load(Ordering::SeqCst) {
-            return false;
-        }
-
-        let Some(url) = download_url.filter(|url| is_allowed_update_url(url)) else {
-            return false;
-        };
-        if !url.ends_with("/MD-Preview-windows-x64.exe") {
-            return false;
-        }
-        let Some(expected_digest) = digest.filter(|digest| valid_digest(digest)) else {
-            return false;
-        };
-
-        let Ok(target) = std::env::current_exe() else {
-            return false;
-        };
-        let pid = std::process::id();
-        let update_dir = config_dir().join("updates");
-        if fs::create_dir_all(&update_dir).is_err() {
-            return false;
-        }
-        let script_path = update_dir.join(format!("update-{pid}.ps1"));
-        let script_path_s = script_path.to_string_lossy();
-        let target_s = target.to_string_lossy();
-        let args = relaunch_args(relaunch_file);
-        let script = format!(
-            r#"$ErrorActionPreference = 'Stop'
-$target = {target}
-$url = {url}
-$expected = {expected}
-$script = {script}
-$pidToWait = {pid}
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ('md-preview-update-' + [guid]::NewGuid().ToString() + '.exe')
-Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
-$actual = 'sha256:' + (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actual -ne $expected.ToLowerInvariant()) {{
-  Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-  exit 2
-}}
-Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue
-$done = $false
-for ($i = 0; $i -lt 80; $i++) {{
-  try {{
-    Copy-Item -LiteralPath $tmp -Destination $target -Force
-    $done = $true
-    break
-  }} catch {{
-    Start-Sleep -Milliseconds 250
-  }}
-}}
-Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-if (-not $done) {{ exit 3 }}
-Start-Process -FilePath $target -ArgumentList {args}
-Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue
-"#,
-            target = ps_quote(&target_s),
-            url = ps_quote(url),
-            expected = ps_quote(expected_digest),
-            script = ps_quote(&script_path_s),
-            pid = pid,
-            args = args,
-        );
-        if fs::write(&script_path, script).is_err() {
-            return false;
-        }
-
-        let spawned = Command::new("powershell.exe")
-            .arg("-NoProfile")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-WindowStyle")
-            .arg("Hidden")
-            .arg("-File")
-            .arg(&script_path)
-            .spawn()
-            .is_ok();
-        if spawned {
-            std::process::exit(0);
-        }
-        false
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn start_native_updater() -> bool {
-    macos_updater::start()
-}
-
-#[cfg(target_os = "windows")]
-fn start_native_updater() -> bool {
-    windows_updater::start()
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn start_native_updater() -> bool {
-    false
-}
-
-#[cfg(target_os = "macos")]
-fn native_updater_enabled() -> bool {
-    macos_updater::can_install_updates()
-}
-
-#[cfg(target_os = "windows")]
-fn native_updater_enabled() -> bool {
-    true
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn native_updater_enabled() -> bool {
-    false
-}
-
-#[cfg(target_os = "macos")]
-fn check_native_updates(
-    _download_url: Option<&str>,
-    _digest: Option<&str>,
-    _relaunch_file: Option<PathBuf>,
-) -> bool {
-    macos_updater::check_for_updates()
-}
-
-#[cfg(target_os = "windows")]
-fn check_native_updates(
-    download_url: Option<&str>,
-    digest: Option<&str>,
-    relaunch_file: Option<PathBuf>,
-) -> bool {
-    windows_updater::check_for_updates(download_url, digest, relaunch_file)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn check_native_updates(
-    _download_url: Option<&str>,
-    _digest: Option<&str>,
-    _relaunch_file: Option<PathBuf>,
-) -> bool {
-    false
-}
 
 #[cfg(any(target_os = "linux", test))]
 fn linux_webkit_compat_env(
@@ -3856,7 +3115,7 @@ enum FinderAction {
 
 fn parse_finder_action(value: &str) -> Option<FinderAction> {
     let url = url::Url::parse(value).ok()?;
-    if url.scheme() != "mdpreview" || url.host_str() != Some("finder") {
+    if url.scheme() != "mdpreviewer" || url.host_str() != Some("finder") {
         return None;
     }
     let query = url.query_pairs().collect::<HashMap<_, _>>();
@@ -3936,7 +3195,7 @@ fn register_finder_extension() {
     let Some(bundle) = contents.parent() else {
         return;
     };
-    let extension = bundle.join("Contents/PlugIns/MDPreviewFinderExtension.appex");
+    let extension = bundle.join("Contents/PlugIns/MDPreviewerFinderExtension.appex");
     if bundle.extension().and_then(|value| value.to_str()) != Some("app") || !extension.exists() {
         return;
     }
@@ -3952,7 +3211,12 @@ fn register_finder_extension() {
         .arg(bundle)
         .status();
     let _ = std::process::Command::new("pluginkit")
-        .args(["-e", "use", "-i", "com.mdpreview.app.FinderExtension"])
+        .args([
+            "-e",
+            "use",
+            "-i",
+            "io.github.arnoldredman.mdpreviewer.finder-extension",
+        ])
         .status();
 
     if marker.exists() {
@@ -3967,14 +3231,14 @@ fn register_finder_extension() {
         .map(|output| {
             output.lines().any(|line| {
                 line.trim_start().starts_with('+')
-                    && line.contains("com.mdpreview.app.FinderExtension")
+                    && line.contains("io.github.arnoldredman.mdpreviewer.finder-extension")
             })
         })
         .unwrap_or(false);
     if !active {
         show_info_dialog(
             "Enable the Finder Extension",
-            "Open System Settings > General > Login Items & Extensions > Finder, then enable MD Preview.",
+            "Open System Settings > General > Login Items & Extensions > Finder, then enable MD Previewer.",
         );
     }
     let _ = fs::create_dir_all(config_dir());
@@ -4004,9 +3268,13 @@ fn update_window_title(window: &Window, session: &DocumentSession) {
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| tab.path.to_string_lossy().to_string());
-            format!("{}{} — MD Preview", if tab.dirty { "• " } else { "" }, name)
+            format!(
+                "{}{} — MD Previewer",
+                if tab.dirty { "• " } else { "" },
+                name
+            )
         })
-        .unwrap_or_else(|| "MD Preview".to_string());
+        .unwrap_or_else(|| "MD Previewer".to_string());
     window.set_title(&title);
 }
 
@@ -4059,7 +3327,7 @@ fn render_active_document(
                     tab.edit_on_open = false;
                 }
                 let _ = webview.evaluate_script(
-                    "if(window.__mdPreviewEnterEdit)window.__mdPreviewEnterEdit();",
+                    "if(window.__mdPreviewerEnterEdit)window.__mdPreviewerEnterEdit();",
                 );
             }
         }
@@ -4096,10 +3364,10 @@ fn render_active_document(
 fn main() {
     apply_linux_webkit_compat_env();
 
-    // Bench instrumentation: MD_PREVIEW_BENCH=1 makes the app print
+    // Bench instrumentation: MD_PREVIEWER_BENCH=1 makes the app print
     // cold-start timings to stderr and exit as soon as the first paint
     // lands. Costs nothing outside bench mode.
-    let bench = std::env::var("MD_PREVIEW_BENCH").is_ok();
+    let bench = std::env::var("MD_PREVIEWER_BENCH").is_ok();
     let t0 = Instant::now();
     let bench_log = |label: &str| {
         if bench {
@@ -4108,7 +3376,7 @@ fn main() {
     };
     bench_log("main_start");
 
-    // CLI: md-preview [--edit] [file.md ...]
+    // CLI: md-previewer [--edit] [file.md ...]
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.iter().any(|arg| is_help_arg(arg)) {
         print_help();
@@ -4151,13 +3419,12 @@ fn main() {
     let proxy = event_loop.create_proxy();
     let initial_theme = load_theme_choice();
     install_macos_menu(proxy.clone(), initial_theme);
-    let native_updater_enabled = native_updater_enabled();
 
     let title = initial_session
         .active()
         .and_then(|tab| tab.path.file_name())
-        .map(|name| format!("{} — MD Preview", name.to_string_lossy()))
-        .unwrap_or_else(|| "MD Preview".to_string());
+        .map(|name| format!("{} — MD Previewer", name.to_string_lossy()))
+        .unwrap_or_else(|| "MD Previewer".to_string());
 
     let geom = load_window_geom()
         .filter(|g| geom_visible(g, &event_loop))
@@ -4175,15 +3442,6 @@ fn main() {
         .build(&event_loop)
         .expect("failed to build window");
     bench_log("window_built");
-    let native_updater_available = if native_updater_enabled {
-        start_native_updater()
-    } else {
-        false
-    };
-    if bench && native_updater_available {
-        bench_log("native_updater_started");
-    }
-
     let recent_files: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(load_recent_files()));
 
     let mut initial_flags = EnhanceFlags::default();
@@ -4201,7 +3459,6 @@ fn main() {
                     initial_flags,
                     &strings,
                     false,
-                    native_updater_enabled,
                 )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -4215,7 +3472,6 @@ fn main() {
                     EnhanceFlags::default(),
                     &strings,
                     false,
-                    native_updater_enabled,
                 )
             }
             Err(error) => build_page(
@@ -4230,7 +3486,6 @@ fn main() {
                 EnhanceFlags::default(),
                 &strings,
                 true,
-                native_updater_enabled,
             ),
         },
         None => build_page(
@@ -4240,7 +3495,6 @@ fn main() {
             EnhanceFlags::default(),
             &strings,
             true,
-            native_updater_enabled,
         ),
     };
 
@@ -4384,56 +3638,6 @@ fn main() {
                 {
                     let _ = proxy_for_ipc.send_event(UserEvent::FileChanged(path));
                 }
-            } else if let Some(url) = body.strip_prefix("open-url:") {
-                if is_allowed_update_url(url) {
-                    let _ = open::that(url);
-                }
-            } else if body == "check-updates" || body.starts_with("check-updates:\n") {
-                let payload = body.strip_prefix("check-updates:\n").unwrap_or("");
-                let mut parts = payload.splitn(4, '\n');
-                let download_url = parts.next().filter(|value| !value.is_empty());
-                let digest = parts.next().filter(|value| !value.is_empty());
-                let tag = parts.next().filter(|value| !value.is_empty());
-                let relaunch_file = session_for_ipc
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|tab| tab.path.clone());
-                if !check_native_updates(download_url, digest, relaunch_file) {
-                    if let Some(url) = download_url.filter(|url| is_allowed_update_url(url)) {
-                        if confirm_open_update(tag.unwrap_or("update")) {
-                            let _ = open::that(url);
-                        }
-                    } else {
-                        show_warning_dialog(
-                            "Update Unavailable",
-                            "MD Preview could not start the updater for this release.",
-                        );
-                    }
-                }
-            } else if let Some(result) = body.strip_prefix("update-check-result:") {
-                let mut parts = result.splitn(4, '\n');
-                match parts.next().unwrap_or("") {
-                    "available" => {
-                        let tag = parts.next().unwrap_or("update").to_string();
-                        let url = parts.next().unwrap_or("").to_string();
-                        let digest = parts
-                            .next()
-                            .filter(|value| !value.is_empty())
-                            .map(str::to_string);
-                        let _ = proxy_for_ipc.send_event(UserEvent::UpdateCheckResult(
-                            UpdateCheckResult::Available { tag, url, digest },
-                        ));
-                    }
-                    "none" => {
-                        let _ = proxy_for_ipc
-                            .send_event(UserEvent::UpdateCheckResult(UpdateCheckResult::UpToDate));
-                    }
-                    _ => {
-                        let _ = proxy_for_ipc
-                            .send_event(UserEvent::UpdateCheckResult(UpdateCheckResult::Failed));
-                    }
-                }
             } else if let Some(content) = body.strip_prefix("save:") {
                 let path = session_for_ipc
                     .lock()
@@ -4499,7 +3703,7 @@ fn main() {
         .unwrap_or(false)
     {
         let _ = webview
-            .evaluate_script("if(window.__mdPreviewEnterEdit)window.__mdPreviewEnterEdit();");
+            .evaluate_script("if(window.__mdPreviewerEnterEdit)window.__mdPreviewerEnterEdit();");
         if let Some(tab) = session_for_event.lock().unwrap().active_mut() {
             tab.edit_on_open = false;
         }
@@ -4548,7 +3752,7 @@ fn main() {
                     .unwrap_or(false)
                 {
                     let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewNewFile)window.__mdPreviewNewFile();",
+                        "if(window.__mdPreviewerNewFile)window.__mdPreviewerNewFile();",
                     );
                     return;
                 }
@@ -4584,7 +3788,7 @@ fn main() {
                     .unwrap_or(false)
                 {
                     let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewOpenFile)window.__mdPreviewOpenFile();",
+                        "if(window.__mdPreviewerOpenFile)window.__mdPreviewerOpenFile();",
                     );
                     return;
                 }
@@ -4669,7 +3873,7 @@ fn main() {
             TaoEvent::UserEvent(UserEvent::CloseActiveTab) => {
                 if session_for_event.lock().unwrap().active_id.is_some() {
                     let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewCloseActiveTab)window.__mdPreviewCloseActiveTab();",
+                        "if(window.__mdPreviewerCloseActiveTab)window.__mdPreviewerCloseActiveTab();",
                     );
                 } else {
                     save_window_geom(&window);
@@ -4711,7 +3915,7 @@ fn main() {
                 {
                     pending_external_change = Some(path);
                     let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewResolveExternalChange)window.__mdPreviewResolveExternalChange();",
+                        "if(window.__mdPreviewerResolveExternalChange)window.__mdPreviewerResolveExternalChange();",
                     );
                 }
             }
@@ -4728,7 +3932,7 @@ fn main() {
                         }
                         APP_DIRTY.store(true, Ordering::SeqCst);
                         let _ = webview.evaluate_script(
-                            "if(window.__mdPreviewPauseAutosave)window.__mdPreviewPauseAutosave();",
+                            "if(window.__mdPreviewerPauseAutosave)window.__mdPreviewerPauseAutosave();",
                         );
                         if warned_external_change.as_ref() != Some(&path) {
                             show_warning_dialog(
@@ -4804,12 +4008,12 @@ fn main() {
             }
             TaoEvent::UserEvent(UserEvent::ToggleEdit) => {
                 let _ = webview.evaluate_script(
-                    "if(window.__mdPreviewToggleEdit)window.__mdPreviewToggleEdit();",
+                    "if(window.__mdPreviewerToggleEdit)window.__mdPreviewerToggleEdit();",
                 );
             }
             TaoEvent::UserEvent(UserEvent::ShowFind) => {
                 let _ = webview
-                    .evaluate_script("if(window.__mdPreviewShowFind)window.__mdPreviewShowFind();");
+                    .evaluate_script("if(window.__mdPreviewerShowFind)window.__mdPreviewerShowFind();");
             }
             TaoEvent::UserEvent(UserEvent::RecentChanged) => {
                 let html = empty_preview_html(&strings, &recent_files.lock().unwrap());
@@ -4822,50 +4026,11 @@ fn main() {
             TaoEvent::UserEvent(UserEvent::Print) => {
                 let _ = webview.print();
             }
-            TaoEvent::UserEvent(UserEvent::CheckUpdates) => {
-                let proxy = proxy.clone();
-                std::thread::spawn(move || {
-                    let _ = proxy.send_event(UserEvent::UpdateCheckResult(check_github_updates()));
-                });
-            }
-            TaoEvent::UserEvent(UserEvent::UpdateCheckResult(result)) => match result {
-                UpdateCheckResult::Available { tag, url, digest } => {
-                    if is_allowed_update_url(&url) && confirm_open_update(&tag) {
-                        let relaunch_file = session_for_event
-                            .lock()
-                            .unwrap()
-                            .active()
-                            .map(|tab| tab.path.clone());
-                        if !check_native_updates(
-                            Some(url.as_str()),
-                            digest.as_deref(),
-                            relaunch_file,
-                        ) {
-                            let _ = open::that(url);
-                        }
-                    }
-                }
-                UpdateCheckResult::UpToDate => {
-                    show_info_dialog(
-                        "MD Preview Is Up to Date",
-                        &format!(
-                            "You are using the latest version: {}.",
-                            env!("CARGO_PKG_VERSION")
-                        ),
-                    );
-                }
-                UpdateCheckResult::Failed => {
-                    show_warning_dialog(
-                        "Could Not Check for Updates",
-                        "MD Preview could not reach the update service. Please try again later.",
-                    );
-                }
-            },
             TaoEvent::UserEvent(UserEvent::Quit) => {
                 if APP_DIRTY.load(Ordering::SeqCst) && !pending_window_close {
                     pending_window_close = true;
                     let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewSave)window.__mdPreviewSave();",
+                        "if(window.__mdPreviewerSave)window.__mdPreviewerSave();",
                     );
                 } else if !pending_window_close {
                     save_window_geom(&window);
@@ -4936,7 +4101,7 @@ fn main() {
                 if APP_DIRTY.load(Ordering::SeqCst) && !pending_window_close {
                     pending_window_close = true;
                     let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewSave)window.__mdPreviewSave();",
+                        "if(window.__mdPreviewerSave)window.__mdPreviewerSave();",
                     );
                 } else if !pending_window_close {
                     save_window_geom(&window);

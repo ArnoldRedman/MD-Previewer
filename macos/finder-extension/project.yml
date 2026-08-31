@@ -1,4 +1,4 @@
-name: MDPreviewFinderExtension
+name: MDPreviewerFinderExtension
 options:
   deploymentTarget:
     macOS: "10.15"
@@ -7,7 +7,7 @@ settings:
     CODE_SIGNING_ALLOWED: NO
     SWIFT_VERSION: "5.0"
 targets:
-  MDPreviewFinderExtension:
+  MDPreviewerFinderExtension:
     type: app-extension
     platform: macOS
     sources:
@@ -15,19 +15,19 @@ targets:
     info:
       path: ExtensionInfo.plist
       properties:
-        CFBundleDisplayName: MD Preview
+        CFBundleDisplayName: MD Previewer
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true
         NSExtension:
           NSExtensionAttributes: {}
           NSExtensionPointIdentifier: com.apple.FinderSync
-          NSExtensionPrincipalClass: MDPreviewFinderSync
+          NSExtensionPrincipalClass: MDPreviewerFinderSync
         NSPrincipalClass: NSApplication
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.mdpreview.app.FinderExtension
-        PRODUCT_NAME: MDPreviewFinderExtension
-        MARKETING_VERSION: "1.2.0"
-        CURRENT_PROJECT_VERSION: "1.2.0"
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.arnoldredman.mdpreviewer.finder-extension
+        PRODUCT_NAME: MDPreviewerFinderExtension
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
         CODE_SIGN_ENTITLEMENTS: Extension.entitlements

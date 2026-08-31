@@ -2,7 +2,7 @@
 
 ## 项目目标
 
-- MD Preview 是本地优先 Markdown 预览器，核心场景是快速打开 AI 生成文档、README、计划文档和手机收到的 Markdown 文件。
+- MD Previewer 是本地优先 Markdown 预览器，核心场景是快速打开 AI 生成文档、README、计划文档和手机收到的 Markdown 文件。
 - 桌面端保持 Rust + 系统 WebView 的轻量路线；手机端 MVP 聚焦只读快速预览和系统文件打开入口。
 
 ## 技术栈与入口

@@ -174,7 +174,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "md-preview-session-{name}-{}-{unique}",
+            "md-previewer-session-{name}-{}-{unique}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();

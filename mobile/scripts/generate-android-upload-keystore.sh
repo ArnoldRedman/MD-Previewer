@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="$ROOT/.env.mobile-release"
 KEYSTORE_DIR="$ROOT/mobile/android/signing"
-KEYSTORE="$KEYSTORE_DIR/md-preview-upload.keystore"
+KEYSTORE="$KEYSTORE_DIR/md-previewer-upload.keystore"
 
 if [ -f "$KEYSTORE" ] || [ -f "$ENV_FILE" ]; then
   echo "[android-keystore] existing signing material found; refusing to overwrite"
@@ -24,20 +24,20 @@ key_password="$store_password"
 
 keytool -genkeypair \
   -keystore "$KEYSTORE" \
-  -alias md-preview-upload \
+  -alias md-previewer-upload \
   -keyalg RSA \
   -keysize 4096 \
   -validity 10000 \
   -storepass "$store_password" \
   -keypass "$key_password" \
-  -dname "CN=MD Preview, OU=Release, O=MD Preview, L=Local, ST=Local, C=US" >/dev/null
+  -dname "CN=MD Previewer, OU=Release, O=MD Previewer, L=Local, ST=Local, C=US" >/dev/null
 
 umask 077
 cat > "$ENV_FILE" <<EOF
-MD_PREVIEW_ANDROID_KEYSTORE="$KEYSTORE"
-MD_PREVIEW_ANDROID_KEYSTORE_PASSWORD="$store_password"
-MD_PREVIEW_ANDROID_KEY_ALIAS="md-preview-upload"
-MD_PREVIEW_ANDROID_KEY_PASSWORD="$key_password"
+MD_PREVIEWER_ANDROID_KEYSTORE="$KEYSTORE"
+MD_PREVIEWER_ANDROID_KEYSTORE_PASSWORD="$store_password"
+MD_PREVIEWER_ANDROID_KEY_ALIAS="md-previewer-upload"
+MD_PREVIEWER_ANDROID_KEY_PASSWORD="$key_password"
 EOF
 
 chmod 600 "$ENV_FILE"

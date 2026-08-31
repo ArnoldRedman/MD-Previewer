@@ -1,0 +1,13 @@
+MD Previewer
+Copyright (c) 2026 ArnoldRedman
+
+This project is derived from MD Preview:
+https://github.com/vorojar/md-preview
+Copyright (c) 2025 vorojar
+
+The upstream source was used under the MIT License. The original copyright
+notice and MIT permission notice are retained in LICENSE.
+
+Bundled rendering assets include highlight.js, KaTeX, Mermaid, and Marked.
+Their notices are retained in the distributed source files and in
+mobile/shared/vendor/THIRD_PARTY.md.

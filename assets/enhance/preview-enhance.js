@@ -1,5 +1,5 @@
 (function() {
-  var flags = window.__mdPreviewFeatureFlags || { math: false, mermaid: false };
+  var flags = window.__mdPreviewerFeatureFlags || { math: false, mermaid: false };
   var mermaidSeq = 0;
   var anchorNavigationBound = false;
 
@@ -9,7 +9,7 @@
 
   function setFlags(needsMath, needsMermaid) {
     flags = { math: !!needsMath, mermaid: !!needsMermaid };
-    window.__mdPreviewFeatureFlags = flags;
+    window.__mdPreviewerFeatureFlags = flags;
   }
 
   function hasClassInTree(el, cls) {

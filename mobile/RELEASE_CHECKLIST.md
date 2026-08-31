@@ -5,7 +5,7 @@
 - Android: `mobile/scripts/verify-release-readiness.sh` passes and produces a signed `app-release.apk` plus `app-release.aab`.
 - Android: install the signed release APK on an emulator or phone and verify the app launches.
 - Android: install `mobile/android/app/build/outputs/apk/debug/app-debug.apk` on a real phone and open `.md`, `.markdown`, `.mdown`, `.mkd` files from Files, WeChat, and WeCom.
-- Android: long-press a Markdown file, choose "Open with", select MD Preview, then verify the system offers it again as the default handler.
+- Android: long-press a Markdown file, choose "Open with", select MD Previewer, then verify the system offers it again as the default handler.
 - Android: verify `ACTION_SEND` from WeChat/WeCom share sheet opens the same document.
 - iOS: install on a real iPhone, open Markdown files from Files, WeChat, and WeCom via the share sheet / Open In.
 - iOS: verify the app appears for `.md`, `.markdown`, `.mdown`, and `.mkd`; iOS does not allow silently forcing a default handler.

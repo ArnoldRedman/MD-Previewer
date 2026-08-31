@@ -23,11 +23,11 @@ const desktopScript = mainRs
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
-await page.route('https://md-preview.test/**', (route) => route.fulfill({
+await page.route('https://md-previewer.test/**', (route) => route.fulfill({
   contentType: 'text/html',
-  body: '<!doctype html><title>MD Preview test</title>',
+  body: '<!doctype html><title>MD Previewer test</title>',
 }));
-await page.goto('https://md-preview.test/');
+await page.goto('https://md-previewer.test/');
 const previewBlocks = Array.from(
   { length: 100 },
   (_, index) => `<p>Preview paragraph ${index + 1}</p>`,
@@ -134,7 +134,7 @@ await page.locator('#btn-zoom-in').click();
 result = await page.evaluate(() => ({
   resetLabel: document.getElementById('btn-zoom-reset').textContent,
   scale: getComputedStyle(document.documentElement).getPropertyValue('--content-scale').trim(),
-  stored: localStorage.getItem('md-preview-content-zoom-v1'),
+  stored: localStorage.getItem('md-previewer-content-zoom-v1'),
   toolbarWidth: document.getElementById('btn-open').getBoundingClientRect().width,
 }));
 if (result.resetLabel !== '110%' || result.scale !== '1.1' ||
