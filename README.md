@@ -13,12 +13,17 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 
 - Opens Markdown and text files from the command line, file picker, drag and drop, or OS file associations.
 - Keeps multiple documents in tabs and restores the previous session; opening another Markdown file from Windows Explorer reuses the running window.
+- Lets the toolbar gear choose whether a Markdown file reuses the running window or opens its own, and whether the tab bar accumulates tabs or keeps only the current document.
+- Offers a collapsible left sidebar listing the current document's folder and recently opened files, for switching between chapters without the file picker.
+- Includes an author mode that adds copy buttons for the chapter heading line, the title without its chapter number, and the whole body.
 - Reloads previews when another editor changes the file.
 - Supports tables, task lists, syntax highlighting, GitHub alerts, KaTeX, Mermaid, local images, and local document links.
 - Includes preview search, content zoom, print, source editing, and reliable autosave.
 - Uses native iOS and Android shells for read-only mobile previews.
 
 All rendering assets are bundled locally. **Automatic updates are disabled** until this fork has its own signed release channel.
+
+Released packages are currently **Windows only**. The macOS and mobile shells build from source but are not published yet, because this fork has no signing identity.
 
 ## Windows one-click build
 
