@@ -4,11 +4,13 @@
 )]
 
 mod session;
+mod settings;
 mod single_instance;
 
 use notify::{Event, RecursiveMode, Watcher};
 use pulldown_cmark::{html, CowStr, Event as MdEvent, Options, Parser, Tag, TagEnd};
 use session::DocumentSession;
+use settings::{OpenMode, Settings, TabMode};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Component;
@@ -26,6 +28,9 @@ const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.ico");
 const DEFAULT_W: f64 = 900.0;
 const DEFAULT_H: f64 = 700.0;
 static APP_DIRTY: AtomicBool = AtomicBool::new(false);
+/// 当前设置是否需要跨启动的 `session.json`。用静态量是为了让 `persist_session`
+/// 的十来个调用点不必都拿到设置，语义见 `Settings::keeps_session`
+static SESSION_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug)]
 struct SelfWriteRecord {
@@ -53,6 +58,7 @@ enum UserEvent {
     ShowFind,
     Print, // route print through wry's native API (WKWebView ignores window.print())
     SetTheme(ThemeChoice),
+    SettingsChanged,
     OpenUrl(&'static str),
     Quit,
     RecentChanged,
@@ -157,6 +163,13 @@ struct Strings {
     search_placeholder: &'static str,
     stat_words: &'static str,
     stat_chars: &'static str,
+    btn_settings: &'static str,
+    set_open_mode: &'static str,
+    set_open_tab: &'static str,
+    set_open_window: &'static str,
+    set_tab_mode: &'static str,
+    set_tab_keep: &'static str,
+    set_tab_single: &'static str,
 }
 
 impl Strings {
@@ -185,6 +198,13 @@ impl Strings {
                 search_placeholder: "搜索",
                 stat_words: "字",
                 stat_chars: "字符",
+                btn_settings: "设置",
+                set_open_mode: "打开 Markdown 文件时",
+                set_open_tab: "沿用当前窗口",
+                set_open_window: "开新窗口",
+                set_tab_mode: "标签栏",
+                set_tab_keep: "累计标签",
+                set_tab_single: "只留当前",
             },
             Lang::En => Strings {
                 drop_hint: "Drop a .md file here or press Cmd/Ctrl+O to open",
@@ -209,6 +229,13 @@ impl Strings {
                 search_placeholder: "Find",
                 stat_words: "non-space",
                 stat_chars: "chars",
+                btn_settings: "Settings",
+                set_open_mode: "When opening a Markdown file",
+                set_open_tab: "Reuse window",
+                set_open_window: "New window",
+                set_tab_mode: "Tab bar",
+                set_tab_keep: "Keep tabs",
+                set_tab_single: "Current only",
             },
         }
     }
@@ -245,6 +272,10 @@ struct WindowGeom {
 
 fn geom_path() -> PathBuf {
     config_dir().join("window.geom")
+}
+
+fn settings_path() -> PathBuf {
+    config_dir().join("settings.json")
 }
 
 fn theme_path() -> PathBuf {
@@ -1252,6 +1283,32 @@ body.empty .toolbar {{ display: none !important; }}
 	.toolbar .zoom-popover .zoom-reset {{
 	  width: 52px; font-size: 11px; font-variant-numeric: tabular-nums;
 	}}
+	.settings-control {{ position: relative; }}
+	.settings-popover {{
+	  position: absolute; top: 40px; right: 0;
+	  display: none; flex-direction: column; gap: 10px; padding: 10px;
+	  border: 1px solid rgba(0,0,0,.1); border-radius: 8px;
+	  background: rgba(255,255,255,.96); box-shadow: 0 6px 20px rgba(0,0,0,.12);
+	  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+	  white-space: nowrap; text-align: left;
+	}}
+	.settings-control.open .settings-popover {{ display: flex; }}
+	.settings-row {{ display: flex; flex-direction: column; gap: 5px; align-items: stretch; }}
+	.settings-label {{ font-size: 11px; color: #666; }}
+	.settings-seg {{
+	  display: flex; border: 1px solid rgba(0,0,0,.14); border-radius: 6px; overflow: hidden;
+	}}
+	.toolbar .settings-seg button {{
+	  flex: 1; width: auto; height: 26px; padding: 0 12px;
+	  border: 0; border-radius: 0; background: transparent;
+	  font: inherit; font-size: 12px; color: #444;
+	}}
+	.toolbar .settings-seg button + button {{ border-left: 1px solid rgba(0,0,0,.14); }}
+	.toolbar .settings-seg button:hover {{ background: rgba(0,0,0,.06); }}
+	.toolbar .settings-seg button[aria-pressed="true"] {{
+	  background: #1a73e8; color: #fff;
+	}}
+	.toolbar .settings-seg button[aria-pressed="true"]:hover {{ background: #1765cc; }}
 	.findbar {{
 	  position: fixed; top: var(--chrome-top); left: 50%; transform: translateX(-50%);
 	  display: none; align-items: center; gap: 6px; z-index: 101;
@@ -1305,6 +1362,14 @@ body.empty .toolbar {{ display: none !important; }}
 	  .toolbar button:hover {{ color: #fff; background: rgba(55,55,55,1); }}
 	  .zoom-popover {{ background: rgba(34,34,34,.96); border-color: rgba(255,255,255,.12); }}
 	  .toolbar .zoom-popover button:hover {{ background: rgba(255,255,255,.1); }}
+	  .settings-popover {{ background: rgba(34,34,34,.96); border-color: rgba(255,255,255,.12); }}
+	  .settings-label {{ color: #999; }}
+	  .settings-seg {{ border-color: rgba(255,255,255,.16); }}
+	  .toolbar .settings-seg button {{ color: #bbb; }}
+	  .toolbar .settings-seg button + button {{ border-left-color: rgba(255,255,255,.16); }}
+	  .toolbar .settings-seg button:hover {{ background: rgba(255,255,255,.1); color: #fff; }}
+	  .toolbar .settings-seg button[aria-pressed="true"] {{ background: #2f6fd0; color: #fff; }}
+	  .toolbar .settings-seg button[aria-pressed="true"]:hover {{ background: #3a7de0; }}
 		  .empty-open {{ background: #242424; border-color: #444; color: #ddd; }}
 		  .empty-open:hover {{ background: #2d2d2d; color: #fff; }}
 		  .recent-name {{ color: #ddd; }}
@@ -1367,6 +1432,25 @@ body.editing #btn-print {{ display: none; }}
 	      <button id="btn-zoom-in" title="{btn_zoom_in}" aria-label="{btn_zoom_in}">+</button>
 	    </div>
 	  </div>
+	  <div class="settings-control" id="settings-control">
+	    <button id="btn-settings" title="{btn_settings}" aria-label="{btn_settings}"></button>
+	    <div class="settings-popover" role="group" aria-label="{btn_settings}">
+	      <div class="settings-row">
+	        <span class="settings-label">{set_open_mode}</span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="open-mode" data-value="new-tab" aria-pressed="false">{set_open_tab}</button>
+	          <button type="button" data-setting="open-mode" data-value="new-window" aria-pressed="false">{set_open_window}</button>
+	        </div>
+	      </div>
+	      <div class="settings-row">
+	        <span class="settings-label">{set_tab_mode}</span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="tab-mode" data-value="accumulate" aria-pressed="false">{set_tab_keep}</button>
+	          <button type="button" data-setting="tab-mode" data-value="single" aria-pressed="false">{set_tab_single}</button>
+	        </div>
+	      </div>
+	    </div>
+	  </div>
 	</div>
 	<div class="findbar" role="search">
 	  <input id="find-input" type="search" placeholder="{search_placeholder}" aria-label="{search_placeholder}">
@@ -1387,6 +1471,7 @@ body.editing #btn-print {{ display: none; }}
 	  var ICON_SEARCH = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
 	  var ICON_PRINT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
 	  var ICON_ZOOM = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>';
+	  var ICON_SETTINGS = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 	  var ICON_UP = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
 	  var ICON_DOWN = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
 	  var ICON_CLOSE = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
@@ -1401,6 +1486,8 @@ body.editing #btn-print {{ display: none; }}
 	  var btnZoomReset = document.getElementById('btn-zoom-reset');
 	  var btnZoomIn = document.getElementById('btn-zoom-in');
 	  var zoomControl = document.getElementById('zoom-control');
+	  var btnSettings = document.getElementById('btn-settings');
+	  var settingsControl = document.getElementById('settings-control');
 	  var findInput = document.getElementById('find-input');
 	  var findState = document.getElementById('find-state');
 	  var findPrev = document.getElementById('find-prev');
@@ -1434,6 +1521,7 @@ body.editing #btn-print {{ display: none; }}
 	  btnToggle.innerHTML = ICON_EDIT;
 	  btnPrint.innerHTML = ICON_PRINT;
 	  btnZoom.innerHTML = ICON_ZOOM;
+	  btnSettings.innerHTML = ICON_SETTINGS;
 	  findPrev.innerHTML = ICON_UP;
 	  findNext.innerHTML = ICON_DOWN;
 	  findClose.innerHTML = ICON_CLOSE;
@@ -1762,8 +1850,31 @@ body.editing #btn-print {{ display: none; }}
 	  }});
 	  btnZoom.addEventListener('click', function(e) {{
 	    e.stopPropagation();
+	    settingsControl.classList.remove('open');
 	    zoomControl.classList.toggle('open');
 	  }});
+	  btnSettings.addEventListener('click', function(e) {{
+	    e.stopPropagation();
+	    zoomControl.classList.remove('open');
+	    settingsControl.classList.toggle('open');
+	  }});
+	  // 只上报点击，选中态一律等 Rust 存盘后通过 __setSettings 回显，避免界面和实际配置不一致
+	  settingsControl.addEventListener('click', function(e) {{
+	    var btn = e.target && e.target.closest ? e.target.closest('[data-setting]') : null;
+	    if (!btn) return;
+	    e.preventDefault();
+	    window.ipc.postMessage('set-setting:' + btn.getAttribute('data-setting') + '=' + btn.getAttribute('data-value'));
+	  }});
+	  window.__setSettings = function(settings) {{
+	    settings = settings || {{}};
+	    var current = {{ 'open-mode': settings.openMode, 'tab-mode': settings.tabMode }};
+	    var buttons = settingsControl.querySelectorAll('[data-setting]');
+	    for (var i = 0; i < buttons.length; i++) {{
+	      var btn = buttons[i];
+	      var selected = current[btn.getAttribute('data-setting')] === btn.getAttribute('data-value');
+	      btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+	    }}
+	  }};
 	  btnZoomOut.addEventListener('click', function() {{ changeZoom(-ZOOM_STEP); }});
 	  btnZoomReset.addEventListener('click', function() {{ applyZoom(100, true); }});
 	  btnZoomIn.addEventListener('click', function() {{ changeZoom(ZOOM_STEP); }});
@@ -1777,6 +1888,7 @@ body.editing #btn-print {{ display: none; }}
   window.addEventListener('resize', function() {{ if (inEdit()) autoResize(); }});
   document.addEventListener('click', function(e) {{
     if (!zoomControl.contains(e.target)) zoomControl.classList.remove('open');
+    if (!settingsControl.contains(e.target)) settingsControl.classList.remove('open');
   }});
 
   document.addEventListener('keydown', function(e) {{
@@ -2003,6 +2115,13 @@ if(window.__enhancePreview)window.__enhancePreview();
         btn_zoom_reset = s.btn_zoom_reset,
         btn_zoom_in = s.btn_zoom_in,
         search_placeholder = s.search_placeholder,
+        btn_settings = s.btn_settings,
+        set_open_mode = s.set_open_mode,
+        set_open_tab = s.set_open_tab,
+        set_open_window = s.set_open_window,
+        set_tab_mode = s.set_tab_mode,
+        set_tab_keep = s.set_tab_keep,
+        set_tab_single = s.set_tab_single,
         stat_words_js = escape_js(s.stat_words),
         stat_chars_js = escape_js(s.stat_chars),
         body_class = body_class,
@@ -2319,6 +2438,10 @@ mod tests {
         assert!(page.contains("updateDocumentStats"));
         assert!(page.contains("restoreScrollProgress"));
         assert!(page.contains("md-previewer-content-zoom-v1"));
+        assert!(page.contains("id=\"btn-settings\""));
+        assert!(page.contains("data-setting=\"open-mode\" data-value=\"new-window\""));
+        assert!(page.contains("data-setting=\"tab-mode\" data-value=\"single\""));
+        assert!(page.contains("window.__setSettings"));
         assert!(page.contains("id=\"btn-zoom-in\""));
         assert!(page.contains("id=\"btn-zoom-out\""));
         assert!(page.contains("id=\"btn-zoom-reset\""));
@@ -3250,9 +3373,20 @@ fn register_finder_extension() {
 fn register_finder_extension() {}
 
 fn persist_session(session: &DocumentSession) {
+    // 新窗口模式是多进程、单标签模式按设计不恢复，这两种情况下落盘只会互相覆盖或把老标签带回来
+    if !SESSION_ENABLED.load(Ordering::SeqCst) {
+        return;
+    }
     if let Err(error) = session.save(&session_path()) {
         eprintln!("Could not save tab session: {error}");
     }
+}
+
+fn update_settings_ui(webview: &WebView, settings: &Settings) {
+    let state = settings.to_json();
+    let _ = webview.evaluate_script(&format!(
+        "if(window.__setSettings)window.__setSettings({state});"
+    ));
 }
 
 fn update_tabs(webview: &WebView, session: &DocumentSession) {
@@ -3407,7 +3541,14 @@ fn main() {
 
     let lang = detect_lang();
     let strings = Strings::for_lang(lang);
-    let instance = match single_instance::prepare(&config_dir(), &cli_paths, edit_from_cli) {
+    let settings = Settings::load(&settings_path());
+    SESSION_ENABLED.store(settings.keeps_session(), Ordering::SeqCst);
+    let instance = match single_instance::prepare(
+        &config_dir(),
+        &cli_paths,
+        edit_from_cli,
+        settings.open_mode == OpenMode::NewTab,
+    ) {
         single_instance::Startup::Primary(server) => server,
         single_instance::Startup::Forwarded => return,
     };
@@ -3415,7 +3556,12 @@ fn main() {
     register_finder_extension();
     bench_log("after_register");
 
-    let mut initial_session = DocumentSession::load(&session_path());
+    let mut initial_session = if settings.keeps_session() {
+        DocumentSession::load(&session_path())
+    } else {
+        DocumentSession::default()
+    };
+    initial_session.single_tab = settings.tab_mode == TabMode::Single;
     for path in cli_paths {
         initial_session.open(path, edit_from_cli);
     }
@@ -3506,9 +3652,11 @@ fn main() {
 
     persist_session(&initial_session);
     let document_session = Arc::new(Mutex::new(initial_session));
+    let settings = Arc::new(Mutex::new(settings));
     let enhance_flags: Arc<Mutex<EnhanceFlags>> = Arc::new(Mutex::new(initial_flags));
     let last_self_write: Arc<Mutex<Option<SelfWriteRecord>>> = Arc::new(Mutex::new(None));
     let session_for_ipc = Arc::clone(&document_session);
+    let settings_for_ipc = Arc::clone(&settings);
     let recent_files_for_ipc = Arc::clone(&recent_files);
     let last_self_write_for_ipc = Arc::clone(&last_self_write);
     let proxy_for_ipc = proxy.clone();
@@ -3619,6 +3767,14 @@ fn main() {
                     }
                     _ => {}
                 }
+            } else if let Some(change) = body.strip_prefix("set-setting:") {
+                let Some((key, value)) = change.split_once('=') else {
+                    return;
+                };
+                // 只有取值真的变了才唤醒事件循环，避免重复点同一项也走一遍落盘和重绘
+                if settings_for_ipc.lock().unwrap().apply(key, value) {
+                    let _ = proxy_for_ipc.send_event(UserEvent::SettingsChanged);
+                }
             } else if let Some(id) = body.strip_prefix("locate-tab:") {
                 if let Ok(id) = id.parse::<u64>() {
                     let _ = proxy_for_ipc.send_event(UserEvent::LocateTab(id));
@@ -3700,7 +3856,9 @@ fn main() {
     let webview = builder.build(&window).expect("failed to build webview");
     bench_log("webview_built");
     let session_for_event = Arc::clone(&document_session);
+    let settings_for_event = Arc::clone(&settings);
     update_tabs(&webview, &session_for_event.lock().unwrap());
+    update_settings_ui(&webview, &settings_for_event.lock().unwrap());
     if session_for_event
         .lock()
         .unwrap()
@@ -3746,7 +3904,6 @@ fn main() {
     let mut pending_external_change: Option<PathBuf> = None;
 
     event_loop.run(move |event, _, control_flow| {
-        let _keep_single_instance_lock = &instance;
         *control_flow = ControlFlow::Wait;
 
         match event {
@@ -4050,6 +4207,27 @@ fn main() {
                     persist_session(&session_for_event.lock().unwrap());
                     *control_flow = ControlFlow::Exit;
                 }
+            }
+            TaoEvent::UserEvent(UserEvent::SettingsChanged) => {
+                let current = *settings_for_event.lock().unwrap();
+                SESSION_ENABLED.store(current.keeps_session(), Ordering::SeqCst);
+                if let Err(error) = current.save(&settings_path()) {
+                    eprintln!("Could not save settings: {error}");
+                }
+                let mut session = session_for_event.lock().unwrap();
+                session.single_tab = current.tab_mode == TabMode::Single;
+                if session.single_tab {
+                    session.collapse_to_active();
+                }
+                if current.keeps_session() {
+                    persist_session(&session);
+                } else {
+                    // 留着旧会话文件会在下次启动又把老标签拉回来，正是这个设置要避免的
+                    let _ = fs::remove_file(session_path());
+                }
+                update_tabs(&webview, &session);
+                drop(session);
+                update_settings_ui(&webview, &current);
             }
             TaoEvent::UserEvent(UserEvent::SetTheme(choice)) => {
                 save_theme_choice(choice);

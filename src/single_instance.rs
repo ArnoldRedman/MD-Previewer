@@ -40,17 +40,18 @@ mod platform {
         Forwarded,
     }
 
+    // 锁文件退出时不删除：`event_loop.run` 在 Windows 上不返回，析构不会执行。
+    // 进程结束由系统释放文件句柄，残留文件由下一个实例的 `acquire_lock` 截断复用
     pub(crate) struct Server {
         lock: Option<File>,
-        lock_path: PathBuf,
         request_dir: PathBuf,
     }
 
     impl Server {
+        // 单实例不可用时的降级形态：不持锁、不监听，只让本进程照常开窗
         fn disabled(config_dir: &Path) -> Self {
             Self {
                 lock: None,
-                lock_path: config_dir.join(LOCK_FILE),
                 request_dir: config_dir.join(REQUEST_DIR),
             }
         }
@@ -64,14 +65,14 @@ mod platform {
         }
     }
 
-    impl Drop for Server {
-        fn drop(&mut self) {
-            self.lock.take();
-            let _ = fs::remove_file(&self.lock_path);
-        }
-    }
-
-    pub(crate) fn prepare(config_dir: &Path, paths: &[PathBuf], edit: bool) -> Startup {
+    /// `forward` 为 false 时是「每个文件开新窗口」模式：已有实例继续持锁并监听，
+    /// 本进程不转发，自己开一个窗口。切回复用模式后下一次点击就会重新转发给它
+    pub(crate) fn prepare(
+        config_dir: &Path,
+        paths: &[PathBuf],
+        edit: bool,
+        forward: bool,
+    ) -> Startup {
         if fs::create_dir_all(config_dir).is_err() {
             return Startup::Primary(Server::disabled(config_dir));
         }
@@ -81,10 +82,12 @@ mod platform {
         match acquire_lock(&lock_path) {
             Ok(lock) => Startup::Primary(Server {
                 lock: Some(lock),
-                lock_path,
                 request_dir,
             }),
             Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
+                if !forward {
+                    return Startup::Primary(Server::disabled(config_dir));
+                }
                 allow_primary_to_focus(&lock_path);
                 if write_request(&request_dir, paths, edit) {
                     Startup::Forwarded
@@ -258,11 +261,11 @@ mod platform {
             let dir = temp_dir("forward");
             let document = dir.join("计划.md");
             fs::write(&document, "# 计划").unwrap();
-            let Startup::Primary(primary) = prepare(&dir, &[], false) else {
+            let Startup::Primary(primary) = prepare(&dir, &[], false, true) else {
                 panic!("first launch must become primary");
             };
 
-            let second = prepare(&dir, std::slice::from_ref(&document), true);
+            let second = prepare(&dir, std::slice::from_ref(&document), true, true);
 
             assert!(matches!(second, Startup::Forwarded));
             let request_path = fs::read_dir(dir.join(REQUEST_DIR))
@@ -276,7 +279,28 @@ mod platform {
             assert_eq!(request.paths, vec![document]);
             assert!(request.edit);
             drop(primary);
-            assert!(!dir.join(LOCK_FILE).exists());
+            let _ = fs::remove_dir_all(dir);
+        }
+
+        #[test]
+        fn new_window_mode_opens_its_own_window_instead_of_forwarding() {
+            let dir = temp_dir("new-window");
+            let document = dir.join("计划.md");
+            fs::write(&document, "# 计划").unwrap();
+            let Startup::Primary(primary) = prepare(&dir, &[], false, true) else {
+                panic!("first launch must become primary");
+            };
+
+            let second = prepare(&dir, std::slice::from_ref(&document), false, false);
+
+            assert!(matches!(second, Startup::Primary(_)));
+            // 不转发就不该入队请求，否则主实例会多开一个标签
+            let queued = fs::read_dir(dir.join(REQUEST_DIR))
+                .map(|entries| entries.count())
+                .unwrap_or(0);
+            assert_eq!(queued, 0);
+            drop(second);
+            drop(primary);
             let _ = fs::remove_dir_all(dir);
         }
 
@@ -308,7 +332,12 @@ mod platform {
         pub(crate) fn start(&self, _proxy: EventLoopProxy<UserEvent>) {}
     }
 
-    pub(crate) fn prepare(_config_dir: &Path, _paths: &[PathBuf], _edit: bool) -> Startup {
+    pub(crate) fn prepare(
+        _config_dir: &Path,
+        _paths: &[PathBuf],
+        _edit: bool,
+        _forward: bool,
+    ) -> Startup {
         Startup::Primary(Server)
     }
 }

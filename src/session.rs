@@ -16,6 +16,8 @@ pub struct DocumentTab {
 pub struct DocumentSession {
     pub tabs: Vec<DocumentTab>,
     pub active_id: Option<u64>,
+    /// 单标签模式：`open` 只保留刚打开的这一个标签。由设置驱动，见 `settings::TabMode`
+    pub single_tab: bool,
     next_id: u64,
 }
 
@@ -59,6 +61,10 @@ impl DocumentSession {
             return tab.id;
         }
 
+        if self.single_tab {
+            self.tabs.clear();
+        }
+
         self.next_id += 1;
         let id = self.next_id;
         self.tabs.push(DocumentTab {
@@ -70,6 +76,15 @@ impl DocumentSession {
         });
         self.active_id = Some(id);
         id
+    }
+
+    /// 切到单标签模式时把已经打开的标签收敛成当前这一个。
+    /// 未保存内容只可能在当前标签里（切换和关闭标签都会先回写磁盘），所以这里不会丢内容
+    pub fn collapse_to_active(&mut self) {
+        match self.active_id {
+            Some(active) => self.tabs.retain(|tab| tab.id == active),
+            None => self.tabs.clear(),
+        }
     }
 
     pub fn activate(&mut self, id: u64) -> bool {
@@ -195,6 +210,42 @@ mod tests {
         assert_eq!(session.tabs.len(), 1);
         assert_eq!(session.active_id, Some(first));
         assert!(session.tabs[0].edit_on_open);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn single_tab_mode_replaces_instead_of_accumulating() {
+        let dir = temp_dir("single");
+        let first = dir.join("one.md");
+        let second = dir.join("two.md");
+        let mut session = DocumentSession {
+            single_tab: true,
+            ..DocumentSession::default()
+        };
+
+        session.open(first, false);
+        let id = session.open(second.clone(), false);
+
+        assert_eq!(session.tabs.len(), 1);
+        assert_eq!(session.tabs[0].path, normalize_path(second));
+        assert_eq!(session.active_id, Some(id));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn collapsing_keeps_only_the_active_tab() {
+        let dir = temp_dir("collapse");
+        let mut session = DocumentSession::default();
+        session.open(dir.join("one.md"), false);
+        let second = session.open(dir.join("two.md"), false);
+        session.open(dir.join("three.md"), false);
+        assert!(session.activate(second));
+
+        session.collapse_to_active();
+
+        assert_eq!(session.tabs.len(), 1);
+        assert_eq!(session.active_id, Some(second));
+        assert_eq!(session.tabs[0].id, second);
         let _ = fs::remove_dir_all(dir);
     }
 

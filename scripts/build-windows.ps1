@@ -7,14 +7,6 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 Set-Location -LiteralPath $root
 $cargo = (Get-Command cargo.exe -ErrorAction Stop).Source
-$versionMatch = [regex]::Match(
-    (Get-Content -LiteralPath (Join-Path $root "Cargo.toml") -Raw),
-    '(?m)^version\s*=\s*"([^"]+)"'
-)
-if (-not $versionMatch.Success) {
-    throw "Could not read Cargo.toml version"
-}
-$version = $versionMatch.Groups[1].Value
 
 $dist = Join-Path $root "dist"
 $payload = Join-Path $dist "payload"
@@ -22,8 +14,7 @@ $releaseExe = Join-Path $root "target\release\md-previewer.exe"
 $portableExe = Join-Path $dist "MD-Previewer-windows-x64.exe"
 $installer = Join-Path $dist "MD-Previewer-Setup.exe"
 $testInstall = Join-Path $dist "installer-test"
-$testId = [guid]::NewGuid().ToString("N")
-$testRegistryRoot = "HKCU:\Software\MDPreviewerBuildTest\$testId"
+$testRegistryRoot = "HKCU:\Software\MDPreviewerBuildTest"
 $testClassesRoot = Join-Path $testRegistryRoot "Classes"
 $testUninstallRoot = Join-Path $testRegistryRoot "Uninstall"
 $testStartMenu = Join-Path $dist "start-menu-test"
@@ -65,10 +56,6 @@ function Wait-ForExit([Diagnostics.Process]$Process, [string]$Description) {
     }
 }
 
-if (-not $dist.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Output directory is outside the repository: $dist"
-}
-
 Write-Host "[build] Running Rust tests"
 Invoke-Cargo @("test", "--locked")
 
@@ -76,6 +63,11 @@ Write-Host "[build] Building release executable"
 Invoke-Cargo @("build", "--release", "--locked")
 if (-not (Test-Path -LiteralPath $releaseExe)) {
     throw "Release executable was not created: $releaseExe"
+}
+# Read the version from the resource build.rs embeds, so Cargo.toml is parsed in exactly one place (verify.sh)
+$version = (Get-Item -LiteralPath $releaseExe).VersionInfo.ProductVersion
+if ([string]::IsNullOrWhiteSpace($version)) {
+    throw "Release executable is missing embedded ProductVersion"
 }
 
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
@@ -150,7 +142,12 @@ SourceFiles0=$payload\
 %FILE4%=
 %FILE5%=
 "@
-[IO.File]::WriteAllText($sed, $sedContent, [Text.Encoding]::Default)
+# IExpress parses .sed as ANSI, and Encoding::Default means ANSI on PowerShell 5.1 but UTF-8 on 7.
+# Pin ASCII and require ASCII-representable paths instead of emitting a silently corrupt installer.
+if ($sedContent -match '[^\u0000-\u007F]') {
+    throw "Installer paths must be ASCII to build the .sed script: $root"
+}
+[IO.File]::WriteAllText($sed, $sedContent, [Text.Encoding]::ASCII)
 
 $iexpress = Join-Path $env:SystemRoot "System32\iexpress.exe"
 if (-not (Test-Path -LiteralPath $iexpress)) {
@@ -174,59 +171,54 @@ if (-not $SkipInstallerTest) {
         MD_PREVIEWER_START_MENU_DIR = $testStartMenu
         MD_PREVIEWER_INSTALL_QUIET = "1"
     }
-    $installProcess = Start-WithEnvironment $installer "/Q" $testEnvironment
-    Wait-ForExit $installProcess "installer test"
-    $installedExe = Join-Path $testInstall "md-previewer.exe"
-    if (-not (Test-Path -LiteralPath $installedExe)) {
-        throw "Installer test did not create $installedExe"
-    }
-    if ((Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash -ne
-        (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash) {
-        throw "Installed executable does not match the release executable"
-    }
-    $testOpenCommand = Join-Path $testClassesRoot "MDPreviewer.md\shell\open\command"
-    if (-not (Test-Path -LiteralPath $testOpenCommand)) {
-        throw "Installer test did not register the Markdown open command"
-    }
-    if ((Get-Item -LiteralPath $testOpenCommand).GetValue("") -notlike "*$installedExe*") {
-        throw "Installer test registered an unexpected Markdown open command"
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $testStartMenu "MD Previewer.lnk"))) {
-        throw "Installer test did not create the Start Menu shortcut"
-    }
-    if (-not (Test-Path -LiteralPath $testUninstallRoot)) {
-        throw "Installer test did not create uninstall metadata"
-    }
+    try {
+        $installProcess = Start-WithEnvironment $installer "/Q" $testEnvironment
+        Wait-ForExit $installProcess "installer test"
+        $installedExe = Join-Path $testInstall "md-previewer.exe"
+        if (-not (Test-Path -LiteralPath $installedExe)) {
+            throw "Installer test did not create $installedExe"
+        }
+        if ((Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash) {
+            throw "Installed executable does not match the release executable"
+        }
+        $testOpenCommand = Join-Path $testClassesRoot "MDPreviewer.md\shell\open\command"
+        if (-not (Test-Path -LiteralPath $testOpenCommand)) {
+            throw "Installer test did not register the Markdown open command"
+        }
+        if ((Get-Item -LiteralPath $testOpenCommand).GetValue("") -notlike "*$installedExe*") {
+            throw "Installer test registered an unexpected Markdown open command"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $testStartMenu "MD Previewer.lnk"))) {
+            throw "Installer test did not create the Start Menu shortcut"
+        }
+        if (-not (Test-Path -LiteralPath $testUninstallRoot)) {
+            throw "Installer test did not create uninstall metadata"
+        }
 
-    $uninstaller = Join-Path $testInstall "uninstall-windows.ps1"
-    $uninstallArguments = "-NoProfile -ExecutionPolicy Bypass -File $(Quote-ProcessArgument $uninstaller)"
-    $uninstallProcess = Start-WithEnvironment "powershell.exe" $uninstallArguments $testEnvironment
-    Wait-ForExit $uninstallProcess "uninstaller test"
-    $deadline = [DateTime]::UtcNow.AddSeconds(10)
-    while (Test-Path -LiteralPath $testInstall) {
-        if ([DateTime]::UtcNow -gt $deadline) {
-            throw "Uninstaller test did not remove $testInstall"
-        }
-        Start-Sleep -Milliseconds 200
-    }
-    if ((Test-Path -LiteralPath $testOpenCommand) -or
-        (Test-Path -LiteralPath $testStartMenu) -or
-        (Test-Path -LiteralPath $testUninstallRoot)) {
-        throw "Uninstaller test left shell integration behind"
-    }
-    Remove-Item -LiteralPath $testRegistryRoot -Recurse -Force -ErrorAction SilentlyContinue
-    $startMenuDeadline = [DateTime]::UtcNow.AddSeconds(10)
-    while (Test-Path -LiteralPath $testStartMenu) {
-        try {
-            Remove-Item -LiteralPath $testStartMenu -Recurse -Force -ErrorAction Stop
-            break
-        }
-        catch {
-            if ([DateTime]::UtcNow -gt $startMenuDeadline) {
-                throw "Uninstaller test did not remove $testStartMenu"
+        $uninstaller = Join-Path $testInstall "uninstall-windows.ps1"
+        $uninstallArguments = "-NoProfile -ExecutionPolicy Bypass -File $(Quote-ProcessArgument $uninstaller)"
+        $uninstallProcess = Start-WithEnvironment "powershell.exe" $uninstallArguments $testEnvironment
+        Wait-ForExit $uninstallProcess "uninstaller test"
+        # The uninstaller spawns a detached process to delete the install dir, so wait for it to actually go
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        while (Test-Path -LiteralPath $testInstall) {
+            if ([DateTime]::UtcNow -gt $deadline) {
+                throw "Uninstaller test did not remove $testInstall"
             }
             Start-Sleep -Milliseconds 200
         }
+        if ((Test-Path -LiteralPath $testOpenCommand) -or
+            (Test-Path -LiteralPath $testStartMenu) -or
+            (Test-Path -LiteralPath $testUninstallRoot)) {
+            throw "Uninstaller test left shell integration behind"
+        }
+    }
+    finally {
+        # Never leave test registry keys or temp dirs behind on a failed assertion; also sweeps older failures
+        Remove-Item -LiteralPath $testRegistryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $testStartMenu -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $testInstall -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 

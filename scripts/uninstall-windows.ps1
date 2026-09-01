@@ -2,7 +2,6 @@ $ErrorActionPreference = "Stop"
 
 $installRoot = $PSScriptRoot
 $programExe = Join-Path $installRoot "md-previewer.exe"
-$skipShell = $env:MD_PREVIEWER_SKIP_SHELL -eq "1"
 $classesRoot = $env:MD_PREVIEWER_CLASSES_ROOT
 if ([string]::IsNullOrWhiteSpace($classesRoot)) {
     $classesRoot = "HKCU:\Software\Classes"
@@ -29,15 +28,13 @@ if ($runningInstalled) {
     throw "Close MD Previewer before uninstalling it."
 }
 
-if (-not $skipShell) {
-    Remove-Item -LiteralPath $startMenu -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $uninstallRoot -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $classesRoot $progid) -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $classesRoot "Applications\md-previewer.exe") -Recurse -Force -ErrorAction SilentlyContinue
-    foreach ($extension in @('.md', '.markdown', '.mdown', '.mkd', '.txt')) {
-        $openWith = Join-Path $classesRoot "$extension\OpenWithProgids"
-        Remove-ItemProperty -LiteralPath $openWith -Name $progid -ErrorAction SilentlyContinue
-    }
+Remove-Item -LiteralPath $startMenu -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $uninstallRoot -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $classesRoot $progid) -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $classesRoot "Applications\md-previewer.exe") -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($extension in @('.md', '.markdown', '.mdown', '.mkd', '.txt')) {
+    $openWith = Join-Path $classesRoot "$extension\OpenWithProgids"
+    Remove-ItemProperty -LiteralPath $openWith -Name $progid -ErrorAction SilentlyContinue
 }
 
 $escapedInstallRoot = $installRoot.Replace("'", "''")
