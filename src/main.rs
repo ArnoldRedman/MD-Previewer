@@ -170,6 +170,10 @@ struct Strings {
     set_tab_mode: &'static str,
     set_tab_keep: &'static str,
     set_tab_single: &'static str,
+    btn_sidebar: &'static str,
+    sidebar_folder: &'static str,
+    sidebar_recent: &'static str,
+    sidebar_empty: &'static str,
 }
 
 impl Strings {
@@ -205,6 +209,10 @@ impl Strings {
                 set_tab_mode: "标签栏",
                 set_tab_keep: "累计标签",
                 set_tab_single: "只留当前",
+                btn_sidebar: "侧栏",
+                sidebar_folder: "当前文件夹",
+                sidebar_recent: "最近打开",
+                sidebar_empty: "没有可显示的文件",
             },
             Lang::En => Strings {
                 drop_hint: "Drop a .md file here or press Cmd/Ctrl+O to open",
@@ -236,6 +244,10 @@ impl Strings {
                 set_tab_mode: "Tab bar",
                 set_tab_keep: "Keep tabs",
                 set_tab_single: "Current only",
+                btn_sidebar: "Sidebar",
+                sidebar_folder: "This folder",
+                sidebar_recent: "Recent",
+                sidebar_empty: "Nothing to show",
             },
         }
     }
@@ -323,6 +335,42 @@ fn load_window_geom() -> Option<WindowGeom> {
         w: parts[2].parse().ok()?,
         h: parts[3].parse().ok()?,
     })
+}
+
+/// 侧栏宽度。页面 CSS 里的 `.sidebar` 宽度和正文左边距都由它插值生成，只此一处
+const SIDEBAR_WIDTH: f64 = 260.0;
+/// 收窄后至少保留的窗口宽度，避免把窗口挤到没法用
+const MIN_WINDOW_WIDTH: f64 = 360.0;
+
+/// 侧栏开合时整体加宽/收窄窗口，让正文可视宽度保持不变。
+/// 优先往左扩：正文和右上角工具栏在屏幕上原地不动，只是左边多出一条侧栏。
+/// 顶到显示器左边就退化为只改宽度；最大化时不动窗口，此时只能挤占正文
+fn resize_for_sidebar(window: &Window, opening: bool) {
+    if window.is_maximized() {
+        return;
+    }
+    let scale = window.scale_factor();
+    let size = window.inner_size().to_logical::<f64>(scale);
+    let delta = if opening {
+        SIDEBAR_WIDTH
+    } else {
+        -SIDEBAR_WIDTH
+    };
+    if let Ok(position) = window.outer_position() {
+        let position = position.to_logical::<f64>(scale);
+        let left_limit = window
+            .current_monitor()
+            .map(|monitor| monitor.position().to_logical::<f64>(scale).x)
+            .unwrap_or(0.0);
+        window.set_outer_position(LogicalPosition::new(
+            (position.x - delta).max(left_limit),
+            position.y,
+        ));
+    }
+    window.set_inner_size(LogicalSize::new(
+        (size.width + delta).max(MIN_WINDOW_WIDTH),
+        size.height,
+    ));
 }
 
 fn save_window_geom(window: &Window) {
@@ -766,6 +814,66 @@ fn html_escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+/// 单个文件夹里列出的上限。目录是外部输入，遇到几千个文件的目录不该把界面拖死
+const MAX_FOLDER_FILES: usize = 200;
+
+/// 当前文档同目录下可预览的文档，按文件名排序。只列这一层不递归：
+/// 侧栏的用途是在同一篇文档的邻居之间快速切换
+fn folder_documents(active: Option<&Path>) -> Vec<PathBuf> {
+    let Some(dir) = active.and_then(Path::parent) else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && is_supported_document(path))
+        .collect::<Vec<_>>();
+    files.sort_by_key(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    });
+    files.truncate(MAX_FOLDER_FILES);
+    files
+}
+
+fn sidebar_entry_json(path: &Path, active: Option<&Path>) -> serde_json::Value {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+    // 只显示所在目录名，完整路径放在条目的 title 里。
+    // 用整条路径 + CSS 省略号会触发 bidi 重排，把路径分隔符甩到错误的位置
+    let dir = path
+        .parent()
+        .and_then(Path::file_name)
+        .map(|dir| dir.to_string_lossy().to_string())
+        .unwrap_or_default();
+    serde_json::json!({
+        "path": path.to_string_lossy(),
+        "name": name,
+        "dir": dir,
+        "active": Some(path) == active,
+    })
+}
+
+fn sidebar_json(session: &DocumentSession, recent: &[PathBuf]) -> String {
+    let active = session.active().map(|tab| tab.path.clone());
+    let active = active.as_deref();
+    let folder = folder_documents(active)
+        .iter()
+        .map(|path| sidebar_entry_json(path, active))
+        .collect::<Vec<_>>();
+    let recent = recent
+        .iter()
+        .map(|path| sidebar_entry_json(path, active))
+        .collect::<Vec<_>>();
+    serde_json::json!({ "folder": folder, "recent": recent }).to_string()
 }
 
 fn recent_files_path() -> PathBuf {
@@ -1309,6 +1417,43 @@ body.empty .toolbar {{ display: none !important; }}
 	  background: #1a73e8; color: #fff;
 	}}
 	.toolbar .settings-seg button[aria-pressed="true"]:hover {{ background: #1765cc; }}
+	.sidebar-toggle {{ right: auto; left: 12px; }}
+	body.sidebar-open .sidebar-toggle {{ left: {sidebar_toggle_left}px; opacity: 1; pointer-events: auto; }}
+	.sidebar {{
+	  position: fixed; top: 0; left: 0; bottom: 0; width: {sidebar_width}px; z-index: 105;
+	  display: none; flex-direction: column; box-sizing: border-box;
+	  border-right: 1px solid #e6e6e6; background: rgba(248,248,248,.98);
+	  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+	}}
+	body.sidebar-open .sidebar {{ display: flex; }}
+	body.sidebar-open:not(.empty) {{ padding-left: {sidebar_width}px; }}
+	body.empty .sidebar {{ display: none !important; }}
+	.sidebar-sections {{ display: flex; gap: 4px; padding: 48px 8px 8px; }}
+	.sidebar-sections button {{
+	  flex: 1; height: 28px; padding: 0 6px; cursor: pointer;
+	  border: 1px solid transparent; border-radius: 6px;
+	  background: transparent; font: inherit; font-size: 12px; color: #666;
+	}}
+	.sidebar-sections button:hover {{ background: rgba(0,0,0,.05); }}
+	.sidebar-sections button[aria-pressed="true"] {{ background: #fff; color: #111; border-color: #dcdcdc; }}
+	.sidebar-list {{ flex: 1; overflow-y: auto; padding: 0 8px 12px; }}
+	.sidebar-item {{
+	  display: block; width: 100%; box-sizing: border-box; cursor: pointer;
+	  border: 0; border-radius: 6px; background: transparent;
+	  padding: 6px 8px; margin-bottom: 2px; text-align: left; font: inherit;
+	}}
+	.sidebar-item:hover {{ background: rgba(0,0,0,.06); }}
+	.sidebar-item.active {{ background: #e8effc; }}
+	.sidebar-name {{
+	  display: block; font-size: 12px; color: #333;
+	  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	}}
+	.sidebar-item.active .sidebar-name {{ color: #1a3f7a; font-weight: 600; }}
+	.sidebar-dir {{
+	  display: block; font-size: 10px; color: #999;
+	  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	}}
+	.sidebar-empty {{ padding: 10px 8px; font-size: 12px; color: #999; }}
 	.findbar {{
 	  position: fixed; top: var(--chrome-top); left: 50%; transform: translateX(-50%);
 	  display: none; align-items: center; gap: 6px; z-index: 101;
@@ -1370,6 +1515,16 @@ body.empty .toolbar {{ display: none !important; }}
 	  .toolbar .settings-seg button:hover {{ background: rgba(255,255,255,.1); color: #fff; }}
 	  .toolbar .settings-seg button[aria-pressed="true"] {{ background: #2f6fd0; color: #fff; }}
 	  .toolbar .settings-seg button[aria-pressed="true"]:hover {{ background: #3a7de0; }}
+	  .sidebar {{ background: rgba(24,24,24,.98); border-right-color: #333; }}
+	  .sidebar-sections button {{ color: #999; }}
+	  .sidebar-sections button:hover {{ background: rgba(255,255,255,.07); }}
+	  .sidebar-sections button[aria-pressed="true"] {{ background: #2c2c2c; color: #eee; border-color: #444; }}
+	  .sidebar-item:hover {{ background: rgba(255,255,255,.07); }}
+	  .sidebar-item.active {{ background: #23324a; }}
+	  .sidebar-name {{ color: #ccc; }}
+	  .sidebar-item.active .sidebar-name {{ color: #9dc0ff; }}
+	  .sidebar-dir {{ color: #777; }}
+	  .sidebar-empty {{ color: #777; }}
 		  .empty-open {{ background: #242424; border-color: #444; color: #ddd; }}
 		  .empty-open:hover {{ background: #2d2d2d; color: #fff; }}
 		  .recent-name {{ color: #ddd; }}
@@ -1412,13 +1567,24 @@ body.editing #btn-print {{ display: none; }}
 }}
 
 @media print {{
-  .toolbar, .tabbar, #editor {{ display: none !important; }}
+  .toolbar, .tabbar, #editor, .sidebar {{ display: none !important; }}
+  body {{ padding-left: 0 !important; }}
   #preview {{ display: block !important; }}
   #app {{ max-width: none; padding: 0; }}
   #preview .mdp-table-wrap {{ width: auto; margin: 1em 0; transform: none; overflow: visible; }}
 }}
 	</style></head><body class="{body_class}">
 	<div class="tabbar" id="tabbar"><div class="tabs" id="tabs"></div><div class="doc-stats" id="doc-stats" aria-live="polite"></div><button class="tab-open" id="tab-open" type="button" title="{btn_new}" aria-label="{btn_new}">+</button></div>
+	<div class="toolbar sidebar-toggle">
+	  <button id="btn-sidebar" title="{btn_sidebar}" aria-label="{btn_sidebar}"></button>
+	</div>
+	<aside class="sidebar" id="sidebar" aria-label="{btn_sidebar}">
+	  <div class="sidebar-sections">
+	    <button type="button" data-sidebar-section="folder" aria-pressed="true">{sidebar_folder}</button>
+	    <button type="button" data-sidebar-section="recent" aria-pressed="false">{sidebar_recent}</button>
+	  </div>
+	  <div class="sidebar-list" id="sidebar-list"></div>
+	</aside>
 	<div class="toolbar">
 	  <button id="btn-open" title="{btn_open}" aria-label="{btn_open}"></button>
 	  <button id="btn-search" title="{btn_search}" aria-label="{btn_search}"></button>
@@ -1471,6 +1637,7 @@ body.editing #btn-print {{ display: none; }}
 	  var ICON_SEARCH = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
 	  var ICON_PRINT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
 	  var ICON_ZOOM = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>';
+	  var ICON_SIDEBAR = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>';
 	  var ICON_SETTINGS = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 	  var ICON_UP = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
 	  var ICON_DOWN = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
@@ -1488,6 +1655,12 @@ body.editing #btn-print {{ display: none; }}
 	  var zoomControl = document.getElementById('zoom-control');
 	  var btnSettings = document.getElementById('btn-settings');
 	  var settingsControl = document.getElementById('settings-control');
+	  var btnSidebar = document.getElementById('btn-sidebar');
+	  var sidebarEl = document.getElementById('sidebar');
+	  var sidebarList = document.getElementById('sidebar-list');
+	  var sidebarData = {{ folder: [], recent: [] }};
+	  var sidebarSection = 'folder';
+	  var SIDEBAR_EMPTY = '{sidebar_empty_js}';
 	  var findInput = document.getElementById('find-input');
 	  var findState = document.getElementById('find-state');
 	  var findPrev = document.getElementById('find-prev');
@@ -1522,6 +1695,7 @@ body.editing #btn-print {{ display: none; }}
 	  btnPrint.innerHTML = ICON_PRINT;
 	  btnZoom.innerHTML = ICON_ZOOM;
 	  btnSettings.innerHTML = ICON_SETTINGS;
+	  btnSidebar.innerHTML = ICON_SIDEBAR;
 	  findPrev.innerHTML = ICON_UP;
 	  findNext.innerHTML = ICON_DOWN;
 	  findClose.innerHTML = ICON_CLOSE;
@@ -1865,8 +2039,65 @@ body.editing #btn-print {{ display: none; }}
 	    e.preventDefault();
 	    window.ipc.postMessage('set-setting:' + btn.getAttribute('data-setting') + '=' + btn.getAttribute('data-value'));
 	  }});
+	  function renderSidebar() {{
+	    var items = sidebarData[sidebarSection] || [];
+	    var sections = sidebarEl.querySelectorAll('[data-sidebar-section]');
+	    for (var s = 0; s < sections.length; s++) {{
+	      sections[s].setAttribute('aria-pressed', sections[s].getAttribute('data-sidebar-section') === sidebarSection ? 'true' : 'false');
+	    }}
+	    sidebarList.textContent = '';
+	    if (!items.length) {{
+	      var empty = document.createElement('div');
+	      empty.className = 'sidebar-empty';
+	      empty.textContent = SIDEBAR_EMPTY;
+	      sidebarList.appendChild(empty);
+	      return;
+	    }}
+	    items.forEach(function(item) {{
+	      var btn = document.createElement('button');
+	      btn.type = 'button';
+	      btn.className = 'sidebar-item' + (item.active ? ' active' : '');
+	      btn.setAttribute('data-sidebar-path', item.path);
+	      btn.title = item.path;
+	      var name = document.createElement('span');
+	      name.className = 'sidebar-name';
+	      name.textContent = item.name;
+	      btn.appendChild(name);
+	      // 最近打开会跨目录，补一行所在目录才分得清同名文件
+	      if (sidebarSection === 'recent') {{
+	        var dir = document.createElement('span');
+	        dir.className = 'sidebar-dir';
+	        dir.textContent = item.dir;
+	        btn.appendChild(dir);
+	      }}
+	      sidebarList.appendChild(btn);
+	    }});
+	  }}
+	  window.__setSidebar = function(data) {{
+	    sidebarData = data || {{ folder: [], recent: [] }};
+	    renderSidebar();
+	  }};
+	  btnSidebar.addEventListener('click', function(e) {{
+	    e.stopPropagation();
+	    // 立刻切换视觉状态，落盘交给 Rust；回显时状态一致，不会来回跳
+	    var open = !document.body.classList.contains('sidebar-open');
+	    document.body.classList.toggle('sidebar-open', open);
+	    window.ipc.postMessage('set-setting:sidebar=' + (open ? '1' : '0'));
+	  }});
+	  sidebarEl.addEventListener('click', function(e) {{
+	    var section = e.target && e.target.closest ? e.target.closest('[data-sidebar-section]') : null;
+	    if (section) {{
+	      sidebarSection = section.getAttribute('data-sidebar-section');
+	      renderSidebar();
+	      return;
+	    }}
+	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
+	    if (item) window.ipc.postMessage('open-doc:' + item.getAttribute('data-sidebar-path'));
+	  }});
+	  renderSidebar();
 	  window.__setSettings = function(settings) {{
 	    settings = settings || {{}};
+	    document.body.classList.toggle('sidebar-open', !!settings.sidebarOpen);
 	    var current = {{ 'open-mode': settings.openMode, 'tab-mode': settings.tabMode }};
 	    var buttons = settingsControl.querySelectorAll('[data-setting]');
 	    for (var i = 0; i < buttons.length; i++) {{
@@ -2115,6 +2346,12 @@ if(window.__enhancePreview)window.__enhancePreview();
         btn_zoom_reset = s.btn_zoom_reset,
         btn_zoom_in = s.btn_zoom_in,
         search_placeholder = s.search_placeholder,
+        btn_sidebar = s.btn_sidebar,
+        sidebar_width = SIDEBAR_WIDTH,
+        sidebar_toggle_left = SIDEBAR_WIDTH + 12.0,
+        sidebar_folder = s.sidebar_folder,
+        sidebar_recent = s.sidebar_recent,
+        sidebar_empty_js = escape_js(s.sidebar_empty),
         btn_settings = s.btn_settings,
         set_open_mode = s.set_open_mode,
         set_open_tab = s.set_open_tab,
@@ -2182,6 +2419,66 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn folder_documents_lists_sorted_siblings_and_skips_other_entries() {
+        let dir = temp_test_dir("folder-list");
+        for name in [
+            "beta.md",
+            "Alpha.markdown",
+            "gamma.txt",
+            "notes.pdf",
+            "readme",
+        ] {
+            fs::write(dir.join(name), "x").unwrap();
+        }
+        fs::create_dir_all(dir.join("nested.md")).unwrap();
+
+        let files = folder_documents(Some(&dir.join("beta.md")));
+
+        let names = files
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["Alpha.markdown", "beta.md", "gamma.txt"]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_documents_is_empty_without_an_active_document() {
+        assert!(folder_documents(None).is_empty());
+    }
+
+    #[test]
+    fn sidebar_json_marks_the_active_document_and_carries_recent_directories() {
+        let dir = temp_test_dir("sidebar-json");
+        let active = dir.join("active.md");
+        let other = dir.join("other.md");
+        fs::write(&active, "# active").unwrap();
+        fs::write(&other, "# other").unwrap();
+        let mut session = DocumentSession::default();
+        session.open(active.clone(), false);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&sidebar_json(&session, &[other.clone()])).unwrap();
+
+        let folder = json["folder"].as_array().unwrap();
+        assert_eq!(folder.len(), 2);
+        let active_entries = folder
+            .iter()
+            .filter(|entry| entry["active"] == serde_json::json!(true))
+            .collect::<Vec<_>>();
+        assert_eq!(active_entries.len(), 1);
+        assert_eq!(active_entries[0]["name"], serde_json::json!("active.md"));
+        let recent = json["recent"].as_array().unwrap();
+        assert_eq!(recent[0]["name"], serde_json::json!("other.md"));
+        assert_eq!(recent[0]["active"], serde_json::json!(false));
+        // 目录列只保留目录名，不是整条路径
+        let shown_dir = recent[0]["dir"].as_str().unwrap();
+        assert_eq!(shown_dir, dir.file_name().unwrap().to_string_lossy());
+        assert!(!shown_dir.contains(std::path::MAIN_SEPARATOR));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -2438,6 +2735,11 @@ mod tests {
         assert!(page.contains("updateDocumentStats"));
         assert!(page.contains("restoreScrollProgress"));
         assert!(page.contains("md-previewer-content-zoom-v1"));
+        assert!(page.contains("id=\"btn-sidebar\""));
+        assert!(page.contains("id=\"sidebar-list\""));
+        assert!(page.contains("data-sidebar-section=\"folder\""));
+        assert!(page.contains("data-sidebar-section=\"recent\""));
+        assert!(page.contains("window.__setSidebar"));
         assert!(page.contains("id=\"btn-settings\""));
         assert!(page.contains("data-setting=\"open-mode\" data-value=\"new-window\""));
         assert!(page.contains("data-setting=\"tab-mode\" data-value=\"single\""));
@@ -3382,6 +3684,13 @@ fn persist_session(session: &DocumentSession) {
     }
 }
 
+fn update_sidebar(webview: &WebView, session: &DocumentSession, recent: &[PathBuf]) {
+    let state = sidebar_json(session, recent);
+    let _ = webview.evaluate_script(&format!(
+        "if(window.__setSidebar)window.__setSidebar({state});"
+    ));
+}
+
 fn update_settings_ui(webview: &WebView, settings: &Settings) {
     let state = settings.to_json();
     let _ = webview.evaluate_script(&format!(
@@ -3430,6 +3739,7 @@ fn render_active_document(
             escape_js(&html)
         ));
         update_tabs(webview, session);
+        update_sidebar(webview, session, &recent_files.lock().unwrap());
         update_window_title(window, session);
         return;
     };
@@ -3493,6 +3803,7 @@ fn render_active_document(
         Ordering::SeqCst,
     );
     update_tabs(webview, session);
+    update_sidebar(webview, session, &recent_files.lock().unwrap());
     update_window_title(window, session);
 }
 
@@ -3716,6 +4027,14 @@ fn main() {
                         }
                     }
                 }
+            } else if let Some(raw) = body.strip_prefix("open-doc:") {
+                let path = PathBuf::from(raw);
+                if path.is_file() && is_supported_document(&path) {
+                    let _ = proxy_for_ipc.send_event(UserEvent::OpenPaths(vec![path], false));
+                } else if forget_recent_file(&recent_files_for_ipc, &path) {
+                    // 侧栏里点到已经不存在的历史条目，顺手把它从最近列表剔掉
+                    let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
+                }
             } else if let Some(url) = body.strip_prefix("open-local-link:") {
                 if let Some(path) = local_document_path_from_url(url) {
                     let _ = proxy_for_ipc.send_event(UserEvent::OpenPaths(vec![path], false));
@@ -3859,6 +4178,11 @@ fn main() {
     let settings_for_event = Arc::clone(&settings);
     update_tabs(&webview, &session_for_event.lock().unwrap());
     update_settings_ui(&webview, &settings_for_event.lock().unwrap());
+    update_sidebar(
+        &webview,
+        &session_for_event.lock().unwrap(),
+        &recent_files.lock().unwrap(),
+    );
     if session_for_event
         .lock()
         .unwrap()
@@ -3902,6 +4226,7 @@ fn main() {
     let mut pending_window_close = false;
     let mut warned_external_change: Option<PathBuf> = None;
     let mut pending_external_change: Option<PathBuf> = None;
+    let mut sidebar_open_applied = settings_for_event.lock().unwrap().sidebar_open;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -4192,6 +4517,11 @@ fn main() {
                     escape_js(&html)
                 );
                 let _ = webview.evaluate_script(&js);
+                update_sidebar(
+                    &webview,
+                    &session_for_event.lock().unwrap(),
+                    &recent_files.lock().unwrap(),
+                );
             }
             TaoEvent::UserEvent(UserEvent::Print) => {
                 let _ = webview.print();
@@ -4210,6 +4540,10 @@ fn main() {
             }
             TaoEvent::UserEvent(UserEvent::SettingsChanged) => {
                 let current = *settings_for_event.lock().unwrap();
+                if current.sidebar_open != sidebar_open_applied {
+                    resize_for_sidebar(&window, current.sidebar_open);
+                    sidebar_open_applied = current.sidebar_open;
+                }
                 SESSION_ENABLED.store(current.keeps_session(), Ordering::SeqCst);
                 if let Err(error) = current.save(&settings_path()) {
                     eprintln!("Could not save settings: {error}");
@@ -4249,6 +4583,11 @@ fn main() {
                 loaded_enhancers.math |= flags.math;
                 loaded_enhancers.mermaid |= flags.mermaid;
                 update_tabs(&webview, &session_for_event.lock().unwrap());
+                update_sidebar(
+                    &webview,
+                    &session_for_event.lock().unwrap(),
+                    &recent_files.lock().unwrap(),
+                );
                 if bench {
                     eprintln!("[bench] +{}ms ready", t0.elapsed().as_millis());
                     *control_flow = ControlFlow::Exit;

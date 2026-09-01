@@ -33,6 +33,8 @@ pub enum TabMode {
 pub struct Settings {
     pub open_mode: OpenMode,
     pub tab_mode: TabMode,
+    /// 左侧栏是否展开。不进设置面板，只是把开合状态记住跨启动
+    pub sidebar_open: bool,
 }
 
 impl Settings {
@@ -78,6 +80,14 @@ impl Settings {
                 tab_mode: TabMode::Single,
                 ..*self
             },
+            ("sidebar", "1") => Self {
+                sidebar_open: true,
+                ..*self
+            },
+            ("sidebar", "0") => Self {
+                sidebar_open: false,
+                ..*self
+            },
             _ => return false,
         };
         if updated == *self {
@@ -104,6 +114,7 @@ mod tests {
         assert_eq!(settings.open_mode, OpenMode::NewTab);
         assert_eq!(settings.tab_mode, TabMode::Accumulate);
         assert!(settings.keeps_session());
+        assert!(!settings.sidebar_open);
     }
 
     #[test]
@@ -127,6 +138,11 @@ mod tests {
         assert!(!settings.apply("tab-mode", "single"));
         assert!(!settings.apply("tab-mode", "banana"));
         assert!(!settings.apply("zoom", "200"));
+        assert!(settings.apply("sidebar", "1"));
+        assert!(settings.sidebar_open);
+        assert!(!settings.apply("sidebar", "1"));
+        assert!(settings.apply("sidebar", "0"));
+        assert!(!settings.sidebar_open);
         assert_eq!(settings.tab_mode, TabMode::Single);
         assert_eq!(settings.open_mode, OpenMode::NewTab);
     }
@@ -146,6 +162,7 @@ mod tests {
         let saved = Settings {
             open_mode: OpenMode::NewWindow,
             tab_mode: TabMode::Single,
+            sidebar_open: true,
         };
 
         saved.save(&path).unwrap();
