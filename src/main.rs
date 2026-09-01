@@ -850,14 +850,27 @@ const CHAPTER_SEPARATORS: [char; 12] = [
     ' ', '\t', '　', ':', '：', '.', '。', '、', ',', '，', '-', '—',
 ];
 
-/// 作者模式的三个复制按钮各自要复制的内容
+/// 作者模式里两个标题按钮要复制的内容。
+/// 正文不在这里：它必须和屏幕上渲染出来的一致，由页面直接从 DOM 取
 struct AuthorDoc {
-    /// 整行标题，原样不动，例如「第二章 一只行李箱」
+    /// 整行标题的纯文本，例如「第二章 一只行李箱」
     title_line: String,
     /// 去掉序号后的标题，例如「一只行李箱」
     title: String,
-    /// 标题之后的全部内容
-    body: String,
+}
+
+/// 把标题里的行内 Markdown 还原成纯文本，跟页面上看到的一致。
+/// 否则「## 第二章 **一只**行李箱」会把星号一起复制走
+fn inline_plain_text(markdown: &str) -> String {
+    let mut text = String::new();
+    for event in Parser::new(markdown) {
+        match event {
+            MdEvent::Text(value) | MdEvent::Code(value) => text.push_str(&value),
+            MdEvent::SoftBreak | MdEvent::HardBreak => text.push(' '),
+            _ => {}
+        }
+    }
+    text.trim().to_string()
 }
 
 /// 吃掉开头的「第X章」或「12、」这类序号，返回剩下的部分；不是序号则返回 None
@@ -896,10 +909,9 @@ fn strip_chapter_prefix(title: &str) -> &str {
     }
 }
 
-/// 把一章 Markdown 拆成标题行、去序号标题和正文。
-/// 认第一个 ATX 标题作章节标题，没有标题就整篇算正文
+/// 取出一章的标题行和去掉序号的标题，认第一个 ATX 标题作章节标题
 fn author_doc(raw_md: &str) -> AuthorDoc {
-    let heading = raw_md.lines().enumerate().find_map(|(index, line)| {
+    let heading = raw_md.lines().find_map(|line| {
         let trimmed = line.trim_start();
         let hashes = trimmed.chars().take_while(|c| *c == '#').count();
         if hashes == 0 || hashes > 6 {
@@ -910,28 +922,18 @@ fn author_doc(raw_md: &str) -> AuthorDoc {
         if !rest.starts_with(char::is_whitespace) {
             return None;
         }
-        let text = rest.trim();
-        (!text.is_empty()).then(|| (index, text.to_string()))
+        let text = inline_plain_text(rest);
+        (!text.is_empty()).then_some(text)
     });
-    let Some((index, title_line)) = heading else {
+    let Some(title_line) = heading else {
         return AuthorDoc {
             title_line: String::new(),
             title: String::new(),
-            body: raw_md.trim().to_string(),
         };
     };
-    // lines() 会顺带吃掉 CRLF 的 ，正文统一成 LF 更适合粘贴到发布框
-    let body = raw_md
-        .lines()
-        .skip(index + 1)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string();
     AuthorDoc {
         title: strip_chapter_prefix(&title_line).to_string(),
         title_line,
-        body,
     }
 }
 
@@ -2242,7 +2244,7 @@ body.editing #btn-print {{ display: none; }}
 	    if (item) window.ipc.postMessage('open-doc:' + item.getAttribute('data-sidebar-path'));
 	  }});
 	  renderSidebar();
-	  var authorDoc = {{ titleLine: '', title: '', body: '' }};
+	  var authorDoc = {{ titleLine: '', title: '' }};
 	  var authorMode = false;
 	  var AUTHOR_LABELS = {{
 	    'title-line': '{copy_title_line_js}',
@@ -2258,6 +2260,26 @@ body.editing #btn-print {{ display: none; }}
 	    btn.setAttribute('data-author-copy', kind);
 	    btn.textContent = AUTHOR_LABELS[kind];
 	    return btn;
+	  }}
+	  // 正文按屏幕上看到的取：逐个顶层块读 innerText，段落之间留空行。
+	  // 用渲染结果而不是 Markdown 原文，复制出来才不会带 # * ` 这些语法
+	  function authorBodyText() {{
+	    var preview = document.getElementById('preview');
+	    if (!preview) return '';
+	    var heading = preview.querySelector('h1, h2, h3, h4, h5, h6');
+	    var reached = !heading;
+	    var blocks = [];
+	    for (var i = 0; i < preview.children.length; i++) {{
+	      var node = preview.children[i];
+	      if (!reached) {{
+	        if (node === heading) reached = true;
+	        continue;
+	      }}
+	      if (node.classList && node.classList.contains('author-body-actions')) continue;
+	      var text = (node.innerText || node.textContent || '').replace(/\s+$/, '');
+	      if (text) blocks.push(text);
+	    }}
+	    return blocks.join('\n\n');
 	  }}
 	  function applyAuthorMode() {{
 	    var preview = document.getElementById('preview');
@@ -2275,7 +2297,7 @@ body.editing #btn-print {{ display: none; }}
 	      actions.appendChild(authorButton('title'));
 	      heading.appendChild(actions);
 	    }}
-	    if (!authorDoc.body) return;
+	    if (!authorBodyText()) return;
 	    var bodyActions = document.createElement('div');
 	    bodyActions.className = 'author-body-actions';
 	    bodyActions.appendChild(authorButton('body'));
@@ -2284,7 +2306,7 @@ body.editing #btn-print {{ display: none; }}
 	  }}
 	  window.__applyAuthorMode = applyAuthorMode;
 	  window.__setAuthorDoc = function(doc) {{
-	    authorDoc = doc || {{ titleLine: '', title: '', body: '' }};
+	    authorDoc = doc || {{ titleLine: '', title: '' }};
 	    applyAuthorMode();
 	  }};
 	  // 页面由 with_html 载入，不是安全上下文，navigator.clipboard 未必可用，所以留一条 execCommand 退路
@@ -2315,7 +2337,7 @@ body.editing #btn-print {{ display: none; }}
 	    if (!btn) return;
 	    e.preventDefault();
 	    var kind = btn.getAttribute('data-author-copy');
-	    var text = kind === 'title-line' ? authorDoc.titleLine : (kind === 'title' ? authorDoc.title : authorDoc.body);
+	    var text = kind === 'title-line' ? authorDoc.titleLine : (kind === 'title' ? authorDoc.title : authorBodyText());
 	    if (!text) return;
 	    if (navigator.clipboard && navigator.clipboard.writeText) {{
 	      navigator.clipboard.writeText(text).then(function() {{ flashCopied(btn); }}, function() {{
@@ -2680,24 +2702,30 @@ mod tests {
     }
 
     #[test]
-    fn author_doc_splits_the_chapter_heading_from_its_body() {
-        let raw = "## 第二章 一只行李箱\r\n\r\n雨没有停的意思。\r\n\r\n陈律师撑开一把黑伞。\r\n";
+    fn author_doc_reads_the_chapter_heading_as_plain_text() {
+        let raw = "## 第二章 一只行李箱\r\n\r\n雨没有停的意思。\r\n";
 
         let doc = author_doc(raw);
 
         assert_eq!(doc.title_line, "第二章 一只行李箱");
         assert_eq!(doc.title, "一只行李箱");
-        // CRLF 统一成 LF，段落之间的空行保留
-        assert_eq!(doc.body, "雨没有停的意思。\n\n陈律师撑开一把黑伞。");
     }
 
     #[test]
-    fn author_doc_without_a_heading_keeps_everything_as_body() {
+    fn author_doc_strips_inline_markdown_from_the_heading() {
+        // 标题里写了行内语法时，复制出来的要和屏幕上一致，不带星号和反引号
+        let doc = author_doc("## 第二章 **一只**`行李`箱\n\n正文");
+
+        assert_eq!(doc.title_line, "第二章 一只行李箱");
+        assert_eq!(doc.title, "一只行李箱");
+    }
+
+    #[test]
+    fn author_doc_without_a_heading_reports_no_title() {
         let doc = author_doc("\n只有正文，没有标题。\n");
 
         assert!(doc.title_line.is_empty());
         assert!(doc.title.is_empty());
-        assert_eq!(doc.body, "只有正文，没有标题。");
     }
 
     #[test]
@@ -2705,7 +2733,7 @@ mod tests {
         let doc = author_doc("#不是标题，井号后面没空格\n\n## 第一章 开始\n\n正文");
 
         assert_eq!(doc.title_line, "第一章 开始");
-        assert_eq!(doc.body, "正文");
+        assert_eq!(doc.title, "开始");
     }
 
     #[test]
@@ -3980,7 +4008,6 @@ fn update_author_doc(webview: &WebView, raw_md: &str) {
     let state = serde_json::json!({
         "titleLine": doc.title_line,
         "title": doc.title,
-        "body": doc.body,
     });
     let _ = webview.evaluate_script(&format!(
         "if(window.__setAuthorDoc)window.__setAuthorDoc({state});"

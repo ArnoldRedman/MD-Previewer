@@ -2,6 +2,11 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.1.1
+
+- Fixed author mode copying Markdown source instead of the rendered text: **Copy body** now takes the visible article text from the rendered document, with blank lines between paragraphs and no `#`, `**`, `` ` ``, `>` or `-` markers
+- Fixed the two heading buttons for the same reason: inline Markdown in a chapter heading is no longer copied along with the text
+
 ## 1.1.0
 
 Windows-only release: the macOS and mobile shells are unchanged but are not published as packages yet.
