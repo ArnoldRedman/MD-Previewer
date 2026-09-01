@@ -174,6 +174,14 @@ struct Strings {
     sidebar_folder: &'static str,
     sidebar_recent: &'static str,
     sidebar_empty: &'static str,
+    set_author_mode: &'static str,
+    set_author_off: &'static str,
+    set_author_on: &'static str,
+    author_help: &'static str,
+    copy_title_line: &'static str,
+    copy_title: &'static str,
+    copy_body: &'static str,
+    copied: &'static str,
 }
 
 impl Strings {
@@ -213,6 +221,14 @@ impl Strings {
                 sidebar_folder: "当前文件夹",
                 sidebar_recent: "最近打开",
                 sidebar_empty: "没有可显示的文件",
+                set_author_mode: "作者模式",
+                set_author_off: "关",
+                set_author_on: "开",
+                author_help: "开启后，章节标题右侧出现「复制标题行」和「复制标题」两个按钮，正文右上角出现「复制正文」按钮，直接取用去发布，不用手动拖选。「复制标题行」原样复制整行；「复制标题」会去掉「第 N 章」这类序号。",
+                copy_title_line: "复制标题行",
+                copy_title: "复制标题",
+                copy_body: "复制正文",
+                copied: "已复制",
             },
             Lang::En => Strings {
                 drop_hint: "Drop a .md file here or press Cmd/Ctrl+O to open",
@@ -248,6 +264,14 @@ impl Strings {
                 sidebar_folder: "This folder",
                 sidebar_recent: "Recent",
                 sidebar_empty: "Nothing to show",
+                set_author_mode: "Author mode",
+                set_author_off: "Off",
+                set_author_on: "On",
+                author_help: "Adds copy buttons for publishing: two beside the chapter heading and one above the body. Copy heading line takes the whole line as written; Copy title drops the chapter number.",
+                copy_title_line: "Copy heading line",
+                copy_title: "Copy title",
+                copy_body: "Copy body",
+                copied: "Copied",
             },
         }
     }
@@ -814,6 +838,101 @@ fn html_escape_text(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+/// 章节序号里可能出现的数字，阿拉伯数字、全角数字和中文数字都算
+const CHAPTER_DIGITS: &str =
+    "0123456789０１２３４５６７８９一二三四五六七八九十百千万零两壹贰叁肆伍陆柒捌玖拾佰仟";
+/// 跟在序号后面的量词
+const CHAPTER_UNITS: &str = "章节回卷篇幕集话";
+/// 序号和正题之间可能的分隔符
+const CHAPTER_SEPARATORS: [char; 12] = [
+    ' ', '\t', '　', ':', '：', '.', '。', '、', ',', '，', '-', '—',
+];
+
+/// 作者模式的三个复制按钮各自要复制的内容
+struct AuthorDoc {
+    /// 整行标题，原样不动，例如「第二章 一只行李箱」
+    title_line: String,
+    /// 去掉序号后的标题，例如「一只行李箱」
+    title: String,
+    /// 标题之后的全部内容
+    body: String,
+}
+
+/// 吃掉开头的「第X章」或「12、」这类序号，返回剩下的部分；不是序号则返回 None
+fn chapter_number_prefix(title: &str) -> Option<&str> {
+    if let Some(rest) = title.strip_prefix('第') {
+        let split = rest.find(|c| !CHAPTER_DIGITS.contains(c))?;
+        if split == 0 {
+            return None;
+        }
+        let tail = &rest[split..];
+        let unit = tail.chars().next()?;
+        if !CHAPTER_UNITS.contains(unit) {
+            return None;
+        }
+        return Some(&tail[unit.len_utf8()..]);
+    }
+    let split = title.find(|c: char| !c.is_ascii_digit())?;
+    if split == 0 {
+        return None;
+    }
+    let tail = &title[split..];
+    // 纯数字开头必须紧跟分隔符才算序号，否则「2023年的夏天」会被误伤
+    tail.starts_with(CHAPTER_SEPARATORS).then_some(tail)
+}
+
+/// 去掉章节标题里的序号前缀。整行只有序号时保持原样，免得复制出空串
+fn strip_chapter_prefix(title: &str) -> &str {
+    let title = title.trim();
+    let stripped = chapter_number_prefix(title)
+        .map(|rest| rest.trim_start_matches(CHAPTER_SEPARATORS))
+        .unwrap_or("");
+    if stripped.is_empty() {
+        title
+    } else {
+        stripped
+    }
+}
+
+/// 把一章 Markdown 拆成标题行、去序号标题和正文。
+/// 认第一个 ATX 标题作章节标题，没有标题就整篇算正文
+fn author_doc(raw_md: &str) -> AuthorDoc {
+    let heading = raw_md.lines().enumerate().find_map(|(index, line)| {
+        let trimmed = line.trim_start();
+        let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+        if hashes == 0 || hashes > 6 {
+            return None;
+        }
+        let rest = &trimmed[hashes..];
+        // CommonMark 要求 # 后面跟空白，跟渲染器保持一致
+        if !rest.starts_with(char::is_whitespace) {
+            return None;
+        }
+        let text = rest.trim();
+        (!text.is_empty()).then(|| (index, text.to_string()))
+    });
+    let Some((index, title_line)) = heading else {
+        return AuthorDoc {
+            title_line: String::new(),
+            title: String::new(),
+            body: raw_md.trim().to_string(),
+        };
+    };
+    // lines() 会顺带吃掉 CRLF 的 ，正文统一成 LF 更适合粘贴到发布框
+    let body = raw_md
+        .lines()
+        .skip(index + 1)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    AuthorDoc {
+        title: strip_chapter_prefix(&title_line).to_string(),
+        title_line,
+        body,
+    }
 }
 
 /// 单个文件夹里列出的上限。目录是外部输入，遇到几千个文件的目录不该把界面拖死
@@ -1402,7 +1521,13 @@ body.empty .toolbar {{ display: none !important; }}
 	}}
 	.settings-control.open .settings-popover {{ display: flex; }}
 	.settings-row {{ display: flex; flex-direction: column; gap: 5px; align-items: stretch; }}
-	.settings-label {{ font-size: 11px; color: #666; }}
+	.settings-label {{ display: flex; align-items: center; gap: 5px; font-size: 11px; color: #666; }}
+	.settings-help {{
+	  display: inline-flex; align-items: center; justify-content: center; cursor: help;
+	  width: 14px; height: 14px; border: 1px solid #bbb; border-radius: 50%;
+	  color: #888; font-size: 10px; line-height: 1;
+	}}
+	.settings-help:hover {{ border-color: #1a73e8; color: #1a73e8; }}
 	.settings-seg {{
 	  display: flex; border: 1px solid rgba(0,0,0,.14); border-radius: 6px; overflow: hidden;
 	}}
@@ -1454,6 +1579,15 @@ body.empty .toolbar {{ display: none !important; }}
 	  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 	}}
 	.sidebar-empty {{ padding: 10px 8px; font-size: 12px; color: #999; }}
+	.author-actions {{ display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; }}
+	.author-body-actions {{ display: flex; justify-content: flex-end; margin: -2px 0 12px; }}
+	.author-copy {{
+	  border: 1px solid #d8d8d8; border-radius: 6px; background: #fff;
+	  padding: 3px 10px; cursor: pointer; white-space: nowrap; vertical-align: middle;
+	  font-family: inherit; font-size: 12px; font-weight: 400; line-height: 1.6; color: #555;
+	}}
+	.author-copy:hover {{ border-color: #1a73e8; color: #1a73e8; }}
+	.author-copy.done {{ border-color: #1a9e5c; color: #1a9e5c; }}
 	.findbar {{
 	  position: fixed; top: var(--chrome-top); left: 50%; transform: translateX(-50%);
 	  display: none; align-items: center; gap: 6px; z-index: 101;
@@ -1525,6 +1659,11 @@ body.empty .toolbar {{ display: none !important; }}
 	  .sidebar-item.active .sidebar-name {{ color: #9dc0ff; }}
 	  .sidebar-dir {{ color: #777; }}
 	  .sidebar-empty {{ color: #777; }}
+	  .settings-help {{ border-color: #555; color: #999; }}
+	  .settings-help:hover {{ border-color: #6cb6ff; color: #6cb6ff; }}
+	  .author-copy {{ background: #262626; border-color: #444; color: #bbb; }}
+	  .author-copy:hover {{ border-color: #6cb6ff; color: #6cb6ff; }}
+	  .author-copy.done {{ border-color: #4ec27f; color: #4ec27f; }}
 		  .empty-open {{ background: #242424; border-color: #444; color: #ddd; }}
 		  .empty-open:hover {{ background: #2d2d2d; color: #fff; }}
 		  .recent-name {{ color: #ddd; }}
@@ -1567,7 +1706,8 @@ body.editing #btn-print {{ display: none; }}
 }}
 
 @media print {{
-  .toolbar, .tabbar, #editor, .sidebar {{ display: none !important; }}
+  .toolbar, .tabbar, #editor, .sidebar,
+  .author-actions, .author-body-actions {{ display: none !important; }}
   body {{ padding-left: 0 !important; }}
   #preview {{ display: block !important; }}
   #app {{ max-width: none; padding: 0; }}
@@ -1606,6 +1746,13 @@ body.editing #btn-print {{ display: none; }}
 	        <div class="settings-seg">
 	          <button type="button" data-setting="open-mode" data-value="new-tab" aria-pressed="false">{set_open_tab}</button>
 	          <button type="button" data-setting="open-mode" data-value="new-window" aria-pressed="false">{set_open_window}</button>
+	        </div>
+	      </div>
+	      <div class="settings-row">
+	        <span class="settings-label">{set_author_mode}<span class="settings-help" title="{author_help}" aria-label="{author_help}" role="img">?</span></span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="author-mode" data-value="off" aria-pressed="false">{set_author_off}</button>
+	          <button type="button" data-setting="author-mode" data-value="on" aria-pressed="false">{set_author_on}</button>
 	        </div>
 	      </div>
 	      <div class="settings-row">
@@ -2095,10 +2242,99 @@ body.editing #btn-print {{ display: none; }}
 	    if (item) window.ipc.postMessage('open-doc:' + item.getAttribute('data-sidebar-path'));
 	  }});
 	  renderSidebar();
+	  var authorDoc = {{ titleLine: '', title: '', body: '' }};
+	  var authorMode = false;
+	  var AUTHOR_LABELS = {{
+	    'title-line': '{copy_title_line_js}',
+	    'title': '{copy_title_js}',
+	    'body': '{copy_body_js}'
+	  }};
+	  var AUTHOR_COPIED = '{copied_js}';
+
+	  function authorButton(kind) {{
+	    var btn = document.createElement('button');
+	    btn.type = 'button';
+	    btn.className = 'author-copy';
+	    btn.setAttribute('data-author-copy', kind);
+	    btn.textContent = AUTHOR_LABELS[kind];
+	    return btn;
+	  }}
+	  function applyAuthorMode() {{
+	    var preview = document.getElementById('preview');
+	    if (!preview) return;
+	    var stale = preview.querySelectorAll('.author-actions, .author-body-actions');
+	    for (var i = 0; i < stale.length; i++) {{
+	      stale[i].parentNode.removeChild(stale[i]);
+	    }}
+	    if (!authorMode) return;
+	    var heading = preview.querySelector('h1, h2, h3, h4, h5, h6');
+	    if (heading && authorDoc.titleLine) {{
+	      var actions = document.createElement('span');
+	      actions.className = 'author-actions';
+	      actions.appendChild(authorButton('title-line'));
+	      actions.appendChild(authorButton('title'));
+	      heading.appendChild(actions);
+	    }}
+	    if (!authorDoc.body) return;
+	    var bodyActions = document.createElement('div');
+	    bodyActions.className = 'author-body-actions';
+	    bodyActions.appendChild(authorButton('body'));
+	    if (heading) preview.insertBefore(bodyActions, heading.nextSibling);
+	    else preview.insertBefore(bodyActions, preview.firstChild);
+	  }}
+	  window.__applyAuthorMode = applyAuthorMode;
+	  window.__setAuthorDoc = function(doc) {{
+	    authorDoc = doc || {{ titleLine: '', title: '', body: '' }};
+	    applyAuthorMode();
+	  }};
+	  // 页面由 with_html 载入，不是安全上下文，navigator.clipboard 未必可用，所以留一条 execCommand 退路
+	  function authorCopyFallback(text) {{
+	    var holder = document.createElement('textarea');
+	    holder.value = text;
+	    holder.setAttribute('readonly', '');
+	    holder.style.position = 'fixed';
+	    holder.style.top = '-1000px';
+	    document.body.appendChild(holder);
+	    holder.select();
+	    var ok = false;
+	    try {{ ok = document.execCommand('copy'); }} catch (err) {{ ok = false; }}
+	    document.body.removeChild(holder);
+	    return ok;
+	  }}
+	  function flashCopied(btn) {{
+	    var original = btn.textContent;
+	    btn.textContent = AUTHOR_COPIED;
+	    btn.classList.add('done');
+	    setTimeout(function() {{
+	      btn.textContent = original;
+	      btn.classList.remove('done');
+	    }}, 1200);
+	  }}
+	  document.addEventListener('click', function(e) {{
+	    var btn = e.target && e.target.closest ? e.target.closest('[data-author-copy]') : null;
+	    if (!btn) return;
+	    e.preventDefault();
+	    var kind = btn.getAttribute('data-author-copy');
+	    var text = kind === 'title-line' ? authorDoc.titleLine : (kind === 'title' ? authorDoc.title : authorDoc.body);
+	    if (!text) return;
+	    if (navigator.clipboard && navigator.clipboard.writeText) {{
+	      navigator.clipboard.writeText(text).then(function() {{ flashCopied(btn); }}, function() {{
+	        if (authorCopyFallback(text)) flashCopied(btn);
+	      }});
+	      return;
+	    }}
+	    if (authorCopyFallback(text)) flashCopied(btn);
+	  }});
 	  window.__setSettings = function(settings) {{
 	    settings = settings || {{}};
+	    authorMode = !!settings.authorMode;
+	    applyAuthorMode();
 	    document.body.classList.toggle('sidebar-open', !!settings.sidebarOpen);
-	    var current = {{ 'open-mode': settings.openMode, 'tab-mode': settings.tabMode }};
+	    var current = {{
+	      'open-mode': settings.openMode,
+	      'tab-mode': settings.tabMode,
+	      'author-mode': settings.authorMode ? 'on' : 'off'
+	    }};
 	    var buttons = settingsControl.querySelectorAll('[data-setting]');
 	    for (var i = 0; i < buttons.length; i++) {{
 	      var btn = buttons[i];
@@ -2192,6 +2428,7 @@ body.editing #btn-print {{ display: none; }}
       window.__setFeatureFlags(needsMath, needsMermaid);
     }}
     document.getElementById('preview').innerHTML = previewHtml;
+    if (window.__applyAuthorMode) window.__applyAuthorMode();
     (window.requestIdleCallback || function(fn){{ return setTimeout(fn, 0); }})(function() {{
       if (typeof hljs !== 'undefined') hljs.highlightAll();
       if (window.__enhancePreview) window.__enhancePreview();
@@ -2352,6 +2589,14 @@ if(window.__enhancePreview)window.__enhancePreview();
         sidebar_folder = s.sidebar_folder,
         sidebar_recent = s.sidebar_recent,
         sidebar_empty_js = escape_js(s.sidebar_empty),
+        set_author_mode = s.set_author_mode,
+        set_author_off = s.set_author_off,
+        set_author_on = s.set_author_on,
+        author_help = s.author_help,
+        copy_title_line_js = escape_js(s.copy_title_line),
+        copy_title_js = escape_js(s.copy_title),
+        copy_body_js = escape_js(s.copy_body),
+        copied_js = escape_js(s.copied),
         btn_settings = s.btn_settings,
         set_open_mode = s.set_open_mode,
         set_open_tab = s.set_open_tab,
@@ -2419,6 +2664,48 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn chapter_numbering_is_stripped_without_hurting_ordinary_titles() {
+        assert_eq!(strip_chapter_prefix("第二章 一只行李箱"), "一只行李箱");
+        assert_eq!(strip_chapter_prefix("第32章 什么什么"), "什么什么");
+        assert_eq!(strip_chapter_prefix("第一百二十三章：归途"), "归途");
+        assert_eq!(strip_chapter_prefix("32、什么什么"), "什么什么");
+        // 整行只有序号时保持原样，否则复制出来是空串
+        assert_eq!(strip_chapter_prefix("第二章"), "第二章");
+        // 这两个开头像序号但不是，不能误伤
+        assert_eq!(strip_chapter_prefix("2023年的夏天"), "2023年的夏天");
+        assert_eq!(strip_chapter_prefix("第一人称叙事"), "第一人称叙事");
+    }
+
+    #[test]
+    fn author_doc_splits_the_chapter_heading_from_its_body() {
+        let raw = "## 第二章 一只行李箱\r\n\r\n雨没有停的意思。\r\n\r\n陈律师撑开一把黑伞。\r\n";
+
+        let doc = author_doc(raw);
+
+        assert_eq!(doc.title_line, "第二章 一只行李箱");
+        assert_eq!(doc.title, "一只行李箱");
+        // CRLF 统一成 LF，段落之间的空行保留
+        assert_eq!(doc.body, "雨没有停的意思。\n\n陈律师撑开一把黑伞。");
+    }
+
+    #[test]
+    fn author_doc_without_a_heading_keeps_everything_as_body() {
+        let doc = author_doc("\n只有正文，没有标题。\n");
+
+        assert!(doc.title_line.is_empty());
+        assert!(doc.title.is_empty());
+        assert_eq!(doc.body, "只有正文，没有标题。");
+    }
+
+    #[test]
+    fn author_doc_skips_hashes_that_are_not_headings() {
+        let doc = author_doc("#不是标题，井号后面没空格\n\n## 第一章 开始\n\n正文");
+
+        assert_eq!(doc.title_line, "第一章 开始");
+        assert_eq!(doc.body, "正文");
     }
 
     #[test]
@@ -2735,6 +3022,10 @@ mod tests {
         assert!(page.contains("updateDocumentStats"));
         assert!(page.contains("restoreScrollProgress"));
         assert!(page.contains("md-previewer-content-zoom-v1"));
+        assert!(page.contains("data-setting=\"author-mode\" data-value=\"on\""));
+        assert!(page.contains("class=\"settings-help\""));
+        assert!(page.contains("window.__setAuthorDoc"));
+        assert!(page.contains("data-author-copy"));
         assert!(page.contains("id=\"btn-sidebar\""));
         assert!(page.contains("id=\"sidebar-list\""));
         assert!(page.contains("data-sidebar-section=\"folder\""));
@@ -3684,6 +3975,18 @@ fn persist_session(session: &DocumentSession) {
     }
 }
 
+fn update_author_doc(webview: &WebView, raw_md: &str) {
+    let doc = author_doc(raw_md);
+    let state = serde_json::json!({
+        "titleLine": doc.title_line,
+        "title": doc.title,
+        "body": doc.body,
+    });
+    let _ = webview.evaluate_script(&format!(
+        "if(window.__setAuthorDoc)window.__setAuthorDoc({state});"
+    ));
+}
+
 fn update_sidebar(webview: &WebView, session: &DocumentSession, recent: &[PathBuf]) {
     let state = sidebar_json(session, recent);
     let _ = webview.evaluate_script(&format!(
@@ -3738,6 +4041,7 @@ fn render_active_document(
             "if(window.__setEmptyPreview)window.__setEmptyPreview('{}');",
             escape_js(&html)
         ));
+        update_author_doc(webview, "");
         update_tabs(webview, session);
         update_sidebar(webview, session, &recent_files.lock().unwrap());
         update_window_title(window, session);
@@ -3762,6 +4066,7 @@ fn render_active_document(
                 flags.math,
                 flags.mermaid
             ));
+            update_author_doc(webview, &raw);
             for script in build_enhancer_bootstrap(flags, *loaded_enhancers) {
                 let _ = webview.evaluate_script(&script);
             }
@@ -3908,10 +4213,14 @@ fn main() {
     let recent_files: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(load_recent_files()));
 
     let mut initial_flags = EnhanceFlags::default();
+    // 首屏文档的原文：页面是用 with_html 一次成型的，不经过 __setContent，
+    // 作者模式要的标题/正文只能在 webview 建好后单独推一次
+    let mut initial_raw = String::new();
     let initial_page = match initial_session.active().cloned() {
         Some(tab) => match fs::read_to_string(&tab.path) {
             Ok(raw) => {
                 remember_recent_file(&recent_files, &tab.path);
+                initial_raw = raw.clone();
                 let html_body = md_to_html_with_base(&raw, tab.path.parent());
                 let base_href = base_href_for_file(&tab.path);
                 initial_flags = enhance_flags_for(&raw);
@@ -4178,6 +4487,7 @@ fn main() {
     let settings_for_event = Arc::clone(&settings);
     update_tabs(&webview, &session_for_event.lock().unwrap());
     update_settings_ui(&webview, &settings_for_event.lock().unwrap());
+    update_author_doc(&webview, &initial_raw);
     update_sidebar(
         &webview,
         &session_for_event.lock().unwrap(),
@@ -4473,6 +4783,7 @@ fn main() {
                             flags.mermaid,
                             escape_js(&raw)
                         ));
+                        update_author_doc(&webview, &raw);
                         for script in build_enhancer_bootstrap(flags, loaded_enhancers) {
                             let _ = webview.evaluate_script(&script);
                         }

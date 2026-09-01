@@ -35,6 +35,8 @@ pub struct Settings {
     pub tab_mode: TabMode,
     /// 左侧栏是否展开。不进设置面板，只是把开合状态记住跨启动
     pub sidebar_open: bool,
+    /// 作者模式：在标题和正文旁边显示复制按钮，方便整段取用去发布
+    pub author_mode: bool,
 }
 
 impl Settings {
@@ -80,6 +82,14 @@ impl Settings {
                 tab_mode: TabMode::Single,
                 ..*self
             },
+            ("author-mode", "on") => Self {
+                author_mode: true,
+                ..*self
+            },
+            ("author-mode", "off") => Self {
+                author_mode: false,
+                ..*self
+            },
             ("sidebar", "1") => Self {
                 sidebar_open: true,
                 ..*self
@@ -115,6 +125,7 @@ mod tests {
         assert_eq!(settings.tab_mode, TabMode::Accumulate);
         assert!(settings.keeps_session());
         assert!(!settings.sidebar_open);
+        assert!(!settings.author_mode);
     }
 
     #[test]
@@ -138,6 +149,11 @@ mod tests {
         assert!(!settings.apply("tab-mode", "single"));
         assert!(!settings.apply("tab-mode", "banana"));
         assert!(!settings.apply("zoom", "200"));
+        assert!(settings.apply("author-mode", "on"));
+        assert!(settings.author_mode);
+        assert!(!settings.apply("author-mode", "on"));
+        assert!(!settings.apply("author-mode", "yes"));
+        assert!(settings.author_mode);
         assert!(settings.apply("sidebar", "1"));
         assert!(settings.sidebar_open);
         assert!(!settings.apply("sidebar", "1"));
@@ -163,6 +179,7 @@ mod tests {
             open_mode: OpenMode::NewWindow,
             tab_mode: TabMode::Single,
             sidebar_open: true,
+            author_mode: true,
         };
 
         saved.save(&path).unwrap();
