@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = fileURLToPath(new URL('..', import.meta.url));
 const enhanceJs = await readFile(resolve(root, 'assets/enhance/preview-enhance.js'), 'utf8');
 
 const browser = await chromium.launch();

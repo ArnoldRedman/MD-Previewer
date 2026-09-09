@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = fileURLToPath(new URL('..', import.meta.url));
 const mainRs = await readFile(resolve(root, 'src/main.rs'), 'utf8');
 const marker = 'var ICON_EDIT';
 const markerIndex = mainRs.indexOf(marker);
@@ -18,8 +19,16 @@ const desktopScript = mainRs
   .slice(scriptStart + '<script>'.length, scriptEnd)
   .replaceAll('{{', '{')
   .replaceAll('}}', '}')
+  // 主 IIFE 里的 Rust 字符串占位符，测试页给空值即可
+  .replaceAll('{btn_edit}', 'Edit')
+  .replaceAll('{btn_preview}', 'Preview')
+  .replaceAll('{sidebar_empty_js}', 'empty')
   .replaceAll('{stat_words_js}', '字')
-  .replaceAll('{stat_chars_js}', '字符');
+  .replaceAll('{stat_chars_js}', '字符')
+  .replaceAll('{copy_title_line_js}', 'Copy heading')
+  .replaceAll('{copy_title_js}', 'Copy title')
+  .replaceAll('{copy_body_js}', 'Copy body')
+  .replaceAll('{copied_js}', 'Copied');
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
@@ -81,7 +90,11 @@ await page.setContent(`<!doctype html>
         </div>
       </div>
       <button id="btn-update" hidden></button>
+      <button id="btn-settings"></button>
+      <div id="settings-control"></div>
     </div>
+    <button id="btn-sidebar"></button>
+    <aside id="sidebar"><div id="sidebar-list"></div></aside>
     <div class="findbar">
       <input id="find-input">
       <span id="find-state"></span>
@@ -96,6 +109,7 @@ await page.setContent(`<!doctype html>
     <script>
       window.__messages = [];
       window.ipc = { postMessage(message) { window.__messages.push(message); } };
+      window.__mdPreviewerFeatureFlags = { math: false, mermaid: false };
     </script>
     <script>${desktopScript}</script>
   </body>

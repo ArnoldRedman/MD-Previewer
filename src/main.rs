@@ -1310,7 +1310,7 @@ fn build_page(
 }})();
 </script>
 <style>
-:root {{ color-scheme: light dark; --chrome-top: 10px; --content-scale: 1; }}
+:root {{ color-scheme: light dark; --chrome-top: 10px; --bar-top: 0px; --content-scale: 1; }}
 /* Reserve scrollbar space permanently so the fixed toolbar doesn't shift
    between modes (one with scrollbar, one without). */
 html {{ overflow-y: scroll; scrollbar-gutter: stable; }}
@@ -1320,7 +1320,7 @@ body {{
   line-height: 1.6; font-size: 15px;
   color: #1a1a1a; background: #fff;
 }}
-body.has-tabs {{ --chrome-top: 50px; }}
+body.has-tabs {{ --chrome-top: 50px; --bar-top: 40px; }}
 #app {{ max-width: 820px; margin: 0 auto; padding: 24px; }}
 #preview {{ font-size: calc(15px * var(--content-scale)); }}
 #preview .front-matter {{
@@ -1674,6 +1674,7 @@ body.empty .toolbar {{ display: none !important; }}
 	  .findbar {{ background: rgba(34,34,34,0.96); border-color: rgba(255,255,255,0.1); }}
 	  .findbar button:hover {{ background: #333; color: #fff; }}
 	  .tabbar {{ background: rgba(28,28,28,.96); border-color: #363636; }}
+	  body.editing #topbar {{ background: rgba(28,28,28,.96); border-color: #363636; }}
 	  .tab {{ color: #aaa; }}
 	  .tab:hover {{ background: rgba(255,255,255,.07); }}
 	  .tab.active {{ color: #eee; background: #2c2c2c; border-color: #444; }}
@@ -1702,13 +1703,23 @@ body.editing #app {{ max-width: none; padding: 0; }}
 body.editing #btn-open,
 body.editing #btn-search,
 body.editing #btn-print {{ display: none; }}
+/* 编辑模式：悬浮控件改为独占顶栏，不再遮挡正文源码 */
+body.editing #topbar {{
+  display: flex; justify-content: space-between; align-items: center;
+  position: sticky; top: var(--bar-top); z-index: 110;
+  padding: 6px 12px; border-bottom: 1px solid #e6e6e6;
+  background: rgba(248,248,248,0.96);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}}
+body.editing .toolbar {{ position: static; opacity: 1; pointer-events: auto; }}
+body.editing .findbar {{ display: none !important; }}
 
 @page {{
   margin: 12mm;
 }}
 
 @media print {{
-  .toolbar, .tabbar, #editor, .sidebar,
+  .toolbar, #topbar, .tabbar, #editor, .sidebar,
   .author-actions, .author-body-actions {{ display: none !important; }}
   body {{ padding-left: 0 !important; }}
   #preview {{ display: block !important; }}
@@ -1717,9 +1728,6 @@ body.editing #btn-print {{ display: none; }}
 }}
 	</style></head><body class="{body_class}">
 	<div class="tabbar" id="tabbar"><div class="tabs" id="tabs"></div><div class="doc-stats" id="doc-stats" aria-live="polite"></div><button class="tab-open" id="tab-open" type="button" title="{btn_new}" aria-label="{btn_new}">+</button></div>
-	<div class="toolbar sidebar-toggle">
-	  <button id="btn-sidebar" title="{btn_sidebar}" aria-label="{btn_sidebar}"></button>
-	</div>
 	<aside class="sidebar" id="sidebar" aria-label="{btn_sidebar}">
 	  <div class="sidebar-sections">
 	    <button type="button" data-sidebar-section="folder" aria-pressed="true">{sidebar_folder}</button>
@@ -1727,6 +1735,10 @@ body.editing #btn-print {{ display: none; }}
 	  </div>
 	  <div class="sidebar-list" id="sidebar-list"></div>
 	</aside>
+	<div id="topbar">
+	<div class="toolbar sidebar-toggle">
+	  <button id="btn-sidebar" title="{btn_sidebar}" aria-label="{btn_sidebar}"></button>
+	</div>
 	<div class="toolbar">
 	  <button id="btn-open" title="{btn_open}" aria-label="{btn_open}"></button>
 	  <button id="btn-search" title="{btn_search}" aria-label="{btn_search}"></button>
@@ -1766,6 +1778,7 @@ body.editing #btn-print {{ display: none; }}
 	      </div>
 	    </div>
 	  </div>
+	</div>
 	</div>
 	<div class="findbar" role="search">
 	  <input id="find-input" type="search" placeholder="{search_placeholder}" aria-label="{search_placeholder}">
@@ -2993,6 +3006,12 @@ mod tests {
         assert!(page
             .contains("if (inEdit()) return;\n\t      e.preventDefault();\n\t      showFind();"));
         assert!(page.contains("body.editing #btn-open"));
+        assert!(page.contains("id=\"topbar\""));
+        assert!(page.contains("top: var(--bar-top); z-index: 110;"));
+        assert!(page.contains(
+            "body.editing .toolbar { position: static; opacity: 1; pointer-events: auto; }"
+        ));
+        assert!(page.contains("body.editing .findbar { display: none !important; }"));
         assert!(page.contains("ta.focus({ preventScroll: true })"));
         assert!(page.contains("window.__setEmptyPreview"));
         assert!(page.contains("id=\"tabbar\""));
