@@ -142,12 +142,54 @@
     } else {
       var flags = featureFlags(markdown);
       previewEl.innerHTML = window.marked ? window.marked.parse(markdown) : markdown;
+      setupCodeBlockCopyButtons();
       idle(function() {
         if (window.hljs && window.hljs.highlightAll) window.hljs.highlightAll();
         enhance(flags);
       });
     }
   }
+
+  function setupCodeBlockCopyButtons() {
+    if (!previewEl) return;
+    var pres = previewEl.querySelectorAll('pre');
+    for (var i = 0; i < pres.length; i++) {
+      var pre = pres[i];
+      if (pre.classList && (pre.classList.contains('front-matter') || pre.classList.contains('mdp-mermaid'))) continue;
+      if (pre.querySelector('.code-copy-btn')) continue;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'code-copy-btn';
+      btn.textContent = 'Copy';
+      btn.setAttribute('aria-label', 'Copy');
+      pre.appendChild(btn);
+    }
+  }
+
+  previewEl.addEventListener('click', function(e) {
+    var copyBtn = e.target && e.target.closest ? e.target.closest('.code-copy-btn') : null;
+    if (copyBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      var pre = copyBtn.closest('pre');
+      if (!pre) return;
+      var code = pre.querySelector('code');
+      var text = code ? code.innerText : pre.innerText;
+      if (!code && text.endsWith(copyBtn.innerText)) {
+        text = text.slice(0, text.length - copyBtn.innerText.length).trimEnd();
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+          copyBtn.textContent = 'Copied';
+          copyBtn.classList.add('copied');
+          setTimeout(function() {
+            copyBtn.textContent = 'Copy';
+            copyBtn.classList.remove('copied');
+          }, 1500);
+        });
+      }
+    }
+  });
 
   function sendNative(action, payload) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mdPreviewer) {

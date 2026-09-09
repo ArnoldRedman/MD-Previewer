@@ -10,6 +10,7 @@ pub struct DocumentTab {
     pub dirty: bool,
     pub missing: bool,
     pub edit_on_open: bool,
+    pub encoding: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -73,6 +74,7 @@ impl DocumentSession {
             path,
             dirty: false,
             edit_on_open,
+            encoding: None,
         });
         self.active_id = Some(id);
         id
@@ -109,6 +111,17 @@ impl DocumentSession {
                 .or_else(|| index.checked_sub(1).and_then(|i| self.tabs.get(i)))
                 .map(|tab| tab.id);
         }
+        true
+    }
+
+    /// 关闭除指定标签外的其他所有标签
+    pub fn close_others(&mut self, id: u64) -> bool {
+        let exists = self.tabs.iter().any(|tab| tab.id == id);
+        if !exists {
+            return false;
+        }
+        self.tabs.retain(|tab| tab.id == id);
+        self.active_id = Some(id);
         true
     }
 
@@ -265,6 +278,22 @@ mod tests {
             session.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
             vec![first, third]
         );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn closing_other_tabs_leaves_only_the_specified_tab() {
+        let dir = temp_dir("close_others");
+        let mut session = DocumentSession::default();
+        let _first = session.open(dir.join("one.md"), false);
+        let second = session.open(dir.join("two.md"), false);
+        let _third = session.open(dir.join("three.md"), false);
+
+        assert!(session.close_others(second));
+
+        assert_eq!(session.tabs.len(), 1);
+        assert_eq!(session.active_id, Some(second));
+        assert_eq!(session.tabs[0].id, second);
         let _ = fs::remove_dir_all(dir);
     }
 

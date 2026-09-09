@@ -260,12 +260,35 @@ body.empty #preview {
 }
 
 #preview pre {
+  position: relative;
   overflow-x: auto;
   margin: 1em -2px;
   padding: 14px;
   border-radius: 8px;
   background: var(--soft);
   -webkit-overflow-scrolling: touch;
+}
+
+#preview pre .code-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.85;
+  user-select: none;
+  z-index: 5;
+}
+
+#preview pre .code-copy-btn.copied {
+  color: #1a7f37;
+  border-color: #1a7f37;
 }
 
 #preview pre code {

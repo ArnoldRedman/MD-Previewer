@@ -47,8 +47,11 @@ enum UserEvent {
     OpenPaths(Vec<PathBuf>, bool),
     ActivateTab(u64),
     CloseTab(u64),
+    CloseOthers(u64),
     CloseActiveTab,
     LocateTab(u64),
+    RevealTab(u64),
+    RenderPreview(String),
     FileChanged(PathBuf), // external change: refresh preview AND textarea
     ExternalChangeResolved(bool),
     FileSaved(PathBuf), // our own save: refresh preview only, leave textarea cursor alone
@@ -59,6 +62,7 @@ enum UserEvent {
     Print, // route print through wry's native API (WKWebView ignores window.print())
     SetTheme(ThemeChoice),
     SettingsChanged,
+    SetEncoding(String),
     OpenUrl(&'static str),
     Quit,
     RecentChanged,
@@ -182,6 +186,19 @@ struct Strings {
     copy_title: &'static str,
     copy_body: &'static str,
     copied: &'static str,
+    btn_split: &'static str,
+    sidebar_outline: &'static str,
+    sidebar_outline_empty: &'static str,
+    set_word_wrap: &'static str,
+    set_wrap_on: &'static str,
+    set_wrap_off: &'static str,
+    code_copy: &'static str,
+    code_copied: &'static str,
+    tab_menu_close: &'static str,
+    tab_menu_close_others: &'static str,
+    tab_menu_copy_path: &'static str,
+    tab_menu_reveal: &'static str,
+    encoding_title: &'static str,
 }
 
 impl Strings {
@@ -229,6 +246,19 @@ impl Strings {
                 copy_title: "复制标题",
                 copy_body: "复制正文",
                 copied: "已复制",
+                btn_split: "分栏模式 (Cmd/Ctrl+\\)",
+                sidebar_outline: "大纲",
+                sidebar_outline_empty: "当前文档无标题大纲",
+                set_word_wrap: "自动换行",
+                set_wrap_on: "开",
+                set_wrap_off: "关",
+                code_copy: "复制",
+                code_copied: "已复制",
+                tab_menu_close: "关闭标签",
+                tab_menu_close_others: "关闭其他标签",
+                tab_menu_copy_path: "复制路径",
+                tab_menu_reveal: "在文件管理器中显示",
+                encoding_title: "编码格式",
             },
             Lang::En => Strings {
                 drop_hint: "Drop a .md or .txt file here or press Cmd/Ctrl+O to open",
@@ -272,6 +302,19 @@ impl Strings {
                 copy_title: "Copy title",
                 copy_body: "Copy body",
                 copied: "Copied",
+                btn_split: "Split View (Cmd/Ctrl+\\)",
+                sidebar_outline: "Outline",
+                sidebar_outline_empty: "No headings in document",
+                set_word_wrap: "Word wrap",
+                set_wrap_on: "On",
+                set_wrap_off: "Off",
+                code_copy: "Copy",
+                code_copied: "Copied",
+                tab_menu_close: "Close Tab",
+                tab_menu_close_others: "Close Others",
+                tab_menu_copy_path: "Copy Path",
+                tab_menu_reveal: "Reveal in File Manager",
+                encoding_title: "Encoding",
             },
         }
     }
@@ -1123,6 +1166,299 @@ fn is_txt_document(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// 读取文档文本内容，支持 UTF-8、带 BOM 的 UTF-8/UTF-16 以及 Windows ANSI (GBK/CP936 等) 编码
+/// 返回解析后的文本和实际采用的编码格式名称
+fn read_document_with_encoding(
+    path: &Path,
+    encoding_override: Option<&str>,
+) -> std::io::Result<(String, &'static str)> {
+    let bytes = fs::read(path)?;
+    if bytes.is_empty() {
+        let enc = match encoding_override {
+            Some("GBK") => "GBK",
+            Some("UTF-16 LE") => "UTF-16 LE",
+            Some("UTF-16 BE") => "UTF-16 BE",
+            _ => "UTF-8",
+        };
+        return Ok((String::new(), enc));
+    }
+
+    // 若用户明确指定了编码格式，优先按指定格式解码
+    if let Some(enc) = encoding_override {
+        match enc {
+            "UTF-8" => {
+                let slice = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                    &bytes[3..]
+                } else {
+                    &bytes[..]
+                };
+                if let Ok(s) = std::str::from_utf8(slice) {
+                    return Ok((s.to_string(), "UTF-8"));
+                }
+                return Ok((String::from_utf8_lossy(slice).into_owned(), "UTF-8"));
+            }
+            "GBK" => {
+                #[cfg(target_os = "windows")]
+                {
+                    if let Some(s) = decode_windows_codepage(&bytes, 936) {
+                        return Ok((s, "GBK"));
+                    }
+                }
+                return Ok((String::from_utf8_lossy(&bytes).into_owned(), "GBK"));
+            }
+            "UTF-16 LE" => {
+                let slice = if bytes.starts_with(&[0xFF, 0xFE]) {
+                    &bytes[2..]
+                } else {
+                    &bytes[..]
+                };
+                let u16s: Vec<u16> = slice
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                    .collect();
+                if let Ok(s) = String::from_utf16(&u16s) {
+                    return Ok((s, "UTF-16 LE"));
+                }
+                return Ok((String::from_utf16_lossy(&u16s), "UTF-16 LE"));
+            }
+            "UTF-16 BE" => {
+                let slice = if bytes.starts_with(&[0xFE, 0xFF]) {
+                    &bytes[2..]
+                } else {
+                    &bytes[..]
+                };
+                let u16s: Vec<u16> = slice
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+                    .collect();
+                if let Ok(s) = String::from_utf16(&u16s) {
+                    return Ok((s, "UTF-16 BE"));
+                }
+                return Ok((String::from_utf16_lossy(&u16s), "UTF-16 BE"));
+            }
+            _ => {}
+        }
+    }
+
+    // 自动探测编码：
+    // 1. UTF-8 BOM: EF BB BF
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        if let Ok(s) = std::str::from_utf8(&bytes[3..]) {
+            return Ok((s.to_string(), "UTF-8"));
+        }
+    }
+
+    // 2. UTF-16 LE BOM: FF FE
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        if let Ok(s) = String::from_utf16(&u16s) {
+            return Ok((s, "UTF-16 LE"));
+        }
+    }
+
+    // 3. UTF-16 BE BOM: FE FF
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect();
+        if let Ok(s) = String::from_utf16(&u16s) {
+            return Ok((s, "UTF-16 BE"));
+        }
+    }
+
+    // 4. 标准 UTF-8
+    if let Ok(s) = std::str::from_utf8(&bytes) {
+        return Ok((s.to_string(), "UTF-8"));
+    }
+
+    // 5. Windows ANSI (GBK/CP936 等系统代码页回退)
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(decoded) = decode_windows_codepage(&bytes, 936) {
+            return Ok((decoded, "GBK"));
+        }
+    }
+
+    // 兜底：容错转 UTF-8
+    Ok((String::from_utf8_lossy(&bytes).into_owned(), "UTF-8"))
+}
+
+/// 读取文档文本内容快捷入口
+#[allow(dead_code)]
+fn read_document_to_string(path: &Path) -> std::io::Result<String> {
+    read_document_with_encoding(path, None).map(|(content, _)| content)
+}
+
+/// 按照指定或文档已有编码保存文本
+fn write_document_with_encoding(
+    path: &Path,
+    content: &str,
+    encoding: Option<&str>,
+) -> std::io::Result<()> {
+    match encoding {
+        Some("GBK") => {
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(bytes) = encode_windows_codepage(content, 936) {
+                    return fs::write(path, bytes);
+                }
+            }
+            fs::write(path, content)
+        }
+        Some("UTF-16 LE") => {
+            let mut bytes = vec![0xFF, 0xFE];
+            for u in content.encode_utf16() {
+                bytes.extend_from_slice(&u.to_le_bytes());
+            }
+            fs::write(path, bytes)
+        }
+        Some("UTF-16 BE") => {
+            let mut bytes = vec![0xFE, 0xFF];
+            for u in content.encode_utf16() {
+                bytes.extend_from_slice(&u.to_be_bytes());
+            }
+            fs::write(path, bytes)
+        }
+        _ => fs::write(path, content),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn decode_windows_codepage(bytes: &[u8], code_page: u32) -> Option<String> {
+    if bytes.is_empty() {
+        return Some(String::new());
+    }
+    extern "system" {
+        fn MultiByteToWideChar(
+            code_page: u32,
+            flags: u32,
+            multi_byte_str: *const u8,
+            multi_byte_len: i32,
+            wide_char_str: *mut u16,
+            wide_char_len: i32,
+        ) -> i32;
+    }
+    let len = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if len <= 0 {
+        let len_acp = unsafe {
+            MultiByteToWideChar(0, 0, bytes.as_ptr(), bytes.len() as i32, std::ptr::null_mut(), 0)
+        };
+        if len_acp <= 0 {
+            return None;
+        }
+        let mut wide = vec![0u16; len_acp as usize];
+        let res = unsafe {
+            MultiByteToWideChar(0, 0, bytes.as_ptr(), bytes.len() as i32, wide.as_mut_ptr(), len_acp)
+        };
+        return if res > 0 { String::from_utf16(&wide).ok() } else { None };
+    }
+    let mut wide = vec![0u16; len as usize];
+    let res = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            wide.as_mut_ptr(),
+            len,
+        )
+    };
+    if res > 0 {
+        String::from_utf16(&wide).ok()
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn encode_windows_codepage(text: &str, code_page: u32) -> Option<Vec<u8>> {
+    extern "system" {
+        fn WideCharToMultiByte(
+            code_page: u32,
+            flags: u32,
+            wide_char_str: *const u16,
+            wide_char_len: i32,
+            multi_byte_str: *mut u8,
+            multi_byte_len: i32,
+            default_char: *const u8,
+            used_default_char: *mut i32,
+        ) -> i32;
+    }
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    if wide.is_empty() {
+        return Some(Vec::new());
+    }
+    let len = unsafe {
+        WideCharToMultiByte(
+            code_page,
+            0,
+            wide.as_ptr(),
+            wide.len() as i32,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        )
+    };
+    if len <= 0 {
+        return None;
+    }
+    let mut bytes = vec![0u8; len as usize];
+    let res = unsafe {
+        WideCharToMultiByte(
+            code_page,
+            0,
+            wide.as_ptr(),
+            wide.len() as i32,
+            bytes.as_mut_ptr(),
+            len,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        )
+    };
+    if res > 0 {
+        Some(bytes)
+    } else {
+        None
+    }
+}
+
+/// 在系统文件管理器中定位并选中文件
+fn reveal_in_file_manager(path: &Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(parent) = path.parent() {
+            let _ = open::that(parent);
+        }
+    }
+}
+
 /// 纯文本渲染为保留换行与空格的 HTML 容器，特殊符号统一做 HTML 转义
 fn txt_to_html(raw: &str) -> String {
     format!(
@@ -1309,15 +1645,17 @@ fn empty_preview_html(s: &Strings, recent_files: &[PathBuf]) -> String {
     html
 }
 
-fn build_page(
+fn build_page_with_encoding(
     preview_html: &str,
     raw_md: &str,
     base_href: Option<&str>,
     flags: EnhanceFlags,
     s: &Strings,
     empty: bool,
+    initial_encoding: &str,
 ) -> String {
     let body_class = if empty { "empty" } else { "" };
+    let initial_encoding = if initial_encoding.is_empty() { "UTF-8" } else { initial_encoding };
     let base_tag = base_href
         .map(|href| format!(r#"<base id="base-href" href="{}">"#, html_escape_attr(href)))
         .unwrap_or_else(|| r#"<base id="base-href">"#.to_string());
@@ -1372,8 +1710,40 @@ body.has-tabs {{ --chrome-top: 50px; --bar-top: 40px; }}
 #preview h1 {{ border-bottom: 1px solid #e1e4e8; padding-bottom: .3em; }}
 #preview h2 {{ border-bottom: 1px solid #e1e4e8; padding-bottom: .2em; }}
 #preview code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 90%; }}
-#preview pre {{ background: #f6f8fa; padding: 16px; border-radius: 8px; overflow-x: auto; }}
+#preview pre {{ background: #f6f8fa; padding: 16px; border-radius: 8px; overflow-x: auto; position: relative; }}
 #preview pre code {{ background: none; padding: 0; font-size: 14px; }}
+#preview img {{ cursor: zoom-in; max-width: 100%; }}
+#preview pre .code-copy-btn {{
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: #57606a;
+  background: rgba(255,255,255,0.85);
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  user-select: none;
+  z-index: 5;
+}}
+#preview pre:hover .code-copy-btn,
+#preview pre .code-copy-btn:focus {{
+  opacity: 1;
+}}
+#preview pre .code-copy-btn:hover {{
+  background: #ffffff;
+  color: #24292f;
+  border-color: #8c959f;
+}}
+#preview pre .code-copy-btn.copied {{
+  color: #1a7f37;
+  border-color: #1a7f37;
+  opacity: 1;
+}}
 #preview blockquote {{ border-left: 4px solid #ddd; margin: 0; padding: 0 1em; color: #666; }}
 #preview .markdown-alert-note,
 #preview .markdown-alert-tip,
@@ -1419,7 +1789,7 @@ body.has-tabs {{ --chrome-top: 50px; --bar-top: 40px; }}
 #preview table th, #preview table td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}
 #preview table th {{ background: #f6f8fa; font-weight: 600; color: #1a1a1a; white-space: nowrap; }}
 #preview table td {{ min-width: 64px; max-width: 360px; vertical-align: top; overflow-wrap: break-word; }}
-#preview img {{ max-width: 100%; }}
+#preview img {{ max-width: 100%; cursor: zoom-in; }}
 #preview .katex-display {{ overflow-x: auto; overflow-y: hidden; padding: 0.15em 0; }}
 #preview .mdp-mermaid {{ margin: 1.2em 0; overflow-x: auto; text-align: center; }}
 #preview .mdp-mermaid svg {{ max-width: 100%; height: auto; }}
@@ -1503,6 +1873,36 @@ body.has-tabs {{ --chrome-top: 50px; --bar-top: 40px; }}
 	  color: #8b8b8b; font-size: 11px; white-space: nowrap; user-select: none;
 	  font-variant-numeric: tabular-nums;
 	}}
+	.encoding-control {{ position: relative; flex: 0 0 auto; align-self: center; }}
+	body.empty .encoding-control {{ display: none !important; }}
+	.encoding-btn {{
+	  height: 23px; padding: 0 7px;
+	  border: 1px solid rgba(0,0,0,0.08); border-radius: 6px;
+	  background: rgba(0,0,0,0.03); color: #666;
+	  font-size: 11px; font-family: inherit; font-weight: 500;
+	  cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
+	  user-select: none; transition: all 0.15s ease;
+	}}
+	.encoding-btn:hover {{
+	  color: #111; background: rgba(0,0,0,0.07); border-color: rgba(0,0,0,0.15);
+	}}
+	.encoding-popover {{
+	  position: absolute; top: calc(100% + 6px); right: 0; min-width: 130px; padding: 4px;
+	  background: rgba(255,255,255,0.98); border: 1px solid #d0d7de; border-radius: 8px;
+	  box-shadow: 0 6px 20px rgba(0,0,0,0.12); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+	  z-index: 120;
+	}}
+	.encoding-popover-title {{
+	  font-size: 11px; font-weight: 600; color: #8c959f; padding: 4px 8px 3px;
+	  border-bottom: 1px solid rgba(0,0,0,0.06); margin-bottom: 3px;
+	}}
+	.encoding-option {{
+	  display: block; width: 100%; text-align: left; padding: 5px 8px; font-size: 12px;
+	  border: none; background: transparent; color: #24292f; border-radius: 5px; cursor: pointer;
+	  transition: background 0.12s;
+	}}
+	.encoding-option:hover {{ background: #f3f4f6; color: #0969da; }}
+	.encoding-option.active {{ font-weight: 600; color: #0969da; background: rgba(9,105,218,0.08); }}
 	.missing-file {{ min-height: 55vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }}
 	.missing-file h2, .missing-file p {{ margin: 0; }}
 	.missing-file p {{ color: #777; }}
@@ -1644,6 +2044,67 @@ body.empty .toolbar {{ display: none !important; }}
 	  display: grid; place-items: center; color: #555; background: transparent; cursor: pointer;
 	}}
 	.findbar button:hover {{ background: #f0f0f0; color: #111; }}
+	.sidebar-item.outline-item {{
+	  display: block; width: 100%; text-align: left;
+	  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	  padding: 5px 8px; font-size: 13px; line-height: 1.4;
+	  border-left: 2px solid transparent;
+	}}
+	.sidebar-item.outline-item.outline-level-1 {{ padding-left: 10px; font-weight: 600; }}
+	.sidebar-item.outline-item.outline-level-2 {{ padding-left: 20px; }}
+	.sidebar-item.outline-item.outline-level-3 {{ padding-left: 30px; font-size: 12px; }}
+	.sidebar-item.outline-item.outline-level-4 {{ padding-left: 40px; font-size: 12px; }}
+	.sidebar-item.outline-item.outline-level-5 {{ padding-left: 50px; font-size: 11px; }}
+	.sidebar-item.outline-item.outline-level-6 {{ padding-left: 60px; font-size: 11px; }}
+	.sidebar-item.outline-item.active {{
+	  background: #eef3fc; border-left-color: #2f6fd0; color: #2f6fd0;
+	}}
+	.context-menu {{
+	  position: fixed; z-index: 1000; min-width: 150px;
+	  background: #ffffff; border: 1px solid #d0d7de; border-radius: 6px;
+	  box-shadow: 0 8px 24px rgba(140,149,159,0.2); padding: 4px 0; font-size: 13px;
+	}}
+	.context-menu-item {{
+	  display: block; width: 100%; padding: 6px 12px; text-align: left;
+	  border: none; background: transparent; color: #24292f; cursor: pointer; font: inherit;
+	}}
+	.context-menu-item:hover {{ background: #f0f3f6; color: #0969da; }}
+	.context-menu-sep {{ height: 1px; background: #e1e4e8; margin: 4px 0; }}
+	.lightbox {{
+	  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+	  z-index: 500; display: flex; align-items: center; justify-content: center; user-select: none;
+	}}
+	.lightbox-backdrop {{
+	  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+	  background: rgba(0, 0, 0, 0.85);
+	  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+	}}
+	.lightbox-toolbar {{
+	  position: absolute; top: 16px; right: 16px; display: flex; gap: 8px; z-index: 510;
+	}}
+	.lightbox-btn {{
+	  background: rgba(30, 30, 30, 0.75); color: #ffffff;
+	  border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px;
+	  padding: 6px 10px; font-size: 13px; cursor: pointer;
+	  transition: background 0.15s ease;
+	}}
+	.lightbox-btn:hover {{ background: rgba(60, 60, 60, 0.95); }}
+	.lightbox-stage {{
+	  position: relative; z-index: 505; max-width: 90vw; max-height: 85vh;
+	  display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: grab;
+	}}
+	.lightbox-stage.dragging {{ cursor: grabbing; }}
+	.lightbox-img {{
+	  max-width: 90vw; max-height: 85vh; object-fit: contain;
+	  transition: transform 0.1s ease-out; transform-origin: center center;
+	}}
+	.lightbox-caption {{
+	  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+	  color: #cccccc; background: rgba(0, 0, 0, 0.6); padding: 4px 12px;
+	  border-radius: 4px; font-size: 13px; max-width: 80%;
+	  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	  z-index: 510; pointer-events: none;
+	}}
 	@media (prefers-color-scheme: dark) {{
 	  body {{ color: #d4d4d4; background: #1e1e1e; }}
 	  #preview a {{ color: #6cb6ff; }}
@@ -1719,6 +2180,29 @@ body.empty .toolbar {{ display: none !important; }}
 	  .missing-file p {{ color: #aaa; }}
 	  .missing-actions button {{ background: #292929; border-color: #444; color: #ddd; }}
 	  .missing-actions button:hover {{ background: #333; }}
+	  #preview pre .code-copy-btn {{
+	    color: #8b949e; background: rgba(30,30,30,0.85); border-color: rgba(240,246,252,0.15);
+	  }}
+	  #preview pre .code-copy-btn:hover {{
+	    background: #2d333b; color: #c9d1d9; border-color: rgba(240,246,252,0.25);
+	  }}
+	  #preview pre .code-copy-btn.copied {{ color: #3fb950; border-color: #3fb950; }}
+	  .sidebar-item.outline-item.active {{ background: #23324a; border-left-color: #58a6ff; color: #9dc0ff; }}
+	  .context-menu {{
+	    background: #1c2128; border-color: #30363d; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+	  }}
+	  .context-menu-item {{ color: #c9d1d9; }}
+	  .context-menu-item:hover {{ background: #282e33; color: #58a6ff; }}
+	  .context-menu-sep {{ background: #30363d; }}
+	  body.editing.split-view #editor {{ border-right-color: #383e47; background: rgba(255,255,255,0.015); }}
+	  .encoding-btn {{ background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); color: #9da7b3; }}
+	  .encoding-btn:hover {{ background: rgba(255,255,255,0.12); color: #f0f6fc; border-color: rgba(255,255,255,0.22); }}
+	  .encoding-popover {{ background: #1c2128; border-color: #30363d; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }}
+	  .encoding-popover-title {{ color: #768390; border-bottom-color: rgba(255,255,255,0.06); }}
+	  .encoding-option {{ color: #adbac7; }}
+	  .encoding-option:hover {{ background: #2d333b; color: #58a6ff; }}
+	  .encoding-option.active {{ color: #58a6ff; background: rgba(56,139,253,0.15); }}
+	  body.editing #btn-split[aria-pressed="true"] {{ background: rgba(56,139,253,0.18); color: #58a6ff; border-color: rgba(56,139,253,0.4); }}
 	}}
 
 /* Source editor textarea — height is auto-grown by JS to match content,
@@ -1733,8 +2217,38 @@ body.empty .toolbar {{ display: none !important; }}
   background: transparent; color: inherit;
   padding: 0;
 }}
+#btn-split {{ display: none; }}
+body.editing #btn-split {{ display: grid; place-items: center; }}
+body.editing #btn-split[aria-pressed="true"] {{
+  background: rgba(9, 105, 218, 0.12);
+  color: #0969da;
+  border-color: rgba(9, 105, 218, 0.3);
+}}
 body.editing #preview {{ display: none; }}
 body.editing #editor {{ display: block; padding: 16px 24px; }}
+body.editing.split-view #app {{
+  display: flex; flex-direction: row; align-items: stretch;
+  max-width: none; padding: 0; box-sizing: border-box;
+}}
+body.editing.split-view #editor {{
+  order: 1;
+  display: block; flex: 1 1 50%; width: 50%; min-width: 0;
+  box-sizing: border-box; padding: 18px 24px;
+  border-right: 2px solid #d0d7de;
+  background: rgba(0, 0, 0, 0.015);
+}}
+body.editing.split-view #preview {{
+  order: 2;
+  display: block !important; flex: 1 1 50%; width: 50%; min-width: 0;
+  box-sizing: border-box; padding: 18px 24px;
+  border-left: none;
+}}
+body.no-wrap #editor {{
+  white-space: pre; overflow-x: auto; word-break: normal;
+}}
+body.no-wrap #preview pre {{
+  white-space: pre; overflow-x: auto; word-break: normal;
+}}
 body.editing #app {{ max-width: none; padding: 0; }}
 body.editing #btn-open,
 body.editing #btn-search,
@@ -1763,11 +2277,12 @@ body.editing .findbar {{ display: none !important; }}
   #preview .mdp-table-wrap {{ width: auto; margin: 1em 0; transform: none; overflow: visible; }}
 }}
 	</style></head><body class="{body_class}">
-	<div class="tabbar" id="tabbar"><div class="tabs" id="tabs"></div><div class="doc-stats" id="doc-stats" aria-live="polite"></div><button class="tab-open" id="tab-open" type="button" title="{btn_new}" aria-label="{btn_new}">+</button></div>
+	<div class="tabbar" id="tabbar"><div class="tabs" id="tabs"></div><div class="doc-stats" id="doc-stats" aria-live="polite"></div><div class="encoding-control" id="encoding-control"><button class="encoding-btn" id="btn-encoding" type="button" title="{encoding_title}">{initial_encoding}</button><div class="encoding-popover" id="encoding-popover" style="display:none;" role="menu"><div class="encoding-popover-title">{encoding_title}</div><button type="button" class="encoding-option{opt_utf8}" data-encoding="UTF-8">UTF-8</button><button type="button" class="encoding-option{opt_gbk}" data-encoding="GBK">GBK / ANSI</button><button type="button" class="encoding-option{opt_u16le}" data-encoding="UTF-16 LE">UTF-16 LE</button><button type="button" class="encoding-option{opt_u16be}" data-encoding="UTF-16 BE">UTF-16 BE</button></div></div><button class="tab-open" id="tab-open" type="button" title="{btn_new}" aria-label="{btn_new}">+</button></div>
 	<aside class="sidebar" id="sidebar" aria-label="{btn_sidebar}">
 	  <div class="sidebar-sections">
 	    <button type="button" data-sidebar-section="folder" aria-pressed="true">{sidebar_folder}</button>
 	    <button type="button" data-sidebar-section="recent" aria-pressed="false">{sidebar_recent}</button>
+	    <button type="button" data-sidebar-section="outline" aria-pressed="false">{sidebar_outline}</button>
 	  </div>
 	  <div class="sidebar-list" id="sidebar-list"></div>
 	</aside>
@@ -1779,6 +2294,7 @@ body.editing .findbar {{ display: none !important; }}
 	  <button id="btn-open" title="{btn_open}" aria-label="{btn_open}"></button>
 	  <button id="btn-search" title="{btn_search}" aria-label="{btn_search}"></button>
 	  <button id="btn-toggle" title="{btn_edit}" aria-label="{btn_edit}"></button>
+	  <button id="btn-split" title="{btn_split}" aria-label="{btn_split}"></button>
 	  <button id="btn-print" title="{btn_print}" aria-label="{btn_print}"></button>
 	  <div class="zoom-control" id="zoom-control">
 	    <button id="btn-zoom" title="{btn_zoom}" aria-label="{btn_zoom}"></button>
@@ -1812,6 +2328,13 @@ body.editing .findbar {{ display: none !important; }}
 	          <button type="button" data-setting="tab-mode" data-value="single" aria-pressed="false">{set_tab_single}</button>
 	        </div>
 	      </div>
+	      <div class="settings-row">
+	        <span class="settings-label">{set_word_wrap}</span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="word-wrap" data-value="on" aria-pressed="true">{set_wrap_on}</button>
+	          <button type="button" data-setting="word-wrap" data-value="off" aria-pressed="false">{set_wrap_off}</button>
+	        </div>
+	      </div>
 	    </div>
 	  </div>
 	</div>
@@ -1822,6 +2345,26 @@ body.editing .findbar {{ display: none !important; }}
 	  <button id="find-prev" title="Previous" aria-label="Previous"></button>
 	  <button id="find-next" title="Next" aria-label="Next"></button>
 	  <button id="find-close" title="Close" aria-label="Close"></button>
+	</div>
+	<div id="tab-context-menu" class="context-menu" style="display:none;" role="menu">
+	  <button type="button" class="context-menu-item" data-tab-action="close">{tab_menu_close}</button>
+	  <button type="button" class="context-menu-item" data-tab-action="close-others">{tab_menu_close_others}</button>
+	  <div class="context-menu-sep"></div>
+	  <button type="button" class="context-menu-item" data-tab-action="copy-path">{tab_menu_copy_path}</button>
+	  <button type="button" class="context-menu-item" data-tab-action="reveal">{tab_menu_reveal}</button>
+	</div>
+	<div id="lightbox" class="lightbox" style="display:none;" role="dialog" aria-modal="true">
+	  <div class="lightbox-backdrop"></div>
+	  <div class="lightbox-toolbar">
+	    <button type="button" id="lb-zoom-out" class="lightbox-btn" title="Zoom Out">−</button>
+	    <button type="button" id="lb-zoom-reset" class="lightbox-btn" title="Reset">100%</button>
+	    <button type="button" id="lb-zoom-in" class="lightbox-btn" title="Zoom In">+</button>
+	    <button type="button" id="lb-close" class="lightbox-btn lb-close" title="Close">×</button>
+	  </div>
+	  <div class="lightbox-stage">
+	    <img id="lb-img" class="lightbox-img" alt="">
+	  </div>
+	  <div id="lb-caption" class="lightbox-caption"></div>
 	</div>
 	<div id="app">
   <div id="preview">{preview_html}</div>
@@ -1840,11 +2383,16 @@ body.editing .findbar {{ display: none !important; }}
 	  var ICON_UP = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
 	  var ICON_DOWN = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
 	  var ICON_CLOSE = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+	  var ICON_SPLIT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>';
 	  var L_EDIT = '{btn_edit}', L_VIEW = '{btn_preview}';
+	  var L_COPY = '{code_copy_js}', L_COPIED = '{code_copied_js}';
+	  var L_SPLIT = '{btn_split}';
+	  var SIDEBAR_OUTLINE_EMPTY = '{sidebar_outline_empty_js}';
 
 	  var btnOpen = document.getElementById('btn-open');
 	  var btnSearch = document.getElementById('btn-search');
 	  var btnToggle = document.getElementById('btn-toggle');
+	  var btnSplit = document.getElementById('btn-split');
 	  var btnPrint = document.getElementById('btn-print');
 	  var btnZoom = document.getElementById('btn-zoom');
 	  var btnZoomOut = document.getElementById('btn-zoom-out');
@@ -1866,8 +2414,29 @@ body.editing .findbar {{ display: none !important; }}
 	  var findClose = document.getElementById('find-close');
 	  var tabsEl = document.getElementById('tabs');
 	  var docStats = document.getElementById('doc-stats');
+	  var btnEncoding = document.getElementById('btn-encoding');
+	  var encodingPopover = document.getElementById('encoding-popover');
+	  var currentEncoding = (btnEncoding && btnEncoding.textContent.trim()) || 'UTF-8';
 	  var tabOpen = document.getElementById('tab-open');
 	  var ta = document.getElementById('editor');
+	  var previewEl = document.getElementById('preview');
+	  var tabContextMenu = document.getElementById('tab-context-menu');
+	  var contextMenuTabId = null;
+	  var contextMenuTabPath = '';
+	  var lightbox = document.getElementById('lightbox');
+	  var lbImg = document.getElementById('lb-img');
+	  var lbCaption = document.getElementById('lb-caption');
+	  var lbClose = document.getElementById('lb-close');
+	  var lbZoomIn = document.getElementById('lb-zoom-in');
+	  var lbZoomOut = document.getElementById('lb-zoom-out');
+	  var lbZoomReset = document.getElementById('lb-zoom-reset');
+	  var lbScale = 1.0;
+	  var lbTranslateX = 0;
+	  var lbTranslateY = 0;
+	  var lbIsDragging = false;
+	  var lbStartX = 0;
+	  var lbStartY = 0;
+	  var pendingLiveRenderTimer = 0;
 	  var dirty = false;
 	  var activeTabId = 0;
 	  var pendingAutosaveTimer = 0;
@@ -1890,6 +2459,7 @@ body.editing .findbar {{ display: none !important; }}
 	  btnOpen.innerHTML = ICON_OPEN;
 	  btnSearch.innerHTML = ICON_SEARCH;
 	  btnToggle.innerHTML = ICON_EDIT;
+	  if (btnSplit) btnSplit.innerHTML = ICON_SPLIT;
 	  btnPrint.innerHTML = ICON_PRINT;
 	  btnZoom.innerHTML = ICON_ZOOM;
 	  btnSettings.innerHTML = ICON_SETTINGS;
@@ -1953,6 +2523,39 @@ body.editing .findbar {{ display: none !important; }}
   }}
   applyZoom(loadZoomPercent(), false);
   updateDocumentStats(ta.value);
+  function setEncodingUi(enc) {{
+    if (!enc) return;
+    currentEncoding = enc;
+    if (btnEncoding) btnEncoding.textContent = enc;
+    if (encodingPopover) {{
+      var options = encodingPopover.querySelectorAll('.encoding-option');
+      for (var i = 0; i < options.length; i++) {{
+        if (options[i].getAttribute('data-encoding') === enc) {{
+          options[i].classList.add('active');
+        }} else {{
+          options[i].classList.remove('active');
+        }}
+      }}
+    }}
+  }}
+  window.__setEncoding = setEncodingUi;
+  if (btnEncoding && encodingPopover) {{
+    btnEncoding.addEventListener('click', function(e) {{
+      e.stopPropagation();
+      var isOpen = encodingPopover.style.display !== 'none';
+      encodingPopover.style.display = isOpen ? 'none' : 'block';
+    }});
+    encodingPopover.addEventListener('click', function(e) {{
+      var opt = e.target.closest('.encoding-option');
+      if (opt) {{
+        var enc = opt.getAttribute('data-encoding');
+        encodingPopover.style.display = 'none';
+        if (enc && enc !== currentEncoding && window.ipc) {{
+          window.ipc.postMessage('set-encoding:' + enc);
+        }}
+      }}
+    }});
+  }}
   document.addEventListener('contextmenu', function(e) {{
     if (!inEdit() || e.target !== ta) e.preventDefault();
   }});
@@ -2140,6 +2743,7 @@ body.editing .findbar {{ display: none !important; }}
 	    btnToggle.innerHTML = ICON_VIEW;
 	    btnToggle.title = L_VIEW;
 	    btnToggle.setAttribute('aria-label', L_VIEW);
+	    if (document.body.classList.contains('split-view')) scheduleLiveRender(0);
 	    autoResize();
 	    try {{
 	      ta.focus({{ preventScroll: true }});
@@ -2155,8 +2759,32 @@ body.editing .findbar {{ display: none !important; }}
     btnToggle.innerHTML = ICON_EDIT;
     btnToggle.title = L_EDIT;
     btnToggle.setAttribute('aria-label', L_EDIT);
+    if (pendingLiveRenderTimer) {{ clearTimeout(pendingLiveRenderTimer); pendingLiveRenderTimer = 0; }}
     restoreScrollProgress(progress);
   }}
+  function toggleSplitView() {{
+    var split = !document.body.classList.contains('split-view');
+    document.body.classList.toggle('split-view', split);
+    if (btnSplit) btnSplit.setAttribute('aria-pressed', split ? 'true' : 'false');
+    if (split) {{
+      scheduleLiveRender(0);
+    }}
+  }}
+  function scheduleLiveRender(delay) {{
+    if (!document.body.classList.contains('split-view')) return;
+    if (pendingLiveRenderTimer) clearTimeout(pendingLiveRenderTimer);
+    pendingLiveRenderTimer = setTimeout(function() {{
+      pendingLiveRenderTimer = 0;
+      if (window.ipc) window.ipc.postMessage('render-preview:' + ta.value);
+    }}, typeof delay === 'number' ? delay : 150);
+  }}
+  window.__setLivePreview = function(html, math, mermaid) {{
+    if (!document.body.classList.contains('split-view')) return;
+    document.getElementById('preview').innerHTML = html;
+    if (typeof hljs !== 'undefined') hljs.highlightAll();
+    setupCodeBlockCopyButtons();
+    if (sidebarSection === 'outline') renderSidebar();
+  }};
   window.__mdPreviewerToggleEdit = function() {{
     if (inEdit()) leaveEdit(); else enterEdit();
   }};
@@ -2169,8 +2797,16 @@ body.editing .findbar {{ display: none !important; }}
 
 	  btnOpen.addEventListener('click', openFile);
 	  tabOpen.addEventListener('click', newFile);
+	  if (btnSplit) {{
+	    btnSplit.addEventListener('click', function() {{
+	      toggleSplitView();
+	    }});
+	  }}
 	  btnSearch.addEventListener('click', showFind);
 	  document.addEventListener('click', function(e) {{
+	    if (tabContextMenu && tabContextMenu.style.display !== 'none' && !tabContextMenu.contains(e.target)) {{
+	      hideTabContextMenu();
+	    }}
 	    var closeTab = e.target && e.target.closest ? e.target.closest('[data-close-tab]') : null;
 	    if (closeTab) {{
 	      e.preventDefault();
@@ -2188,6 +2824,34 @@ body.editing .findbar {{ display: none !important; }}
 	    if (tab) {{
 	      e.preventDefault();
 	      requestTabAction('activate', tab.getAttribute('data-tab-id'));
+	      return;
+	    }}
+	    var copyBtn = e.target && e.target.closest ? e.target.closest('.code-copy-btn') : null;
+	    if (copyBtn) {{
+	      e.preventDefault();
+	      e.stopPropagation();
+	      var pre = copyBtn.closest('pre');
+	      if (!pre) return;
+	      var code = pre.querySelector('code');
+	      var text = code ? code.innerText : pre.innerText;
+	      if (!code && text.endsWith(copyBtn.innerText)) {{
+	        text = text.slice(0, text.length - copyBtn.innerText.length).trimEnd();
+	      }}
+	      copyText(text, function() {{
+	        var orig = copyBtn.textContent;
+	        copyBtn.textContent = L_COPIED;
+	        copyBtn.classList.add('copied');
+	        setTimeout(function() {{
+	          copyBtn.textContent = orig;
+	          copyBtn.classList.remove('copied');
+	        }}, 1500);
+	      }});
+	      return;
+	    }}
+	    var img = e.target && e.target.closest ? e.target.closest('#preview img') : null;
+	    if (img && !inEdit()) {{
+	      e.preventDefault();
+	      openLightbox(img.src, img.alt || img.title || '');
 	      return;
 	    }}
 	    var openBtn = e.target && e.target.closest ? e.target.closest('[data-open-file]') : null;
@@ -2238,12 +2902,45 @@ body.editing .findbar {{ display: none !important; }}
 	    window.ipc.postMessage('set-setting:' + btn.getAttribute('data-setting') + '=' + btn.getAttribute('data-value'));
 	  }});
 	  function renderSidebar() {{
-	    var items = sidebarData[sidebarSection] || [];
 	    var sections = sidebarEl.querySelectorAll('[data-sidebar-section]');
 	    for (var s = 0; s < sections.length; s++) {{
 	      sections[s].setAttribute('aria-pressed', sections[s].getAttribute('data-sidebar-section') === sidebarSection ? 'true' : 'false');
 	    }}
 	    sidebarList.textContent = '';
+	    if (sidebarSection === 'outline') {{
+	      var preview = document.getElementById('preview');
+	      var headings = preview ? preview.querySelectorAll('h1, h2, h3, h4, h5, h6') : [];
+	      if (!headings || !headings.length) {{
+	        var empty = document.createElement('div');
+	        empty.className = 'sidebar-empty';
+	        empty.textContent = SIDEBAR_OUTLINE_EMPTY;
+	        sidebarList.appendChild(empty);
+	        return;
+	      }}
+	      for (var i = 0; i < headings.length; i++) {{
+	        var h = headings[i];
+	        if (!h.id) h.id = 'heading-' + i;
+	        var level = parseInt(h.tagName.substring(1), 10) || 1;
+	        var text = (h.innerText || h.textContent || '').replace(/\s+$/, '');
+	        var authorActions = h.querySelector('.author-actions');
+	        if (authorActions) {{
+	          text = text.replace(authorActions.innerText, '').trim();
+	        }}
+	        var btn = document.createElement('button');
+	        btn.type = 'button';
+	        btn.className = 'sidebar-item outline-item outline-level-' + level;
+	        btn.setAttribute('data-outline-id', h.id);
+	        btn.title = text;
+	        var name = document.createElement('span');
+	        name.className = 'sidebar-name';
+	        name.textContent = text;
+	        btn.appendChild(name);
+	        sidebarList.appendChild(btn);
+	      }}
+	      updateOutlineActive();
+	      return;
+	    }}
+	    var items = sidebarData[sidebarSection] || [];
 	    if (!items.length) {{
 	      var empty = document.createElement('div');
 	      empty.className = 'sidebar-empty';
@@ -2271,6 +2968,31 @@ body.editing .findbar {{ display: none !important; }}
 	      sidebarList.appendChild(btn);
 	    }});
 	  }}
+	  function updateOutlineActive() {{
+	    if (sidebarSection !== 'outline') return;
+	    var preview = document.getElementById('preview');
+	    if (!preview) return;
+	    var headings = preview.querySelectorAll('h1, h2, h3, h4, h5, h6');
+	    if (!headings.length) return;
+	    var activeId = null;
+	    for (var i = 0; i < headings.length; i++) {{
+	      var rect = headings[i].getBoundingClientRect();
+	      if (rect.top <= 120) {{
+	        activeId = headings[i].id;
+	      }} else {{
+	        break;
+	      }}
+	    }}
+	    if (!activeId && headings.length > 0) activeId = headings[0].id;
+	    var items = sidebarList.querySelectorAll('.outline-item');
+	    for (var j = 0; j < items.length; j++) {{
+	      var match = items[j].getAttribute('data-outline-id') === activeId;
+	      items[j].classList.toggle('active', match);
+	    }}
+	  }}
+	  window.addEventListener('scroll', function() {{
+	    if (sidebarSection === 'outline') updateOutlineActive();
+	  }}, {{ passive: true }});
 	  window.__setSidebar = function(data) {{
 	    sidebarData = data || {{ folder: [], recent: [] }};
 	    renderSidebar();
@@ -2287,6 +3009,14 @@ body.editing .findbar {{ display: none !important; }}
 	    if (section) {{
 	      sidebarSection = section.getAttribute('data-sidebar-section');
 	      renderSidebar();
+	      return;
+	    }}
+	    var outlineItem = e.target && e.target.closest ? e.target.closest('[data-outline-id]') : null;
+	    if (outlineItem) {{
+	      var targetHeading = document.getElementById(outlineItem.getAttribute('data-outline-id'));
+	      if (targetHeading) {{
+	        targetHeading.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+	      }}
 	      return;
 	    }}
 	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
@@ -2372,6 +3102,168 @@ body.editing .findbar {{ display: none !important; }}
 	    document.body.removeChild(holder);
 	    return ok;
 	  }}
+	  function copyText(text, callback) {{
+	    if (!text) return;
+	    if (navigator.clipboard && navigator.clipboard.writeText) {{
+	      navigator.clipboard.writeText(text).then(function() {{
+	        if (callback) callback();
+	      }}, function() {{
+	        if (authorCopyFallback(text) && callback) callback();
+	      }});
+	    }} else {{
+	      if (authorCopyFallback(text) && callback) callback();
+	    }}
+	  }}
+	  function setupCodeBlockCopyButtons() {{
+	    var preview = document.getElementById('preview');
+	    if (!preview) return;
+	    var pres = preview.querySelectorAll('pre');
+	    for (var i = 0; i < pres.length; i++) {{
+	      var pre = pres[i];
+	      if (pre.classList && (pre.classList.contains('front-matter') || pre.classList.contains('mdp-mermaid'))) continue;
+	      if (pre.querySelector('.code-copy-btn')) continue;
+	      var btn = document.createElement('button');
+	      btn.type = 'button';
+	      btn.className = 'code-copy-btn';
+	      btn.textContent = L_COPY;
+	      btn.setAttribute('aria-label', L_COPY);
+	      pre.appendChild(btn);
+	    }}
+	  }}
+	  function showTabContextMenu(id, path, x, y) {{
+	    if (!tabContextMenu) return;
+	    contextMenuTabId = id;
+	    contextMenuTabPath = path || '';
+	    tabContextMenu.style.display = 'block';
+	    var menuWidth = tabContextMenu.offsetWidth || 160;
+	    var menuHeight = tabContextMenu.offsetHeight || 130;
+	    var posX = Math.min(x, window.innerWidth - menuWidth - 8);
+	    var posY = Math.min(y, window.innerHeight - menuHeight - 8);
+	    tabContextMenu.style.left = Math.max(8, posX) + 'px';
+	    tabContextMenu.style.top = Math.max(8, posY) + 'px';
+	  }}
+	  function hideTabContextMenu() {{
+	    if (tabContextMenu) tabContextMenu.style.display = 'none';
+	    contextMenuTabId = null;
+	    contextMenuTabPath = '';
+	  }}
+	  if (tabsEl) {{
+	    tabsEl.addEventListener('contextmenu', function(e) {{
+	      var tab = e.target && e.target.closest ? e.target.closest('[data-tab-id]') : null;
+	      if (!tab) return;
+	      e.preventDefault();
+	      e.stopPropagation();
+	      showTabContextMenu(tab.getAttribute('data-tab-id'), tab.title, e.clientX, e.clientY);
+	    }});
+	    tabsEl.addEventListener('auxclick', function(e) {{
+	      if (e.button === 1) {{
+	        var tab = e.target && e.target.closest ? e.target.closest('[data-tab-id]') : null;
+	        if (tab) {{
+	          e.preventDefault();
+	          e.stopPropagation();
+	          requestTabAction('close', tab.getAttribute('data-tab-id'));
+	        }}
+	      }}
+	    }});
+	  }}
+	  if (tabContextMenu) {{
+	    tabContextMenu.addEventListener('click', function(e) {{
+	      var item = e.target && e.target.closest ? e.target.closest('[data-tab-action]') : null;
+	      if (!item) return;
+	      var action = item.getAttribute('data-tab-action');
+	      var id = contextMenuTabId;
+	      var path = contextMenuTabPath;
+	      hideTabContextMenu();
+	      if (!id) return;
+	      if (action === 'close') {{
+	        requestTabAction('close', id);
+	      }} else if (action === 'close-others') {{
+	        requestTabAction('close-others', id);
+	      }} else if (action === 'copy-path') {{
+	        if (path) copyText(path);
+	      }} else if (action === 'reveal') {{
+	        window.ipc.postMessage('reveal-tab:' + id);
+	      }}
+	    }});
+	  }}
+	  function updateLightboxTransform() {{
+	    if (!lbImg) return;
+	    lbImg.style.transform = 'translate(' + lbTranslateX + 'px, ' + lbTranslateY + 'px) scale(' + lbScale + ')';
+	    if (lbZoomReset) lbZoomReset.textContent = Math.round(lbScale * 100) + '%';
+	  }}
+	  function openLightbox(src, caption) {{
+	    if (!lightbox || !lbImg) return;
+	    lbImg.src = src;
+	    if (lbCaption) lbCaption.textContent = caption || '';
+	    lbScale = 1.0;
+	    lbTranslateX = 0;
+	    lbTranslateY = 0;
+	    updateLightboxTransform();
+	    lightbox.style.display = 'flex';
+	    document.body.classList.add('lightbox-open');
+	  }}
+	  function closeLightbox() {{
+	    if (!lightbox) return;
+	    lightbox.style.display = 'none';
+	    document.body.classList.remove('lightbox-open');
+	    if (lbImg) lbImg.src = '';
+	  }}
+	  if (lbClose) lbClose.addEventListener('click', function(e) {{ e.stopPropagation(); closeLightbox(); }});
+	  if (lbZoomIn) lbZoomIn.addEventListener('click', function(e) {{
+	    e.stopPropagation();
+	    lbScale = Math.min(5.0, lbScale + 0.25);
+	    updateLightboxTransform();
+	  }});
+	  if (lbZoomOut) lbZoomOut.addEventListener('click', function(e) {{
+	    e.stopPropagation();
+	    lbScale = Math.max(0.2, lbScale - 0.25);
+	    updateLightboxTransform();
+	  }});
+	  if (lbZoomReset) lbZoomReset.addEventListener('click', function(e) {{
+	    e.stopPropagation();
+	    lbScale = 1.0;
+	    lbTranslateX = 0;
+	    lbTranslateY = 0;
+	    updateLightboxTransform();
+	  }});
+	  if (lightbox) {{
+	    lightbox.addEventListener('click', function(e) {{
+	      if (e.target === lightbox || (e.target && e.target.classList && (e.target.classList.contains('lightbox-backdrop') || e.target.classList.contains('lightbox-stage')))) {{
+	        closeLightbox();
+	      }}
+	    }});
+	    lightbox.addEventListener('wheel', function(e) {{
+	      e.preventDefault();
+	      var delta = e.deltaY < 0 ? 0.2 : -0.2;
+	      lbScale = Math.min(5.0, Math.max(0.2, lbScale + delta));
+	      updateLightboxTransform();
+	    }}, {{ passive: false }});
+	  }}
+	  if (lbImg) {{
+	    lbImg.addEventListener('mousedown', function(e) {{
+	      if (e.button !== 0) return;
+	      e.preventDefault();
+	      lbIsDragging = true;
+	      lbStartX = e.clientX - lbTranslateX;
+	      lbStartY = e.clientY - lbTranslateY;
+	      var stage = lbImg.closest('.lightbox-stage');
+	      if (stage) stage.classList.add('dragging');
+	    }});
+	  }}
+	  window.addEventListener('mousemove', function(e) {{
+	    if (!lbIsDragging) return;
+	    lbTranslateX = e.clientX - lbStartX;
+	    lbTranslateY = e.clientY - lbStartY;
+	    updateLightboxTransform();
+	  }});
+	  window.addEventListener('mouseup', function() {{
+	    if (!lbIsDragging) return;
+	    lbIsDragging = false;
+	    if (lbImg) {{
+	      var stage = lbImg.closest('.lightbox-stage');
+	      if (stage) stage.classList.remove('dragging');
+	    }}
+	  }});
 	  function flashCopied(btn) {{
 	    var original = btn.textContent;
 	    btn.textContent = AUTHOR_COPIED;
@@ -2388,22 +3280,18 @@ body.editing .findbar {{ display: none !important; }}
 	    var kind = btn.getAttribute('data-author-copy');
 	    var text = kind === 'title-line' ? authorDoc.titleLine : (kind === 'title' ? authorDoc.title : authorBodyText());
 	    if (!text) return;
-	    if (navigator.clipboard && navigator.clipboard.writeText) {{
-	      navigator.clipboard.writeText(text).then(function() {{ flashCopied(btn); }}, function() {{
-	        if (authorCopyFallback(text)) flashCopied(btn);
-	      }});
-	      return;
-	    }}
-	    if (authorCopyFallback(text)) flashCopied(btn);
+	    copyText(text, function() {{ flashCopied(btn); }});
 	  }});
 	  window.__setSettings = function(settings) {{
 	    settings = settings || {{}};
 	    authorMode = !!settings.authorMode;
 	    applyAuthorMode();
 	    document.body.classList.toggle('sidebar-open', !!settings.sidebarOpen);
+	    document.body.classList.toggle('no-wrap', settings.wordWrap === false);
 	    var current = {{
 	      'open-mode': settings.openMode,
 	      'tab-mode': settings.tabMode,
+	      'word-wrap': settings.wordWrap === false ? 'off' : 'on',
 	      'author-mode': settings.authorMode ? 'on' : 'off'
 	    }};
 	    var buttons = settingsControl.querySelectorAll('[data-setting]');
@@ -2422,11 +3310,20 @@ body.editing .findbar {{ display: none !important; }}
     // WebView::print() calls the right native API on each platform.
     setTimeout(function(){{ window.ipc.postMessage('print'); }}, 0);
   }});
-	  ta.addEventListener('input', function() {{ setDirty(true); scheduleAutosave(); autoResize(); updateDocumentStats(ta.value); }});
+	  ta.addEventListener('input', function() {{
+	    setDirty(true);
+	    scheduleAutosave();
+	    if (document.body.classList.contains('split-view')) scheduleLiveRender();
+	    autoResize();
+	    updateDocumentStats(ta.value);
+	  }});
   window.addEventListener('resize', function() {{ if (inEdit()) autoResize(); }});
   document.addEventListener('click', function(e) {{
     if (!zoomControl.contains(e.target)) zoomControl.classList.remove('open');
     if (!settingsControl.contains(e.target)) settingsControl.classList.remove('open');
+    if (encodingPopover && !encodingPopover.contains(e.target) && (!btnEncoding || !btnEncoding.contains(e.target))) {{
+      encodingPopover.style.display = 'none';
+    }}
   }});
 
   document.addEventListener('keydown', function(e) {{
@@ -2488,6 +3385,15 @@ body.editing .findbar {{ display: none !important; }}
       setTimeout(function(){{ window.ipc.postMessage('print'); }}, 0);
       return;
     }}
+	    if ((e.metaKey || e.ctrlKey) && (e.key === '\\' || e.code === 'Backslash')) {{
+	      e.preventDefault();
+	      if (!inEdit()) enterEdit();
+	      toggleSplitView();
+	      return;
+	    }}
+	    if (e.key === 'Escape' && encodingPopover && encodingPopover.style.display !== 'none') {{ encodingPopover.style.display = 'none'; return; }}
+	    if (e.key === 'Escape' && lightbox && lightbox.style.display !== 'none') {{ closeLightbox(); return; }}
+	    if (e.key === 'Escape' && tabContextMenu && tabContextMenu.style.display !== 'none') {{ hideTabContextMenu(); return; }}
 	    if (e.key === 'Escape' && document.body.classList.contains('finding')) {{ hideFind(); return; }}
 	    if (e.key === 'Escape' && inEdit()) {{ leaveEdit(); }}
   }});
@@ -2500,6 +3406,8 @@ body.editing .findbar {{ display: none !important; }}
     }}
     document.getElementById('preview').innerHTML = previewHtml;
     if (window.__applyAuthorMode) window.__applyAuthorMode();
+    setupCodeBlockCopyButtons();
+    if (sidebarSection === 'outline') renderSidebar();
     (window.requestIdleCallback || function(fn){{ return setTimeout(fn, 0); }})(function() {{
       if (typeof hljs !== 'undefined') hljs.highlightAll();
       if (window.__enhancePreview) window.__enhancePreview();
@@ -2626,6 +3534,8 @@ body.editing .findbar {{ display: none !important; }}
   // it lands, hljs.highlightAll() gets called by the injected bootstrap
   // and __setPreview.
 
+  setupCodeBlockCopyButtons();
+
   // Signal Rust after first paint (triggers hljs inject; bench mode exits).
   requestAnimationFrame(function() {{
     requestAnimationFrame(function() {{
@@ -2660,6 +3570,18 @@ if(window.__enhancePreview)window.__enhancePreview();
         sidebar_folder = s.sidebar_folder,
         sidebar_recent = s.sidebar_recent,
         sidebar_empty_js = escape_js(s.sidebar_empty),
+        sidebar_outline = s.sidebar_outline,
+        sidebar_outline_empty_js = escape_js(s.sidebar_outline_empty),
+        btn_split = s.btn_split,
+        set_word_wrap = s.set_word_wrap,
+        set_wrap_on = s.set_wrap_on,
+        set_wrap_off = s.set_wrap_off,
+        code_copy_js = escape_js(s.code_copy),
+        code_copied_js = escape_js(s.code_copied),
+        tab_menu_close = s.tab_menu_close,
+        tab_menu_close_others = s.tab_menu_close_others,
+        tab_menu_copy_path = s.tab_menu_copy_path,
+        tab_menu_reveal = s.tab_menu_reveal,
         set_author_mode = s.set_author_mode,
         set_author_off = s.set_author_off,
         set_author_on = s.set_author_on,
@@ -2677,11 +3599,28 @@ if(window.__enhancePreview)window.__enhancePreview();
         set_tab_single = s.set_tab_single,
         stat_words_js = escape_js(s.stat_words),
         stat_chars_js = escape_js(s.stat_chars),
+        encoding_title = s.encoding_title,
+        initial_encoding = initial_encoding,
+        opt_utf8 = if initial_encoding == "UTF-8" { " active" } else { "" },
+        opt_gbk = if initial_encoding == "GBK" { " active" } else { "" },
+        opt_u16le = if initial_encoding == "UTF-16 LE" { " active" } else { "" },
+        opt_u16be = if initial_encoding == "UTF-16 BE" { " active" } else { "" },
         body_class = body_class,
         needs_math = flags.math,
         needs_mermaid = flags.mermaid,
         preview_enhance_js = PREVIEW_ENHANCE_JS,
     )
+}
+
+fn build_page(
+    preview_html: &str,
+    raw_md: &str,
+    base_href: Option<&str>,
+    flags: EnhanceFlags,
+    s: &Strings,
+    empty: bool,
+) -> String {
+    build_page_with_encoding(preview_html, raw_md, base_href, flags, s, empty, "UTF-8")
 }
 
 fn escape_js(s: &str) -> String {
@@ -3310,6 +4249,114 @@ mod tests {
 
         assert_eq!(created.file_name().unwrap(), "新建 2.md");
         assert_eq!(fs::read_to_string(created).unwrap(), "");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_document_to_string_handles_utf8_bom_and_utf16() {
+        let dir = temp_test_dir("encoding-detection");
+
+        // 1. 标准 UTF-8
+        let p_utf8 = dir.join("utf8.txt");
+        fs::write(&p_utf8, "hello 编码".as_bytes()).unwrap();
+        assert_eq!(read_document_to_string(&p_utf8).unwrap(), "hello 编码");
+
+        // 2. 带 BOM 的 UTF-8
+        let p_utf8_bom = dir.join("utf8_bom.txt");
+        let mut bytes_bom = vec![0xEF, 0xBB, 0xBF];
+        bytes_bom.extend_from_slice("with bom 文本".as_bytes());
+        fs::write(&p_utf8_bom, &bytes_bom).unwrap();
+        assert_eq!(
+            read_document_to_string(&p_utf8_bom).unwrap(),
+            "with bom 文本"
+        );
+
+        // 3. 带 BOM 的 UTF-16 LE
+        let p_utf16_le = dir.join("utf16_le.txt");
+        let u16s: Vec<u16> = "utf16 文本".encode_utf16().collect();
+        let mut bytes_le = vec![0xFF, 0xFE];
+        for u in u16s {
+            bytes_le.extend_from_slice(&u.to_le_bytes());
+        }
+        fs::write(&p_utf16_le, &bytes_le).unwrap();
+        assert_eq!(read_document_to_string(&p_utf16_le).unwrap(), "utf16 文本");
+
+        // 4. 带 BOM 的 UTF-16 BE
+        let p_utf16_be = dir.join("utf16_be.txt");
+        let u16s: Vec<u16> = "utf16 be 文本".encode_utf16().collect();
+        let mut bytes_be = vec![0xFE, 0xFF];
+        for u in u16s {
+            bytes_be.extend_from_slice(&u.to_be_bytes());
+        }
+        fs::write(&p_utf16_be, &bytes_be).unwrap();
+        assert_eq!(
+            read_document_to_string(&p_utf16_be).unwrap(),
+            "utf16 be 文本"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn build_page_includes_all_ux_enhancement_components() {
+        let strings = Strings::for_lang(Lang::En);
+        let page = build_page(
+            "# Heading",
+            "# Heading",
+            None,
+            EnhanceFlags::default(),
+            &strings,
+            false,
+        );
+        assert!(page.contains("code-copy-btn"));
+        assert!(page.contains("data-sidebar-section=\"outline\""));
+        assert!(page.contains("id=\"btn-split\""));
+        assert!(page.contains("id=\"tab-context-menu\""));
+        assert!(page.contains("data-tab-action=\"close-others\""));
+        assert!(page.contains("data-tab-action=\"copy-path\""));
+        assert!(page.contains("data-tab-action=\"reveal\""));
+        assert!(page.contains("id=\"lightbox\""));
+        assert!(page.contains("data-setting=\"word-wrap\""));
+        assert!(page.contains("id=\"encoding-control\""));
+        assert!(page.contains("id=\"btn-encoding\""));
+        assert!(page.contains("id=\"encoding-popover\""));
+        assert!(page.contains("order: 1;"));
+        assert!(page.contains("order: 2;"));
+        assert!(page.contains("border-right: 2px solid"));
+    }
+
+    #[test]
+    fn read_and_write_document_with_encoding_roundtrips() {
+        let dir = temp_test_dir("encoding-roundtrip");
+        let p = dir.join("test.txt");
+
+        // UTF-8
+        write_document_with_encoding(&p, "测试 UTF-8 编码", Some("UTF-8")).unwrap();
+        let (content, enc) = read_document_with_encoding(&p, None).unwrap();
+        assert_eq!(content, "测试 UTF-8 编码");
+        assert_eq!(enc, "UTF-8");
+
+        // UTF-16 LE
+        write_document_with_encoding(&p, "测试 UTF-16 LE", Some("UTF-16 LE")).unwrap();
+        let (content, enc) = read_document_with_encoding(&p, None).unwrap();
+        assert_eq!(content, "测试 UTF-16 LE");
+        assert_eq!(enc, "UTF-16 LE");
+
+        // UTF-16 BE
+        write_document_with_encoding(&p, "测试 UTF-16 BE", Some("UTF-16 BE")).unwrap();
+        let (content, enc) = read_document_with_encoding(&p, None).unwrap();
+        assert_eq!(content, "测试 UTF-16 BE");
+        assert_eq!(enc, "UTF-16 BE");
+
+        #[cfg(target_os = "windows")]
+        {
+            // GBK
+            write_document_with_encoding(&p, "测试 GBK 编码", Some("GBK")).unwrap();
+            let (content, enc) = read_document_with_encoding(&p, Some("GBK")).unwrap();
+            assert_eq!(content, "测试 GBK 编码");
+            assert_eq!(enc, "GBK");
+        }
+
         let _ = fs::remove_dir_all(dir);
     }
 }
@@ -4171,10 +5218,13 @@ fn render_active_document(
         return;
     };
 
-    match fs::read_to_string(&active.path) {
-        Ok(raw) => {
+    match read_document_with_encoding(&active.path, active.encoding.as_deref()) {
+        Ok((raw, resolved_encoding)) => {
             if let Some(tab) = session.get_mut(active.id) {
                 tab.missing = false;
+                if tab.encoding.is_none() {
+                    tab.encoding = Some(resolved_encoding.to_string());
+                }
             }
             remember_recent_file(recent_files, &active.path);
             let is_txt = is_txt_document(&active.path);
@@ -4182,12 +5232,13 @@ fn render_active_document(
             let base_href = base_href.unwrap_or_default();
             *enhance_flags.lock().unwrap() = flags;
             let _ = webview.evaluate_script(&format!(
-                "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {});",
+                "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
                 escape_js(&html),
                 escape_js(&raw),
                 escape_js(&base_href),
                 flags.math,
-                flags.mermaid
+                flags.mermaid,
+                escape_js(resolved_encoding)
             ));
             if is_txt {
                 update_author_doc(webview, "");
@@ -4344,19 +5395,25 @@ fn main() {
     // 作者模式要的标题/正文只能在 webview 建好后单独推一次
     let mut initial_raw = String::new();
     let initial_page = match initial_session.active().cloned() {
-        Some(tab) => match fs::read_to_string(&tab.path) {
-            Ok(raw) => {
+        Some(tab) => match read_document_with_encoding(&tab.path, tab.encoding.as_deref()) {
+            Ok((raw, resolved_encoding)) => {
+                if let Some(active) = initial_session.active_mut() {
+                    if active.encoding.is_none() {
+                        active.encoding = Some(resolved_encoding.to_string());
+                    }
+                }
                 remember_recent_file(&recent_files, &tab.path);
                 initial_raw = raw.clone();
                 let (html_body, doc_flags, base_href) = document_to_html(&tab.path, &raw);
                 initial_flags = doc_flags;
-                build_page(
+                build_page_with_encoding(
                     &html_body,
                     &raw,
                     base_href.as_deref(),
                     initial_flags,
                     &strings,
                     false,
+                    resolved_encoding,
                 )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -4486,12 +5543,12 @@ fn main() {
                     return;
                 };
                 if let Some(content) = pending_content {
-                    let path = session_for_ipc
+                    let active_info = session_for_ipc
                         .lock()
                         .unwrap()
                         .active()
-                        .map(|tab| tab.path.clone());
-                    let Some(path) = path else {
+                        .map(|tab| (tab.path.clone(), tab.encoding.clone()));
+                    let Some((path, encoding)) = active_info else {
                         return;
                     };
                     *last_self_write_for_ipc.lock().unwrap() = Some(SelfWriteRecord {
@@ -4499,7 +5556,7 @@ fn main() {
                         path: path.clone(),
                         content: content.to_string(),
                     });
-                    match fs::write(&path, content) {
+                    match write_document_with_encoding(&path, content, encoding.as_deref()) {
                         Ok(()) => {
                             let _ = proxy_for_ipc.send_event(UserEvent::FileSaved(path));
                         }
@@ -4519,6 +5576,9 @@ fn main() {
                     "close" => {
                         let _ = proxy_for_ipc.send_event(UserEvent::CloseTab(id));
                     }
+                    "close-others" => {
+                        let _ = proxy_for_ipc.send_event(UserEvent::CloseOthers(id));
+                    }
                     _ => {}
                 }
             } else if let Some(change) = body.strip_prefix("set-setting:") {
@@ -4533,6 +5593,12 @@ fn main() {
                 if let Ok(id) = id.parse::<u64>() {
                     let _ = proxy_for_ipc.send_event(UserEvent::LocateTab(id));
                 }
+            } else if let Some(id) = body.strip_prefix("reveal-tab:") {
+                if let Ok(id) = id.parse::<u64>() {
+                    let _ = proxy_for_ipc.send_event(UserEvent::RevealTab(id));
+                }
+            } else if let Some(content) = body.strip_prefix("render-preview:") {
+                let _ = proxy_for_ipc.send_event(UserEvent::RenderPreview(content.to_string()));
             } else if body == "dirty:1" {
                 let _ = proxy_for_ipc.send_event(UserEvent::DirtyChanged(true));
             } else if body == "dirty:0" {
@@ -4555,18 +5621,18 @@ fn main() {
                     let _ = proxy_for_ipc.send_event(UserEvent::FileChanged(path));
                 }
             } else if let Some(content) = body.strip_prefix("save:") {
-                let path = session_for_ipc
+                let active_info = session_for_ipc
                     .lock()
                     .unwrap()
                     .active()
-                    .map(|tab| tab.path.clone());
-                if let Some(path) = path {
+                    .map(|tab| (tab.path.clone(), tab.encoding.clone()));
+                if let Some((path, encoding)) = active_info {
                     *last_self_write_for_ipc.lock().unwrap() = Some(SelfWriteRecord {
                         at: Instant::now(),
                         path: path.clone(),
                         content: content.to_string(),
                     });
-                    match fs::write(&path, content) {
+                    match write_document_with_encoding(&path, content, encoding.as_deref()) {
                         Ok(()) => {
                             let _ = proxy_for_ipc.send_event(UserEvent::FileSaved(path));
                         }
@@ -4578,6 +5644,8 @@ fn main() {
                         }
                     }
                 }
+            } else if let Some(enc) = body.strip_prefix("set-encoding:") {
+                let _ = proxy_for_ipc.send_event(UserEvent::SetEncoding(enc.to_string()));
             }
         })
         .with_drag_drop_handler({
@@ -4813,6 +5881,57 @@ fn main() {
                     }
                 }
             }
+            TaoEvent::UserEvent(UserEvent::CloseOthers(id)) => {
+                let mut session = session_for_event.lock().unwrap();
+                let was_active = session.active_id == Some(id);
+                if session.close_others(id) {
+                    persist_session(&session);
+                    if !was_active {
+                        render_active_document(
+                            &webview,
+                            &window,
+                            &mut session,
+                            &recent_files,
+                            &enhance_flags,
+                            &mut loaded_enhancers,
+                            &strings,
+                        );
+                        let path = session.active().map(|tab| tab.path.clone());
+                        drop(session);
+                        install_file_watcher(&watcher_for_event, &proxy, &last_self_write, path);
+                    } else {
+                        update_tabs(&webview, &session);
+                    }
+                }
+            }
+            TaoEvent::UserEvent(UserEvent::RevealTab(id)) => {
+                let path = session_for_event
+                    .lock()
+                    .unwrap()
+                    .tabs
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.path.clone());
+                if let Some(path) = path {
+                    reveal_in_file_manager(&path);
+                }
+            }
+            TaoEvent::UserEvent(UserEvent::RenderPreview(content)) => {
+                let path = session_for_event
+                    .lock()
+                    .unwrap()
+                    .active()
+                    .map(|t| t.path.clone());
+                if let Some(path) = path {
+                    let (html, flags, _) = document_to_html(&path, &content);
+                    let _ = webview.evaluate_script(&format!(
+                        "if(window.__setLivePreview)window.__setLivePreview('{}', {}, {});",
+                        escape_js(&html),
+                        flags.math,
+                        flags.mermaid
+                    ));
+                }
+            }
             TaoEvent::UserEvent(UserEvent::CloseActiveTab) => {
                 if session_for_event.lock().unwrap().active_id.is_some() {
                     let _ = webview.evaluate_script(
@@ -4900,6 +6019,23 @@ fn main() {
                     persist_session(&session);
                 }
             }
+            TaoEvent::UserEvent(UserEvent::SetEncoding(enc)) => {
+                let mut session = session_for_event.lock().unwrap();
+                if let Some(tab) = session.active_mut() {
+                    tab.encoding = Some(enc);
+                    tab.dirty = false;
+                }
+                render_active_document(
+                    &webview,
+                    &window,
+                    &mut session,
+                    &recent_files,
+                    &enhance_flags,
+                    &mut loaded_enhancers,
+                    &strings,
+                );
+                persist_session(&session);
+            }
             TaoEvent::UserEvent(UserEvent::FileSaved(path)) => {
                 if warned_external_change.as_ref() == Some(&path) {
                     warned_external_change = None;
@@ -4912,7 +6048,8 @@ fn main() {
                 }
                 APP_DIRTY.store(false, Ordering::SeqCst);
                 if active_matches {
-                    if let Ok(raw) = fs::read_to_string(&path) {
+                    let enc = session.active().and_then(|t| t.encoding.clone());
+                    if let Ok((raw, _)) = read_document_with_encoding(&path, enc.as_deref()) {
                         let is_txt = is_txt_document(&path);
                         let (html, flags, _) = document_to_html(&path, &raw);
                         *enhance_flags.lock().unwrap() = flags;

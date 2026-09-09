@@ -26,9 +26,13 @@ pub enum TabMode {
     Single,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// 用户偏好。容器上带 `serde(default)`，所以手工编辑漏了字段、
 /// 或者以后新增字段，都不会让整份配置失效
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub open_mode: OpenMode,
@@ -37,6 +41,21 @@ pub struct Settings {
     pub sidebar_open: bool,
     /// 作者模式：在标题和正文旁边显示复制按钮，方便整段取用去发布
     pub author_mode: bool,
+    /// 自动换行：代码块和编辑器正文是否自动软换行
+    #[serde(default = "default_true")]
+    pub word_wrap: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            open_mode: OpenMode::default(),
+            tab_mode: TabMode::default(),
+            sidebar_open: false,
+            author_mode: false,
+            word_wrap: true,
+        }
+    }
 }
 
 impl Settings {
@@ -98,6 +117,14 @@ impl Settings {
                 sidebar_open: false,
                 ..*self
             },
+            ("word-wrap", "on") => Self {
+                word_wrap: true,
+                ..*self
+            },
+            ("word-wrap", "off") => Self {
+                word_wrap: false,
+                ..*self
+            },
             _ => return false,
         };
         if updated == *self {
@@ -126,6 +153,7 @@ mod tests {
         assert!(settings.keeps_session());
         assert!(!settings.sidebar_open);
         assert!(!settings.author_mode);
+        assert!(settings.word_wrap);
     }
 
     #[test]
@@ -159,6 +187,11 @@ mod tests {
         assert!(!settings.apply("sidebar", "1"));
         assert!(settings.apply("sidebar", "0"));
         assert!(!settings.sidebar_open);
+        assert!(settings.apply("word-wrap", "off"));
+        assert!(!settings.word_wrap);
+        assert!(!settings.apply("word-wrap", "off"));
+        assert!(settings.apply("word-wrap", "on"));
+        assert!(settings.word_wrap);
         assert_eq!(settings.tab_mode, TabMode::Single);
         assert_eq!(settings.open_mode, OpenMode::NewTab);
     }
@@ -180,6 +213,7 @@ mod tests {
             tab_mode: TabMode::Single,
             sidebar_open: true,
             author_mode: true,
+            word_wrap: false,
         };
 
         saved.save(&path).unwrap();
@@ -187,6 +221,7 @@ mod tests {
         let raw = fs::read_to_string(&path).unwrap();
         assert!(raw.contains("\"openMode\": \"new-window\""), "{raw}");
         assert!(raw.contains("\"tabMode\": \"single\""), "{raw}");
+        assert!(raw.contains("\"wordWrap\": false"), "{raw}");
         assert_eq!(Settings::load(&path), saved);
 
         fs::write(&path, "{ not json").unwrap();
@@ -212,6 +247,7 @@ mod tests {
 
         assert_eq!(loaded.tab_mode, TabMode::Single);
         assert_eq!(loaded.open_mode, OpenMode::NewTab);
+        assert!(loaded.word_wrap);
         let _ = fs::remove_dir_all(dir);
     }
 }
