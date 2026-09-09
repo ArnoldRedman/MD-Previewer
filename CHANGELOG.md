@@ -2,6 +2,24 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.2.1
+
+- Added document encoding display and switcher:
+  - Displays the active encoding format in the top-right tab bar next to document statistics
+  - Clicking the encoding label opens a popover to quickly switch between UTF-8, GBK / ANSI, UTF-16 LE, and UTF-16 BE
+  - Automatically decodes and re-renders the document upon switching, eliminating mojibake without external conversion tools
+  - Respects the selected encoding when saving changes back to disk
+- Optimized split-view editing mode:
+  - Repositioned the source editor to the left and the live rendered preview to the right
+  - Added a distinct 2px vertical divider line and subtle pane contrast matching IDE/Rider preview ergonomics
+  - Fixed the split-view toolbar button icon to be precisely centered in its bounding box
+- Enhanced reading and editing UX:
+  - Added one-click copy buttons to code blocks on both desktop and mobile previews
+  - Added Table of Contents (TOC Outline) navigation in the collapsible sidebar with smooth anchor jumping
+  - Added an image lightbox viewer with click-to-zoom, mouse drag panning, and zoom controls
+  - Added tab context menu (close other tabs, copy path, reveal in Windows Explorer / macOS Finder)
+  - Added a word wrap toggle in the settings popover for code blocks and editor source
+
 ## 1.2.0
 
 - Added native plain text (`.txt`) document reading and preview support:

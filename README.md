@@ -21,9 +21,14 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 
 - Opens Markdown and `.txt` plain text files from the command line, file picker, drag and drop, or OS file associations.
 - Dedicated plain text rendering for `.txt` files: preserves line breaks, indentation, and safe escaping without Markdown syntax collisions.
+- Document encoding detection and switcher: displays the active encoding in the top-right and allows switching between UTF-8, GBK / ANSI, UTF-16 LE, and UTF-16 BE with safe re-decoding and saving.
+- Side-by-side split view: source editor on the left, live preview on the right, with a clean Rider-style divider line and centered split button.
 - Keeps multiple documents in tabs and restores the previous session; opening another file from Windows Explorer reuses the running window.
-- Lets the toolbar gear choose whether a Markdown file reuses the running window or opens its own, and whether the tab bar accumulates tabs or keeps only the current document.
-- Offers a collapsible left sidebar listing the current document's folder and recently opened files, for switching between chapters without the file picker.
+- Tab context menu: close other tabs, copy path, and reveal the file in Explorer or Finder.
+- Offers a collapsible left sidebar listing the current document's folder, recent files, and a Table of Contents (TOC Outline) for quick anchor navigation.
+- One-click copy buttons on code blocks across desktop and mobile previews.
+- Image lightbox viewer with click-to-zoom, mouse drag panning, and zoom controls.
+- Settings panel for window reuse, tab accumulation mode, and word wrap toggle for source and code blocks.
 - Includes an author mode that adds copy buttons for the chapter heading line, the title without its chapter number, and the whole body.
 - Reloads previews when another editor changes the file.
 - Supports tables, task lists, syntax highlighting, GitHub alerts, KaTeX, Mermaid, local images, and local document links.

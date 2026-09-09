@@ -28,6 +28,6 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.arnoldredman.mdpreviewer.finder-extension
         PRODUCT_NAME: MDPreviewerFinderExtension
-        MARKETING_VERSION: "1.2.0"
+        MARKETING_VERSION: "1.2.1"
         CURRENT_PROJECT_VERSION: "1"
         CODE_SIGN_ENTITLEMENTS: Extension.entitlements
