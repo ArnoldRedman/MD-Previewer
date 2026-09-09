@@ -2,6 +2,13 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.3.1
+
+- Release build for automated update channel deployment:
+  - Validates and delivers in-app auto-update from v1.3.0 and prior versions
+  - Features the new brand application icon assets
+  - Includes download failure auto-recovery to prevent process dropping
+
 ## 1.3.0
 
 - Updated brand application icon across all platforms:

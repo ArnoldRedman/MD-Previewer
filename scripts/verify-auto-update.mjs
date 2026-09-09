@@ -43,7 +43,7 @@ let desktopScript = mainRs
   .slice(scriptStart + '<script>'.length, scriptEnd)
   .replaceAll('{{', '{')
   .replaceAll('}}', '}')
-  .replaceAll('{cargo_version}', '1.3.0')
+  .replaceAll('{cargo_version}', '1.3.1')
   .replaceAll('{update_status_checking_js}', 'Checking...')
   .replaceAll('{update_status_latest_js}', 'Up to date')
   .replaceAll('{update_status_failed_js}', 'Check failed')
@@ -131,7 +131,7 @@ const htmlContent = `
           <div class="settings-sep"></div>
           <div class="settings-row">
             <div class="settings-label">
-              <span>Version: v1.3.0</span>
+              <span>Version: v1.3.1</span>
               <span id="update-status-msg" class="update-status-msg"></span>
             </div>
             <button type="button" id="btn-check-update" class="settings-action-btn">Check</button>
@@ -221,12 +221,12 @@ const versionComparisonResult = await page.evaluate(() => {
   };
 
   return {
-    test1: isNewer('v1.3.1', '1.3.0'),     // true
-    test2: isNewer('v1.4.0', '1.3.0'),     // true
-    test3: isNewer('v1.3.0', '1.3.0'),     // false
-    test4: isNewer('v1.2.9', '1.3.0'),     // false
-    test5: isNewer('v1.10.0', '1.3.0'),    // true
-    test6: isNewer('1.3.1', '1.3.0'),      // true
+    test1: isNewer('v1.3.2', '1.3.1'),     // true
+    test2: isNewer('v1.4.0', '1.3.1'),     // true
+    test3: isNewer('v1.3.1', '1.3.1'),     // false
+    test4: isNewer('v1.3.0', '1.3.1'),     // false
+    test5: isNewer('v1.10.0', '1.3.1'),    // true
+    test6: isNewer('1.3.2', '1.3.1'),      // true
   };
 });
 
@@ -240,13 +240,13 @@ console.log('Verifying 3: Modal show, hide, and IPC trigger...');
 await page.evaluate(() => {
   // Simulate detecting a release
   const fakeRelease = {
-    tag_name: 'v1.3.1',
-    name: 'v1.3.1 — Test Update',
-    body: '## 1.3.1 Notes\n- Fixed something',
-    html_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/tag/v1.3.1',
+    tag_name: 'v1.3.2',
+    name: 'v1.3.2 — Test Update',
+    body: '## 1.3.2 Notes\n- Fixed something',
+    html_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/tag/v1.3.2',
     assets: [
-      { name: 'MD-Previewer-Setup.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.3.1/MD-Previewer-Setup.exe' },
-      { name: 'MD-Previewer-windows-x64.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.3.1/MD-Previewer-windows-x64.exe' }
+      { name: 'MD-Previewer-Setup.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.3.2/MD-Previewer-Setup.exe' },
+      { name: 'MD-Previewer-windows-x64.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.3.2/MD-Previewer-windows-x64.exe' }
     ]
   };
 
@@ -259,15 +259,15 @@ const isModalVisible = await page.$eval('#update-modal', el => el.style.display 
 if (!isModalVisible) throw new Error('Expected #update-modal to be displayed on update button click');
 
 const badgeText = await page.$eval('#update-badge', el => el.textContent.trim());
-if (badgeText !== 'v1.3.1') throw new Error(`Expected badge text 'v1.3.1', got '${badgeText}'`);
+if (badgeText !== 'v1.3.2') throw new Error(`Expected badge text 'v1.3.2', got '${badgeText}'`);
 
 const releaseName = await page.$eval('#update-release-name', el => el.textContent.trim());
-if (releaseName !== 'v1.3.1 — Test Update') throw new Error(`Expected release name 'v1.3.1 — Test Update', got '${releaseName}'`);
+if (releaseName !== 'v1.3.2 — Test Update') throw new Error(`Expected release name 'v1.3.2 — Test Update', got '${releaseName}'`);
 
 // Test clicking "Update Now"
 await page.click('#btn-do-update');
 const messages = await page.evaluate(() => window.__messages);
-const hasSelfUpdateMsg = messages.some(m => m.startsWith('self-update:https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.3.1/MD-Previewer-windows-x64.exe'));
+const hasSelfUpdateMsg = messages.some(m => m.startsWith('self-update:https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.3.2/MD-Previewer-windows-x64.exe'));
 if (!hasSelfUpdateMsg) {
   throw new Error('Expected self-update IPC message with portable exe download url, got: ' + JSON.stringify(messages));
 }
@@ -304,7 +304,7 @@ if (checkBtnBox.width < 100) {
 if (checkBtnBox.scrollWidth > checkBtnBox.offsetWidth + 2) {
   throw new Error(`Text in #btn-check-update overflows container! scrollWidth=${checkBtnBox.scrollWidth}, offsetWidth=${checkBtnBox.offsetWidth}`);
 }
-if (!checkBtnBox.hasUpdate || !checkBtnBox.text.includes('v1.3.1')) {
+if (!checkBtnBox.hasUpdate || !checkBtnBox.text.includes('v1.3.2')) {
   throw new Error(`Expected #btn-check-update to display detected version and have 'has-update' class, got: ${JSON.stringify(checkBtnBox)}`);
 }
 
