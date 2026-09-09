@@ -1,5 +1,7 @@
 #[cfg(target_os = "windows")]
 fn main() {
+    println!("cargo:rerun-if-changed=assets/icon.ico");
+    println!("cargo:rerun-if-changed=build.rs");
     let mut res = winresource::WindowsResource::new();
     res.set_icon("assets/icon.ico");
     let version = env!("CARGO_PKG_VERSION");

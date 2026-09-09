@@ -2,91 +2,28 @@
 """Generate MD Previewer icons for desktop and mobile platforms."""
 
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
+SOURCE = ASSETS / "icon_source.png"
 IOS = ROOT / "mobile/ios/MDPreviewerMobile/Assets.xcassets/AppIcon.appiconset"
 ANDROID = ROOT / "mobile/android/app/src/main/res"
 
 
-def draw_icon(size: int, transparent: bool) -> Image.Image:
-    scale = size / 1024
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0) if transparent else (15, 23, 42, 255))
-    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-
-    margin = round(48 * scale) if transparent else 0
-    box = (margin, margin, size - margin - 1, size - margin - 1)
-    radius = round(220 * scale) if transparent else 0
-    draw.rounded_rectangle(box, radius=radius, fill=(18, 32, 56, 255))
-    if transparent:
-        mask = Image.new("L", image.size, 0)
-        ImageDraw.Draw(mask).rounded_rectangle(box, radius=radius, fill=255)
-        layer.putalpha(mask)
-    image.alpha_composite(layer)
-    draw = ImageDraw.Draw(image)
-
-    # A paper sheet with a folded corner.
-    page = tuple(round(value * scale) for value in (250, 175, 774, 849))
-    page_radius = round(56 * scale)
-    draw.rounded_rectangle(page, radius=page_radius, fill=(248, 250, 252, 255))
-    fold = [
-        (round(625 * scale), round(175 * scale)),
-        (round(774 * scale), round(324 * scale)),
-        (round(625 * scale), round(324 * scale)),
-    ]
-    draw.polygon(fold, fill=(203, 213, 225, 255))
-    draw.polygon(
-        [fold[0], fold[1], (round(774 * scale), round(175 * scale))],
-        fill=(45, 212, 191, 255),
-    )
-
-    # Two Markdown-like text lines.
-    line_radius = max(1, round(12 * scale))
-    draw.rounded_rectangle(
-        tuple(round(value * scale) for value in (340, 360, 610, 386)),
-        radius=line_radius,
-        fill=(148, 163, 184, 255),
-    )
-    draw.rounded_rectangle(
-        tuple(round(value * scale) for value in (340, 412, 680, 438)),
-        radius=line_radius,
-        fill=(203, 213, 225, 255),
-    )
-
-    # Preview eye: the product's distinct mark.
-    eye = [
-        (round(330 * scale), round(610 * scale)),
-        (round(410 * scale), round(532 * scale)),
-        (round(512 * scale), round(500 * scale)),
-        (round(614 * scale), round(532 * scale)),
-        (round(694 * scale), round(610 * scale)),
-        (round(614 * scale), round(688 * scale)),
-        (round(512 * scale), round(720 * scale)),
-        (round(410 * scale), round(688 * scale)),
-    ]
-    draw.polygon(eye, fill=(20, 184, 166, 255))
-    draw.ellipse(
-        tuple(round(value * scale) for value in (430, 528, 594, 692)),
-        fill=(240, 253, 250, 255),
-    )
-    draw.ellipse(
-        tuple(round(value * scale) for value in (474, 572, 550, 648)),
-        fill=(15, 23, 42, 255),
-    )
-    return image
+def load_icon(size: int) -> Image.Image:
+    with Image.open(SOURCE) as source:
+        return source.convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
 
 
 def main() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
-    desktop = draw_icon(1024, transparent=True)
-    mobile = draw_icon(1024, transparent=False)
+    icon = load_icon(1024)
 
-    desktop.save(ASSETS / "icon_1024.png")
-    desktop.save(ASSETS / "icon.icns", format="ICNS")
+    icon.save(ASSETS / "icon_1024.png")
+    icon.save(ASSETS / "icon.icns", format="ICNS")
     windows_sizes = [16, 32, 48, 64, 128, 256]
-    windows_icons = [draw_icon(size, transparent=True) for size in windows_sizes]
+    windows_icons = [load_icon(size) for size in windows_sizes]
     windows_icons[-1].save(
         ASSETS / "icon.ico",
         format="ICO",
@@ -110,7 +47,7 @@ def main() -> None:
     }
     IOS.mkdir(parents=True, exist_ok=True)
     for name, pixels in ios_sizes.items():
-        mobile.resize((pixels, pixels), Image.Resampling.LANCZOS).convert("RGB").save(IOS / name)
+        load_icon(pixels).save(IOS / name)
 
     android_sizes = {
         "mipmap-mdpi": 48,
@@ -122,10 +59,10 @@ def main() -> None:
     for directory, pixels in android_sizes.items():
         output = ANDROID / directory / "ic_launcher.png"
         output.parent.mkdir(parents=True, exist_ok=True)
-        desktop.resize((pixels, pixels), Image.Resampling.LANCZOS).save(output)
+        load_icon(pixels).save(output)
 
     (ROOT / "docs").mkdir(exist_ok=True)
-    desktop.save(ROOT / "docs/icon.png")
+    icon.save(ROOT / "docs/icon.png")
     print("Generated MD Previewer icons")
 
 
