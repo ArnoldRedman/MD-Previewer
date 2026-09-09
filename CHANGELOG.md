@@ -2,6 +2,18 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.3.0
+
+- Added automatic update checking and Windows in-app one-click self-upgrade:
+  - Startup silent check (deferred by 2.5s) and periodic 4-hour background polling via GitHub Releases API
+  - Non-intrusive pulsating rocket badge (`🚀 v1.3.x`) in the top-right toolbar when an update is available
+  - Release notes modal dialog displaying version badge, release name, scrollable changelog, and direct actions
+  - "立即更新" (Update Now) one-click in-place update for portable users: automatically resolves current EXE path, downloads new standalone executable in the background, safely overwrites the old EXE in-place without manual file searching or moving, and restarts with session tabs preserved
+  - Double-layer cleanup architecture: temporary download files and update scripts are deleted immediately on completion, plus startup sweep for historical leftovers
+  - "检查更新" (Check for Updates) button integrated into the Settings popover with clean layout separator and adaptive update status
+  - Fixed CSS selector specificity in the Settings popover to eliminate button clipping and text overflow
+  - Retained "前往 GitHub 下载" (View on GitHub) option for users who prefer manual downloads or viewing release assets
+
 ## 1.2.1
 
 - Added document encoding display and switcher:

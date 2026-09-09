@@ -28,14 +28,15 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 - Offers a collapsible left sidebar listing the current document's folder, recent files, and a Table of Contents (TOC Outline) for quick anchor navigation.
 - One-click copy buttons on code blocks across desktop and mobile previews.
 - Image lightbox viewer with click-to-zoom, mouse drag panning, and zoom controls.
-- Settings panel for window reuse, tab accumulation mode, and word wrap toggle for source and code blocks.
+- Settings panel for window reuse, tab accumulation mode, word wrap toggle, and manual check for updates.
+- Automatic update checks: silent check after startup and periodic 4-hour background polling via GitHub Releases, with an update badge, release notes dialog, and Windows one-click in-app update restart.
 - Includes an author mode that adds copy buttons for the chapter heading line, the title without its chapter number, and the whole body.
 - Reloads previews when another editor changes the file.
 - Supports tables, task lists, syntax highlighting, GitHub alerts, KaTeX, Mermaid, local images, and local document links.
 - Includes preview search, content zoom, print, source editing, and reliable autosave.
 - Uses native iOS and Android shells for read-only mobile previews.
 
-All rendering assets are bundled locally. **Automatic updates are disabled** until this fork has its own signed release channel.
+All rendering assets are bundled locally. Automatic update checks are routed through GitHub Releases.
 
 Released packages are currently **Windows only**. The macOS and mobile shells build from source but are not published yet, because this fork has no signing identity.
 

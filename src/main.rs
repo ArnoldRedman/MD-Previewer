@@ -199,6 +199,19 @@ struct Strings {
     tab_menu_copy_path: &'static str,
     tab_menu_reveal: &'static str,
     encoding_title: &'static str,
+    btn_update_title: &'static str,
+    btn_update_text: &'static str,
+    set_version_label: &'static str,
+    btn_check_update: &'static str,
+    update_status_checking: &'static str,
+    update_status_latest: &'static str,
+    update_status_failed: &'static str,
+    update_dialog_title: &'static str,
+    btn_do_update: &'static str,
+    btn_view_release: &'static str,
+    btn_dismiss: &'static str,
+    update_downloading: &'static str,
+    update_close: &'static str,
 }
 
 impl Strings {
@@ -259,6 +272,19 @@ impl Strings {
                 tab_menu_copy_path: "复制路径",
                 tab_menu_reveal: "在文件管理器中显示",
                 encoding_title: "编码格式",
+                btn_update_title: "发现新版本，点击查看与更新",
+                btn_update_text: "新版本可用",
+                set_version_label: "当前版本",
+                btn_check_update: "检查更新",
+                update_status_checking: "正在检查更新...",
+                update_status_latest: "已是最新版本",
+                update_status_failed: "检查失败，请稍后重试",
+                update_dialog_title: "发现新版本",
+                btn_do_update: "立即更新",
+                btn_view_release: "前往 GitHub 下载",
+                btn_dismiss: "稍后提醒",
+                update_downloading: "正在下载更新并准备重启...",
+                update_close: "关闭",
             },
             Lang::En => Strings {
                 drop_hint: "Drop a .md or .txt file here or press Cmd/Ctrl+O to open",
@@ -315,6 +341,19 @@ impl Strings {
                 tab_menu_copy_path: "Copy Path",
                 tab_menu_reveal: "Reveal in File Manager",
                 encoding_title: "Encoding",
+                btn_update_title: "New version available, click to view and update",
+                btn_update_text: "Update Available",
+                set_version_label: "Version",
+                btn_check_update: "Check for Updates",
+                update_status_checking: "Checking for updates...",
+                update_status_latest: "You're up to date",
+                update_status_failed: "Check failed, try again later",
+                update_dialog_title: "Update Available",
+                btn_do_update: "Update Now",
+                btn_view_release: "View on GitHub",
+                btn_dismiss: "Later",
+                update_downloading: "Downloading update and restarting...",
+                update_close: "Close",
             },
         }
     }
@@ -338,6 +377,137 @@ fn config_dir() -> PathBuf {
             .map(PathBuf::from)
             .unwrap_or_default()
             .join(".config/md-previewer")
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod windows_updater {
+    use std::process::Command;
+
+    pub fn is_allowed_update_url(url: &str) -> bool {
+        url.starts_with("https://github.com/ArnoldRedman/MD-Previewer/releases/")
+            || url.starts_with("https://github.com/ArnoldRedman/md-preview/releases/")
+    }
+
+    pub fn apply_update(download_url: &str) -> Result<(), String> {
+        if !is_allowed_update_url(download_url) {
+            return Err("Disallowed update URL".to_string());
+        }
+
+        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let pid = std::process::id();
+        let temp_dir = std::env::temp_dir();
+        let is_installer = download_url.to_lowercase().contains("setup");
+
+        // 清理 temp 目录中历史更新残留
+        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let s = name.to_string_lossy();
+                if s.starts_with("md-preview-update-") || s.starts_with("md-preview-setup-") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+
+        let update_script = temp_dir.join(format!("md-preview-update-{pid}.ps1"));
+        let downloaded_file = if is_installer {
+            temp_dir.join(format!("md-preview-setup-{pid}.exe"))
+        } else {
+            temp_dir.join(format!("md-preview-update-{pid}.exe"))
+        };
+
+        let target_s = current_exe.to_string_lossy().replace('\'', "''");
+        let script_s = update_script.to_string_lossy().replace('\'', "''");
+        let download_s = downloaded_file.to_string_lossy().replace('\'', "''");
+        let url_s = download_url.replace('\'', "''");
+
+        let ps_content = if is_installer {
+            format!(
+                r#"$ErrorActionPreference = 'Stop'
+$url = '{url_s}'
+$downloaded = '{download_s}'
+$script = '{script_s}'
+$pidToWait = {pid}
+
+try {{
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $url -OutFile $downloaded -UseBasicParsing
+    if ((Get-Item $downloaded).Length -lt 100000) {{ throw 'Download size too small' }}
+    Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue
+    Start-Process -FilePath $downloaded
+}} catch {{
+    Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
+}} finally {{
+    Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue
+}}
+"#
+            )
+        } else {
+            format!(
+                r#"$ErrorActionPreference = 'Stop'
+$target = '{target_s}'
+$url = '{url_s}'
+$downloaded = '{download_s}'
+$script = '{script_s}'
+$pidToWait = {pid}
+
+try {{
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $url -OutFile $downloaded -UseBasicParsing
+    if ((Get-Item $downloaded).Length -lt 1000000) {{ throw 'Download size too small' }}
+    Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue
+    $copied = $false
+    $started = $false
+    for ($i = 0; $i -lt 80; $i++) {{
+        try {{
+            Copy-Item -LiteralPath $downloaded -Destination $target -Force -ErrorAction Stop
+            $copied = $true
+            break
+        }} catch {{
+            Start-Sleep -Milliseconds 250
+        }}
+    }}
+    if (-not $copied) {{
+        try {{
+            Start-Process -FilePath powershell.exe -ArgumentList "-NoProfile -Command Copy-Item -LiteralPath '$downloaded' -Destination '$target' -Force; Start-Process -FilePath '$target'" -Verb RunAs -Wait
+            $copied = $true
+            $started = $true
+        }} catch {{}}
+    }}
+    if ($copied -and -not $started) {{
+        Start-Process -FilePath $target
+    }}
+}} finally {{
+    Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue
+}}
+"#
+            )
+        };
+
+        std::fs::write(&update_script, ps_content).map_err(|e| e.to_string())?;
+
+        Command::new("powershell.exe")
+            .arg("-NoProfile")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-WindowStyle")
+            .arg("Hidden")
+            .arg("-File")
+            .arg(&update_script)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+
+        std::process::exit(0);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod windows_updater {
+    pub fn is_allowed_update_url(url: &str) -> bool {
+        url.starts_with("https://github.com/ArnoldRedman/MD-Previewer/releases/")
+            || url.starts_with("https://github.com/ArnoldRedman/md-preview/releases/")
     }
 }
 
@@ -1354,16 +1524,34 @@ fn decode_windows_codepage(bytes: &[u8], code_page: u32) -> Option<String> {
     };
     if len <= 0 {
         let len_acp = unsafe {
-            MultiByteToWideChar(0, 0, bytes.as_ptr(), bytes.len() as i32, std::ptr::null_mut(), 0)
+            MultiByteToWideChar(
+                0,
+                0,
+                bytes.as_ptr(),
+                bytes.len() as i32,
+                std::ptr::null_mut(),
+                0,
+            )
         };
         if len_acp <= 0 {
             return None;
         }
         let mut wide = vec![0u16; len_acp as usize];
         let res = unsafe {
-            MultiByteToWideChar(0, 0, bytes.as_ptr(), bytes.len() as i32, wide.as_mut_ptr(), len_acp)
+            MultiByteToWideChar(
+                0,
+                0,
+                bytes.as_ptr(),
+                bytes.len() as i32,
+                wide.as_mut_ptr(),
+                len_acp,
+            )
         };
-        return if res > 0 { String::from_utf16(&wide).ok() } else { None };
+        return if res > 0 {
+            String::from_utf16(&wide).ok()
+        } else {
+            None
+        };
     }
     let mut wide = vec![0u16; len as usize];
     let res = unsafe {
@@ -1655,7 +1843,11 @@ fn build_page_with_encoding(
     initial_encoding: &str,
 ) -> String {
     let body_class = if empty { "empty" } else { "" };
-    let initial_encoding = if initial_encoding.is_empty() { "UTF-8" } else { initial_encoding };
+    let initial_encoding = if initial_encoding.is_empty() {
+        "UTF-8"
+    } else {
+        initial_encoding
+    };
     let base_tag = base_href
         .map(|href| format!(r#"<base id="base-href" href="{}">"#, html_escape_attr(href)))
         .unwrap_or_else(|| r#"<base id="base-href">"#.to_string());
@@ -1951,6 +2143,7 @@ body.empty .toolbar {{ display: none !important; }}
 	.settings-control {{ position: relative; }}
 	.settings-popover {{
 	  position: absolute; top: 40px; right: 0;
+	  min-width: 180px;
 	  display: none; flex-direction: column; gap: 10px; padding: 10px;
 	  border: 1px solid rgba(0,0,0,.1); border-radius: 8px;
 	  background: rgba(255,255,255,.96); box-shadow: 0 6px 20px rgba(0,0,0,.12);
@@ -1980,6 +2173,114 @@ body.empty .toolbar {{ display: none !important; }}
 	  background: #1a73e8; color: #fff;
 	}}
 	.toolbar .settings-seg button[aria-pressed="true"]:hover {{ background: #1765cc; }}
+	.settings-sep {{
+	  height: 1px;
+	  background: rgba(0,0,0,.08);
+	  margin: 2px 0 4px;
+	}}
+	.toolbar .btn-update-available {{
+	  width: auto; height: 28px; padding: 0 10px;
+	  display: none; align-items: center; gap: 5px;
+	  border-radius: 6px; border: 1px solid rgba(47, 111, 208, 0.4);
+	  background: rgba(47, 111, 208, 0.12); color: #1a73e8;
+	  font-size: 11px; font-weight: 500; cursor: pointer; white-space: nowrap;
+	  animation: pulse-badge 2s infinite ease-in-out;
+	}}
+	.toolbar .btn-update-available:hover {{
+	  background: rgba(47, 111, 208, 0.22); border-color: #1a73e8; color: #1a73e8;
+	}}
+	@keyframes pulse-badge {{
+	  0%, 100% {{ box-shadow: 0 0 0 0 rgba(26, 115, 232, 0.4); }}
+	  50% {{ box-shadow: 0 0 0 4px rgba(26, 115, 232, 0); }}
+	}}
+	.toolbar .settings-action-btn {{
+	  width: 100%; box-sizing: border-box;
+	  height: 28px; padding: 0 12px; border-radius: 6px;
+	  border: 1px solid rgba(0,0,0,.15); background: rgba(0,0,0,.04);
+	  color: #333; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+	  display: flex; align-items: center; justify-content: center;
+	  transition: all .15s ease;
+	}}
+	.toolbar .settings-action-btn:hover {{
+	  background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.25); color: #111;
+	}}
+	.toolbar .settings-action-btn.has-update {{
+	  background: #1a73e8; color: #fff; border-color: #1a73e8; font-weight: 500;
+	}}
+	.toolbar .settings-action-btn.has-update:hover {{
+	  background: #1557b0; border-color: #1557b0; color: #fff;
+	}}
+	.update-status-msg {{
+	  font-size: 10px; color: #888;
+	}}
+	.update-modal {{
+	  position: fixed; inset: 0; z-index: 1000;
+	  display: flex; align-items: center; justify-content: center;
+	}}
+	.update-backdrop {{
+	  position: absolute; inset: 0; background: rgba(0,0,0,.45);
+	  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+	}}
+	.update-dialog {{
+	  position: relative; z-index: 1; width: min(520px, calc(100vw - 40px));
+	  max-height: calc(100vh - 60px); background: #fff; border-radius: 12px;
+	  box-shadow: 0 12px 36px rgba(0,0,0,.25); border: 1px solid rgba(0,0,0,.1);
+	  display: flex; flex-direction: column; overflow: hidden;
+	  animation: modal-pop .2s ease-out;
+	}}
+	@keyframes modal-pop {{
+	  from {{ opacity: 0; transform: scale(.95); }}
+	  to {{ opacity: 1; transform: scale(1); }}
+	}}
+	.update-header {{
+	  display: flex; align-items: center; justify-content: space-between;
+	  padding: 16px 20px 12px; border-bottom: 1px solid rgba(0,0,0,.08);
+	}}
+	.update-title {{
+	  display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: #1a1a1a;
+	}}
+	.update-close-btn {{
+	  background: transparent; border: 0; font-size: 18px; line-height: 1;
+	  color: #999; cursor: pointer; padding: 4px; border-radius: 4px;
+	}}
+	.update-close-btn:hover {{ background: rgba(0,0,0,.06); color: #333; }}
+	.update-body {{
+	  padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+	}}
+	.update-badge-row {{ display: flex; align-items: center; gap: 10px; }}
+	.update-badge {{
+	  display: inline-block; padding: 3px 8px; border-radius: 12px;
+	  background: #1a73e8; color: #fff; font-size: 12px; font-weight: 600;
+	}}
+	.update-release-name {{ font-size: 13px; font-weight: 500; color: #444; }}
+	.update-notes-box {{
+	  max-height: 220px; overflow-y: auto; padding: 12px 14px;
+	  background: rgba(0,0,0,.03); border: 1px solid rgba(0,0,0,.07); border-radius: 8px;
+	  font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;
+	}}
+	.update-progress-tip {{
+	  font-size: 12px; color: #1a73e8; display: flex; align-items: center; gap: 6px; font-weight: 500;
+	}}
+	.update-footer {{
+	  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+	  padding: 12px 20px 16px; border-top: 1px solid rgba(0,0,0,.08); background: rgba(0,0,0,.015);
+	}}
+	.update-btn-primary {{
+	  padding: 7px 16px; border-radius: 6px; border: 0;
+	  background: #1a73e8; color: #fff; font-size: 12px; font-weight: 500;
+	  cursor: pointer; transition: background .15s ease;
+	}}
+	.update-btn-primary:hover {{ background: #1557b0; }}
+	.update-btn-primary:disabled {{ opacity: .6; cursor: not-allowed; }}
+	.update-btn-secondary {{
+	  padding: 7px 14px; border-radius: 6px; border: 1px solid rgba(0,0,0,.15);
+	  background: transparent; color: #333; font-size: 12px; font-weight: 500; cursor: pointer;
+	}}
+	.update-btn-secondary:hover {{ background: rgba(0,0,0,.05); }}
+	.update-btn-text {{
+	  padding: 7px 10px; border: 0; background: transparent; color: #888; font-size: 12px; cursor: pointer;
+	}}
+	.update-btn-text:hover {{ color: #333; }}
 	.sidebar-toggle {{ right: auto; left: 12px; }}
 	body.sidebar-open .sidebar-toggle {{ left: {sidebar_toggle_left}px; opacity: 1; pointer-events: auto; }}
 	.sidebar {{
@@ -2148,6 +2449,22 @@ body.empty .toolbar {{ display: none !important; }}
 	  .toolbar .settings-seg button:hover {{ background: rgba(255,255,255,.1); color: #fff; }}
 	  .toolbar .settings-seg button[aria-pressed="true"] {{ background: #2f6fd0; color: #fff; }}
 	  .toolbar .settings-seg button[aria-pressed="true"]:hover {{ background: #3a7de0; }}
+	  .settings-sep {{ background: rgba(255,255,255,.08); }}
+	  .toolbar .btn-update-available {{ border-color: rgba(94, 162, 255, 0.4); background: rgba(94, 162, 255, 0.15); color: #8ab4f8; }}
+	  .toolbar .btn-update-available:hover {{ background: rgba(94, 162, 255, 0.25); border-color: #8ab4f8; color: #8ab4f8; }}
+	  .toolbar .settings-action-btn {{ border-color: rgba(255,255,255,.15); background: rgba(255,255,255,.06); color: #ddd; }}
+	  .toolbar .settings-action-btn:hover {{ background: rgba(255,255,255,.12); color: #fff; }}
+	  .toolbar .settings-action-btn.has-update {{ background: #2f6fd0; color: #fff; border-color: #2f6fd0; }}
+	  .toolbar .settings-action-btn.has-update:hover {{ background: #3a7de0; border-color: #3a7de0; color: #fff; }}
+	  .update-dialog {{ background: #252526; border-color: rgba(255,255,255,.12); box-shadow: 0 12px 36px rgba(0,0,0,.6); }}
+	  .update-header, .update-footer {{ border-color: rgba(255,255,255,.08); }}
+	  .update-title {{ color: #e0e0e0; }}
+	  .update-release-name {{ color: #bbb; }}
+	  .update-notes-box {{ background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); color: #ccc; }}
+	  .update-btn-secondary {{ border-color: rgba(255,255,255,.2); color: #ddd; }}
+	  .update-btn-secondary:hover {{ background: rgba(255,255,255,.08); }}
+	  .update-btn-text {{ color: #888; }}
+	  .update-btn-text:hover {{ color: #ccc; }}
 	  .sidebar {{ background: rgba(24,24,24,.98); border-right-color: #333; }}
 	  .sidebar-sections button {{ color: #999; }}
 	  .sidebar-sections button:hover {{ background: rgba(255,255,255,.07); }}
@@ -2304,6 +2621,7 @@ body.editing .findbar {{ display: none !important; }}
 	      <button id="btn-zoom-in" title="{btn_zoom_in}" aria-label="{btn_zoom_in}">+</button>
 	    </div>
 	  </div>
+	  <button id="btn-update-available" class="btn-update-available" style="display:none;" title="{btn_update_title}" aria-label="{btn_update_title}"><span class="update-icon">🚀</span><span class="update-text">{btn_update_text}</span></button>
 	  <div class="settings-control" id="settings-control">
 	    <button id="btn-settings" title="{btn_settings}" aria-label="{btn_settings}"></button>
 	    <div class="settings-popover" role="group" aria-label="{btn_settings}">
@@ -2335,6 +2653,14 @@ body.editing .findbar {{ display: none !important; }}
 	          <button type="button" data-setting="word-wrap" data-value="off" aria-pressed="false">{set_wrap_off}</button>
 	        </div>
 	      </div>
+	      <div class="settings-sep"></div>
+	      <div class="settings-row">
+	        <div class="settings-label" style="justify-content: space-between;">
+	          <span>{set_version_label}: v{cargo_version}</span>
+	          <span id="update-status-msg" class="update-status-msg"></span>
+	        </div>
+	        <button type="button" id="btn-check-update" class="settings-action-btn">{btn_check_update}</button>
+	      </div>
 	    </div>
 	  </div>
 	</div>
@@ -2365,6 +2691,31 @@ body.editing .findbar {{ display: none !important; }}
 	    <img id="lb-img" class="lightbox-img" alt="">
 	  </div>
 	  <div id="lb-caption" class="lightbox-caption"></div>
+	</div>
+	<div id="update-modal" class="update-modal" style="display:none;" role="dialog" aria-modal="true">
+	  <div class="update-backdrop" id="update-backdrop"></div>
+	  <div class="update-dialog">
+	    <div class="update-header">
+	      <div class="update-title">
+	        <span class="update-icon">🚀</span>
+	        <span id="update-title-text">{update_dialog_title}</span>
+	      </div>
+	      <button type="button" id="update-close" class="update-close-btn" title="{update_close}">×</button>
+	    </div>
+	    <div class="update-body">
+	      <div class="update-badge-row">
+	        <span class="update-badge" id="update-badge">v1.2.x</span>
+	        <span class="update-release-name" id="update-release-name"></span>
+	      </div>
+	      <div class="update-notes-box" id="update-notes-box"></div>
+	      <div id="update-progress-tip" class="update-progress-tip" style="display:none;"></div>
+	    </div>
+	    <div class="update-footer">
+	      <button type="button" id="btn-do-update" class="update-btn-primary">{btn_do_update}</button>
+	      <button type="button" id="btn-view-release" class="update-btn-secondary">{btn_view_release}</button>
+	      <button type="button" id="btn-dismiss-update" class="update-btn-text">{btn_dismiss}</button>
+	    </div>
+	  </div>
 	</div>
 	<div id="app">
   <div id="preview">{preview_html}</div>
@@ -3534,6 +3885,257 @@ body.editing .findbar {{ display: none !important; }}
   // it lands, hljs.highlightAll() gets called by the injected bootstrap
   // and __setPreview.
 
+  // -------------------------------------------------------------
+  // 自动更新检测与弹窗交互逻辑 (Auto-Update Check & Modal)
+  // -------------------------------------------------------------
+  var UPDATE_API_URL = 'https://api.github.com/repos/ArnoldRedman/MD-Previewer/releases/latest';
+  var UPDATE_STORAGE_KEY = 'mdp:update-status';
+  var UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+  var CURRENT_VERSION = '{cargo_version}';
+  var L_CHECKING_UPDATE = '{update_status_checking_js}';
+  var L_LATEST_UPDATE = '{update_status_latest_js}';
+  var L_FAILED_UPDATE = '{update_status_failed_js}';
+  var L_DOWNLOADING_UPDATE = '{update_downloading_js}';
+  var L_UPDATE_TEXT = '{btn_update_text_js}';
+  var L_CHECK_UPDATE = '{btn_check_update_js}';
+
+  var btnUpdateAvailable = document.getElementById('btn-update-available');
+  var btnCheckUpdate = document.getElementById('btn-check-update');
+  var updateStatusMsg = document.getElementById('update-status-msg');
+  var updateModal = document.getElementById('update-modal');
+  var updateBackdrop = document.getElementById('update-backdrop');
+  var updateClose = document.getElementById('update-close');
+  var updateBadge = document.getElementById('update-badge');
+  var updateReleaseName = document.getElementById('update-release-name');
+  var updateNotesBox = document.getElementById('update-notes-box');
+  var updateProgressTip = document.getElementById('update-progress-tip');
+  var btnDoUpdate = document.getElementById('btn-do-update');
+  var btnViewRelease = document.getElementById('btn-view-release');
+  var btnDismissUpdate = document.getElementById('btn-dismiss-update');
+  var activeReleaseData = null;
+
+  function parseVersion(v) {{
+    if (!v || typeof v !== 'string') return null;
+    var s = v.trim().replace(/^v/i, '');
+    var parts = s.split('.');
+    var nums = [];
+    for (var i = 0; i < parts.length; i++) {{
+      var n = parseInt(parts[i], 10);
+      if (isNaN(n)) return null;
+      nums.push(n);
+    }}
+    return nums;
+  }}
+
+  function isNewerVersion(candidate, current) {{
+    var next = parseVersion(candidate);
+    var now = parseVersion(current);
+    if (!next || !now) return false;
+    var len = Math.max(next.length, now.length);
+    for (var i = 0; i < len; i++) {{
+      var a = next[i] || 0;
+      var b = now[i] || 0;
+      if (a > b) return true;
+      if (a < b) return false;
+    }}
+    return false;
+  }}
+
+  function showUpdateModal(release) {{
+    if (!release) return;
+    activeReleaseData = release;
+    if (updateBadge) updateBadge.textContent = release.tag_name || ('v' + CURRENT_VERSION);
+    if (updateReleaseName) updateReleaseName.textContent = release.name || '';
+    if (updateNotesBox) updateNotesBox.textContent = release.body || '';
+    if (updateProgressTip) updateProgressTip.style.display = 'none';
+    if (btnDoUpdate) btnDoUpdate.disabled = false;
+    if (updateModal) updateModal.style.display = 'flex';
+  }}
+
+  function hideUpdateModal() {{
+    if (updateModal) updateModal.style.display = 'none';
+  }}
+
+  function applyDetectedRelease(release) {{
+    if (!release || !isNewerVersion(release.tag_name, CURRENT_VERSION)) {{
+      if (btnUpdateAvailable) btnUpdateAvailable.style.display = 'none';
+      if (btnCheckUpdate) {{
+        btnCheckUpdate.textContent = L_CHECK_UPDATE;
+        btnCheckUpdate.classList.remove('has-update');
+      }}
+      return false;
+    }}
+    activeReleaseData = release;
+    if (btnUpdateAvailable) {{
+      btnUpdateAvailable.style.display = 'inline-flex';
+      var textEl = btnUpdateAvailable.querySelector('.update-text');
+      if (textEl) textEl.textContent = release.tag_name;
+    }}
+    if (btnCheckUpdate) {{
+      btnCheckUpdate.textContent = '🚀 ' + (release.tag_name || '') + ' ' + L_UPDATE_TEXT;
+      btnCheckUpdate.classList.add('has-update');
+    }}
+    return true;
+  }}
+
+  window.__showUpdateModal = showUpdateModal;
+  window.__applyDetectedRelease = applyDetectedRelease;
+  window.__isNewerVersion = isNewerVersion;
+  window.__queryLatestRelease = queryLatestRelease;
+
+  function queryLatestRelease(manual) {{
+    if (manual && updateStatusMsg) {{
+      updateStatusMsg.textContent = L_CHECKING_UPDATE;
+      updateStatusMsg.style.color = '#1a73e8';
+    }}
+
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function() {{ controller.abort(); }}, 8000) : null;
+    var opts = {{
+      cache: 'no-store',
+      headers: {{ 'Accept': 'application/vnd.github+json' }}
+    }};
+    if (controller) opts.signal = controller.signal;
+
+    fetch(UPDATE_API_URL, opts)
+      .then(function(res) {{
+        if (!res.ok) throw new Error('status ' + res.status);
+        return res.json();
+      }})
+      .then(function(data) {{
+        if (timer) clearTimeout(timer);
+        var isNewer = isNewerVersion(data.tag_name, CURRENT_VERSION);
+        try {{
+          localStorage.setItem(UPDATE_STORAGE_KEY, JSON.stringify({{
+            checkedAt: Date.now(),
+            tag_name: data.tag_name,
+            name: data.name,
+            body: data.body,
+            html_url: data.html_url,
+            assets: data.assets
+          }}));
+        }} catch (e) {{}}
+
+        if (isNewer) {{
+          applyDetectedRelease(data);
+          if (manual) {{
+            if (updateStatusMsg) {{
+              updateStatusMsg.textContent = data.tag_name;
+              updateStatusMsg.style.color = '#1a73e8';
+            }}
+            showUpdateModal(data);
+          }}
+        }} else {{
+          if (btnUpdateAvailable) btnUpdateAvailable.style.display = 'none';
+          if (btnCheckUpdate) {{
+            btnCheckUpdate.textContent = L_CHECK_UPDATE;
+            btnCheckUpdate.classList.remove('has-update');
+          }}
+          if (manual && updateStatusMsg) {{
+            updateStatusMsg.textContent = L_LATEST_UPDATE;
+            updateStatusMsg.style.color = '#2e7d32';
+          }}
+        }}
+      }})
+      .catch(function() {{
+        if (timer) clearTimeout(timer);
+        if (manual && updateStatusMsg) {{
+          updateStatusMsg.textContent = L_FAILED_UPDATE;
+          updateStatusMsg.style.color = '#c62828';
+        }}
+      }});
+  }}
+
+  if (btnUpdateAvailable) {{
+    btnUpdateAvailable.addEventListener('click', function(e) {{
+      e.stopPropagation();
+      showUpdateModal(activeReleaseData);
+    }});
+  }}
+  if (btnCheckUpdate) {{
+    btnCheckUpdate.addEventListener('click', function(e) {{
+      e.stopPropagation();
+      if (activeReleaseData && isNewerVersion(activeReleaseData.tag_name, CURRENT_VERSION)) {{
+        showUpdateModal(activeReleaseData);
+      }} else {{
+        queryLatestRelease(true);
+      }}
+    }});
+  }}
+  if (updateClose) updateClose.addEventListener('click', hideUpdateModal);
+  if (updateBackdrop) updateBackdrop.addEventListener('click', hideUpdateModal);
+  if (btnDismissUpdate) btnDismissUpdate.addEventListener('click', hideUpdateModal);
+
+  if (btnViewRelease) {{
+    btnViewRelease.addEventListener('click', function() {{
+      var url = (activeReleaseData && activeReleaseData.html_url) || 'https://github.com/ArnoldRedman/MD-Previewer/releases';
+      window.location.href = url;
+    }});
+  }}
+
+  if (btnDoUpdate) {{
+    btnDoUpdate.addEventListener('click', function() {{
+      if (!activeReleaseData) return;
+      var assets = activeReleaseData.assets || [];
+      var chosenAsset = null;
+      // 优先下载免安装单文件 EXE，实现原地静默替换；若无则降级匹配安装包
+      for (var i = 0; i < assets.length; i++) {{
+        if (/MD-Previewer-windows-x64\.exe$/i.test(assets[i].name || '')) {{
+          chosenAsset = assets[i];
+          break;
+        }}
+      }}
+      if (!chosenAsset) {{
+        for (var j = 0; j < assets.length; j++) {{
+          if (/MD-Previewer-Setup\.exe$/i.test(assets[j].name || '')) {{
+            chosenAsset = assets[j];
+            break;
+          }}
+        }}
+      }}
+      var downloadUrl = chosenAsset ? chosenAsset.browser_download_url : activeReleaseData.html_url;
+      if (downloadUrl && downloadUrl.indexOf('.exe') !== -1 && window.ipc) {{
+        btnDoUpdate.disabled = true;
+        if (updateProgressTip) {{
+          updateProgressTip.style.display = 'block';
+          updateProgressTip.textContent = L_DOWNLOADING_UPDATE;
+        }}
+        window.ipc.postMessage('self-update:' + downloadUrl);
+      }} else {{
+        var fallbackUrl = (activeReleaseData && activeReleaseData.html_url) || 'https://github.com/ArnoldRedman/MD-Previewer/releases';
+        window.location.href = fallbackUrl;
+      }}
+    }});
+  }}
+
+  function scheduleUpdateCheck() {{
+    try {{
+      var cached = JSON.parse(localStorage.getItem(UPDATE_STORAGE_KEY) || 'null');
+      if (cached && cached.tag_name && isNewerVersion(cached.tag_name, CURRENT_VERSION)) {{
+        applyDetectedRelease(cached);
+      }}
+      var lastChecked = cached && cached.checkedAt ? cached.checkedAt : 0;
+      var now = Date.now();
+      if (now - lastChecked >= UPDATE_CHECK_INTERVAL_MS) {{
+        setTimeout(function() {{ queryLatestRelease(false); }}, 2500);
+      }}
+    }} catch(e) {{
+      setTimeout(function() {{ queryLatestRelease(false); }}, 2500);
+    }}
+
+    setInterval(function() {{
+      try {{
+        var cached = JSON.parse(localStorage.getItem(UPDATE_STORAGE_KEY) || 'null');
+        var lastChecked = cached && cached.checkedAt ? cached.checkedAt : 0;
+        if (Date.now() - lastChecked >= UPDATE_CHECK_INTERVAL_MS) {{
+          queryLatestRelease(false);
+        }}
+      }} catch(e) {{}}
+    }}, 60 * 60 * 1000);
+  }}
+
+  scheduleUpdateCheck();
+
   setupCodeBlockCopyButtons();
 
   // Signal Rust after first paint (triggers hljs inject; bench mode exits).
@@ -3600,11 +4202,43 @@ if(window.__enhancePreview)window.__enhancePreview();
         stat_words_js = escape_js(s.stat_words),
         stat_chars_js = escape_js(s.stat_chars),
         encoding_title = s.encoding_title,
+        cargo_version = env!("CARGO_PKG_VERSION"),
+        btn_update_title = s.btn_update_title,
+        btn_update_text = s.btn_update_text,
+        btn_update_text_js = escape_js(s.btn_update_text),
+        set_version_label = s.set_version_label,
+        btn_check_update = s.btn_check_update,
+        btn_check_update_js = escape_js(s.btn_check_update),
+        update_status_checking_js = escape_js(s.update_status_checking),
+        update_status_latest_js = escape_js(s.update_status_latest),
+        update_status_failed_js = escape_js(s.update_status_failed),
+        update_dialog_title = s.update_dialog_title,
+        btn_do_update = s.btn_do_update,
+        btn_view_release = s.btn_view_release,
+        btn_dismiss = s.btn_dismiss,
+        update_downloading_js = escape_js(s.update_downloading),
+        update_close = s.update_close,
         initial_encoding = initial_encoding,
-        opt_utf8 = if initial_encoding == "UTF-8" { " active" } else { "" },
-        opt_gbk = if initial_encoding == "GBK" { " active" } else { "" },
-        opt_u16le = if initial_encoding == "UTF-16 LE" { " active" } else { "" },
-        opt_u16be = if initial_encoding == "UTF-16 BE" { " active" } else { "" },
+        opt_utf8 = if initial_encoding == "UTF-8" {
+            " active"
+        } else {
+            ""
+        },
+        opt_gbk = if initial_encoding == "GBK" {
+            " active"
+        } else {
+            ""
+        },
+        opt_u16le = if initial_encoding == "UTF-16 LE" {
+            " active"
+        } else {
+            ""
+        },
+        opt_u16be = if initial_encoding == "UTF-16 BE" {
+            " active"
+        } else {
+            ""
+        },
         body_class = body_class,
         needs_math = flags.math,
         needs_mermaid = flags.mermaid,
@@ -4016,8 +4650,10 @@ mod tests {
         assert!(page.contains("window.__mdPreviewerShowFind = showFind"));
         assert!(page.contains("window.__mdPreviewerToggleEdit"));
         assert!(!page.contains("id=\"btn-update\""));
-        assert!(!page.contains("api.github.com"));
         assert!(!page.contains("check-updates"));
+        assert!(page.contains("id=\"btn-update-available\""));
+        assert!(page.contains("id=\"btn-check-update\""));
+        assert!(page.contains("id=\"update-modal\""));
         assert!(page.contains("Cmd/Ctrl+F"));
         assert!(page
             .contains("if (inEdit()) return;\n\t      e.preventDefault();\n\t      showFind();"));
@@ -4358,6 +4994,47 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn build_page_includes_auto_update_components() {
+        let strings = Strings::for_lang(Lang::En);
+        let page = build_page(
+            "# Heading",
+            "# Heading",
+            None,
+            EnhanceFlags::default(),
+            &strings,
+            false,
+        );
+        assert!(page.contains("id=\"btn-update-available\""));
+        assert!(page.contains("id=\"btn-check-update\""));
+        assert!(page.contains("id=\"update-modal\""));
+        assert!(page.contains("UPDATE_CHECK_INTERVAL_MS"));
+        assert!(page.contains("self-update:"));
+        assert!(page.contains("isNewerVersion"));
+    }
+
+    #[test]
+    fn update_url_whitelist_safety_checks() {
+        assert!(windows_updater::is_allowed_update_url(
+            "https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.2.2/MD-Previewer-Setup.exe"
+        ));
+        assert!(windows_updater::is_allowed_update_url(
+            "https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.2.2/MD-Previewer-windows-x64.exe"
+        ));
+        assert!(windows_updater::is_allowed_update_url(
+            "https://github.com/ArnoldRedman/md-preview/releases/tag/v1.2.2"
+        ));
+        assert!(!windows_updater::is_allowed_update_url(
+            "https://github.com/malicious/repo/releases/download/v1/bad.exe"
+        ));
+        assert!(!windows_updater::is_allowed_update_url(
+            "http://example.com/bad.exe"
+        ));
+        assert!(!windows_updater::is_allowed_update_url(
+            "https://evil-phishing.com/setup.exe"
+        ));
     }
 }
 
@@ -5646,6 +6323,17 @@ fn main() {
                 }
             } else if let Some(enc) = body.strip_prefix("set-encoding:") {
                 let _ = proxy_for_ipc.send_event(UserEvent::SetEncoding(enc.to_string()));
+            } else if let Some(download_url) = body.strip_prefix("self-update:") {
+                #[cfg(target_os = "windows")]
+                {
+                    if let Err(err) = windows_updater::apply_update(download_url) {
+                        eprintln!("[update error] {err}");
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let _ = open::that(download_url);
+                }
             }
         })
         .with_drag_drop_handler({
