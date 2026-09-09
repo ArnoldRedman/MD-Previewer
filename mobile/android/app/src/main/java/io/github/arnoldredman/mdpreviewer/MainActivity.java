@@ -99,7 +99,7 @@ public final class MainActivity extends Activity {
         if (requestCode == OPEN_DOCUMENT_REQUEST && resultCode == RESULT_OK && data != null) {
             Uri uri = data.getData();
             if (uri != null) {
-                if (!isMarkdownDocument(uri)) {
+                if (!isSupportedDocument(uri)) {
                     showUnsupportedFile(uri);
                     return;
                 }
@@ -184,7 +184,7 @@ public final class MainActivity extends Activity {
 
     private void openUri(Uri uri, boolean fromRecent) {
         try {
-            if (!isMarkdownDocument(uri)) {
+            if (!isSupportedDocument(uri)) {
                 showUnsupportedFile(uri);
                 return;
             }
@@ -290,12 +290,13 @@ public final class MainActivity extends Activity {
         return slash >= 0 ? path.substring(slash + 1) : path;
     }
 
-    private boolean isMarkdownDocument(Uri uri) {
+    private boolean isSupportedDocument(Uri uri) {
         String name = safeDisplayName(uri).toLowerCase(java.util.Locale.ROOT);
         if (name.endsWith(".md")
             || name.endsWith(".markdown")
             || name.endsWith(".mdown")
-            || name.endsWith(".mkd")) {
+            || name.endsWith(".mkd")
+            || name.endsWith(".txt")) {
             return true;
         }
 
@@ -304,6 +305,9 @@ public final class MainActivity extends Activity {
             return false;
         }
         String normalized = mimeType.toLowerCase(java.util.Locale.ROOT);
+        if ("text/plain".equals(normalized)) {
+            return true;
+        }
         for (String markdownMimeType : MARKDOWN_MIME_TYPES) {
             if (markdownMimeType.equals(normalized)) {
                 return true;
@@ -316,12 +320,12 @@ public final class MainActivity extends Activity {
         String name = safeDisplayName(uri);
         JSONObject payload = new JSONObject();
         try {
-            payload.put("markdown", "Cannot open non-Markdown file: " + name);
+            payload.put("markdown", "Cannot open unsupported file: " + name);
             payload.put("name", "Unsupported file.md");
             payload.put("baseHref", "");
         } catch (JSONException ignored) {
         }
-        Toast.makeText(this, "Choose a Markdown file", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Choose a supported Markdown or text file", Toast.LENGTH_SHORT).show();
         evaluate("window.MDPreviewer && window.MDPreviewer.render(" + payload + ");");
     }
 

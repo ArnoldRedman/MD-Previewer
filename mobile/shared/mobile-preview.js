@@ -119,22 +119,34 @@
     });
   }
 
+  function escapeHtml(text) {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
   function render(payload) {
     closeSearch();
     var markdown = payload && payload.markdown ? String(payload.markdown) : '';
     var name = payload && payload.name ? String(payload.name) : 'Untitled.md';
     var baseHref = payload && payload.baseHref ? String(payload.baseHref) : '';
-    var flags = featureFlags(markdown);
+    var isTxt = Boolean(payload && (payload.isTxt || /\.txt$/i.test(name)));
     document.body.classList.remove('empty');
     titleEl.textContent = name;
     document.title = name + ' - MD Previewer';
-    if (baseHref) baseEl.setAttribute('href', baseHref);
+    if (baseHref && !isTxt) baseEl.setAttribute('href', baseHref);
     else baseEl.removeAttribute('href');
-    previewEl.innerHTML = window.marked ? window.marked.parse(markdown) : markdown;
-    idle(function() {
-      if (window.hljs && window.hljs.highlightAll) window.hljs.highlightAll();
-      enhance(flags);
-    });
+    if (isTxt) {
+      previewEl.innerHTML = '<div class="mdp-plain-text">' + escapeHtml(markdown) + '</div>';
+    } else {
+      var flags = featureFlags(markdown);
+      previewEl.innerHTML = window.marked ? window.marked.parse(markdown) : markdown;
+      idle(function() {
+        if (window.hljs && window.hljs.highlightAll) window.hljs.highlightAll();
+        enhance(flags);
+      });
+    }
   }
 
   function sendNative(action, payload) {

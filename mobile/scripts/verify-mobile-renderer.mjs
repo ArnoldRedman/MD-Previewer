@@ -85,6 +85,28 @@ const result = await page.evaluate((searchHits) => ({
   bad: window.__bad === 1
 }), searchHitCount);
 
+await page.evaluate(() => {
+  window.MDPreviewer.render({
+    name: 'notes.txt',
+    markdown: [
+      'Line 1: Plain text file with <tag> & symbols',
+      'Line 2: # Not A Heading',
+      'Line 3: *not italic*',
+      'Line 4: search_keyword_plain_text'
+    ].join('\n')
+  });
+});
+
+await page.waitForSelector('.mdp-plain-text', { timeout: 1000 });
+const txtResult = await page.evaluate(() => ({
+  title: document.getElementById('title').textContent,
+  plainTextContent: document.querySelector('.mdp-plain-text')?.textContent,
+  plainTextHtml: document.querySelector('.mdp-plain-text')?.innerHTML,
+  h1Count: document.querySelectorAll('#preview h1').length,
+  emCount: document.querySelectorAll('#preview em').length,
+  katexCount: document.querySelectorAll('.katex').length
+}));
+
 await browser.close();
 
 if (errors.length) {
@@ -126,6 +148,18 @@ if (result.printTopbarDisplay !== 'none' ||
 }
 if (result.bad) {
   throw new Error('javascript: link executed');
+}
+
+if (txtResult.title !== 'notes.txt') {
+  throw new Error(`Unexpected txt title: ${txtResult.title}`);
+}
+if (!txtResult.plainTextContent.includes('Line 1: Plain text file with <tag> & symbols') ||
+    !txtResult.plainTextContent.includes('\nLine 2: # Not A Heading') ||
+    !txtResult.plainTextHtml.includes('&lt;tag&gt; &amp; symbols') ||
+    txtResult.h1Count !== 0 ||
+    txtResult.emCount !== 0 ||
+    txtResult.katexCount !== 0) {
+  throw new Error(`TXT document render check failed: ${JSON.stringify(txtResult)}`);
 }
 
 console.log('[mobile-renderer] OK');

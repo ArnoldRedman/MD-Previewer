@@ -153,7 +153,19 @@ if (result.finding ||
 await page.keyboard.down(process.platform === 'darwin' ? 'Meta' : 'Control');
 await page.keyboard.press('F');
 await page.keyboard.up(process.platform === 'darwin' ? 'Meta' : 'Control');
-await page.waitForFunction(() => document.body.classList.contains('finding'));
+await page.evaluate(() => {
+  window.__setContent('<div class="mdp-plain-text">First line plain text\nSecond line plain search_target\nThird line target</div>', 'First line plain text\nSecond line plain search_target\nThird line target', '', false, false);
+});
+await page.locator('#btn-search').click();
+await page.locator('#find-input').fill('plain');
+await page.waitForFunction(() => document.querySelectorAll('#preview mark.search-hit').length === 2);
+const plainResult = await page.evaluate(() => ({
+  hitCount: document.querySelectorAll('#preview mark.search-hit').length,
+  inPlainText: !!document.querySelector('.mdp-plain-text mark.search-hit')
+}));
+if (plainResult.hitCount !== 2 || !plainResult.inPlainText) {
+  throw new Error(`desktop search on plain text failed: ${JSON.stringify(plainResult)}`);
+}
 
 await browser.close();
 console.log('[desktop-search-verify] OK');

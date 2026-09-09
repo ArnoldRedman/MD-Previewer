@@ -117,7 +117,7 @@ fn is_help_arg(arg: &str) -> bool {
 
 fn print_help() {
     println!(
-        "MD Previewer {}\n\nUsage:\n  md-previewer [file.md]\n\nOptions:\n  -h, --help    Show this help message",
+        "MD Previewer {}\n\nUsage:\n  md-previewer [file.md|file.txt]\n\nOptions:\n  -h, --help    Show this help message",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -188,7 +188,7 @@ impl Strings {
     fn for_lang(lang: Lang) -> Self {
         match lang {
             Lang::Zh => Strings {
-                drop_hint: "Drop a .md file here or press Cmd/Ctrl+O to open",
+                drop_hint: "Drop a .md or .txt file here or press Cmd/Ctrl+O to open",
                 cannot_read: "无法读取文件",
                 open_file: "Open File",
                 recent_title: "Recent",
@@ -231,7 +231,7 @@ impl Strings {
                 copied: "已复制",
             },
             Lang::En => Strings {
-                drop_hint: "Drop a .md file here or press Cmd/Ctrl+O to open",
+                drop_hint: "Drop a .md or .txt file here or press Cmd/Ctrl+O to open",
                 cannot_read: "Cannot read file",
                 open_file: "Open File",
                 recent_title: "Recent",
@@ -1117,6 +1117,33 @@ fn file_url_for_path_dir(dir: &Path) -> String {
     format!("file://{}", percent_encode_file_path(&path))
 }
 
+fn is_txt_document(path: &Path) -> bool {
+    path.extension()
+        .map(|extension| extension.to_string_lossy().eq_ignore_ascii_case("txt"))
+        .unwrap_or(false)
+}
+
+/// 纯文本渲染为保留换行与空格的 HTML 容器，特殊符号统一做 HTML 转义
+fn txt_to_html(raw: &str) -> String {
+    format!(
+        r#"<div class="mdp-plain-text">{}</div>"#,
+        html_escape_text(raw)
+    )
+}
+
+/// 根据文档扩展名分发渲染：txt 走纯文本保留换行，md 走标准 Markdown 解析与增强
+fn document_to_html(path: &Path, raw: &str) -> (String, EnhanceFlags, Option<String>) {
+    if is_txt_document(path) {
+        (txt_to_html(raw), EnhanceFlags::default(), None)
+    } else {
+        (
+            md_to_html_with_base(raw, path.parent()),
+            enhance_flags_for(raw),
+            base_href_for_file(path),
+        )
+    }
+}
+
 fn starts_mermaid_fence(line: &str) -> bool {
     let trimmed = line.trim_start();
     let rest = trimmed
@@ -1402,6 +1429,15 @@ body.has-tabs {{ --chrome-top: 50px; --bar-top: 40px; }}
 #preview a:hover {{ text-decoration: underline; }}
 #preview ul, #preview ol {{ padding-left: 2em; }}
 #preview input[type="checkbox"] {{ margin-right: 6px; }}
+#preview .mdp-plain-text {{
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
+  font-size: calc(14px * var(--content-scale));
+  line-height: 1.65;
+  tab-size: 4;
+}}
 	.empty {{ display: flex; flex-direction: column; align-items: center; justify-content: center;
 	  min-height: 60vh; color: #999; font-size: 18px; gap: 12px; text-align: center; }}
 	.empty.has-recent {{
@@ -2739,6 +2775,47 @@ mod tests {
 
         assert!(doc.title_line.is_empty());
         assert!(doc.title.is_empty());
+    }
+
+    #[test]
+    fn is_txt_document_matches_txt_extension_case_insensitively() {
+        assert!(is_txt_document(Path::new("note.txt")));
+        assert!(is_txt_document(Path::new("NOTE.TXT")));
+        assert!(is_txt_document(Path::new("/path/to/archive.Txt")));
+        assert!(!is_txt_document(Path::new("readme.md")));
+        assert!(!is_txt_document(Path::new("spec.markdown")));
+        assert!(!is_txt_document(Path::new("no_extension")));
+    }
+
+    #[test]
+    fn txt_document_preserves_newlines_and_escapes_html() {
+        let raw = "# Title\n\nLine 1 <tag> & more\nLine 2 *not bold*\n| table | col |\n";
+        let path = Path::new("test.txt");
+        let (html, flags, base_href) = document_to_html(path, raw);
+
+        assert!(html.starts_with(r#"<div class="mdp-plain-text">"#));
+        assert!(html.ends_with("</div>"));
+        assert!(html.contains("&lt;tag&gt; &amp; more"));
+        assert!(html.contains("# Title\n\nLine 1"));
+        assert!(html.contains("Line 2 *not bold*\n| table | col |"));
+        assert!(!html.contains("<h1>"));
+        assert!(!html.contains("<em>"));
+        assert!(!html.contains("<table>"));
+        assert!(!flags.math);
+        assert!(!flags.mermaid);
+        assert!(base_href.is_none());
+    }
+
+    #[test]
+    fn document_to_html_disables_enhancers_for_txt() {
+        let raw = "Math: $$E=mc^2$$\nMermaid:\n```mermaid\ngraph TD\nA-->B\n```\n";
+        let (html, flags, _) = document_to_html(Path::new("notes.txt"), raw);
+
+        assert!(!flags.math);
+        assert!(!flags.mermaid);
+        assert!(!html.contains("<svg"));
+        assert!(html.contains("$$E=mc^2$$"));
+        assert!(html.contains("```mermaid"));
     }
 
     #[test]
@@ -4100,9 +4177,9 @@ fn render_active_document(
                 tab.missing = false;
             }
             remember_recent_file(recent_files, &active.path);
-            let html = md_to_html_with_base(&raw, active.path.parent());
-            let base_href = base_href_for_file(&active.path).unwrap_or_default();
-            let flags = enhance_flags_for(&raw);
+            let is_txt = is_txt_document(&active.path);
+            let (html, flags, base_href) = document_to_html(&active.path, &raw);
+            let base_href = base_href.unwrap_or_default();
             *enhance_flags.lock().unwrap() = flags;
             let _ = webview.evaluate_script(&format!(
                 "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {});",
@@ -4112,7 +4189,11 @@ fn render_active_document(
                 flags.math,
                 flags.mermaid
             ));
-            update_author_doc(webview, &raw);
+            if is_txt {
+                update_author_doc(webview, "");
+            } else {
+                update_author_doc(webview, &raw);
+            }
             for script in build_enhancer_bootstrap(flags, *loaded_enhancers) {
                 let _ = webview.evaluate_script(&script);
             }
@@ -4267,9 +4348,8 @@ fn main() {
             Ok(raw) => {
                 remember_recent_file(&recent_files, &tab.path);
                 initial_raw = raw.clone();
-                let html_body = md_to_html_with_base(&raw, tab.path.parent());
-                let base_href = base_href_for_file(&tab.path);
-                initial_flags = enhance_flags_for(&raw);
+                let (html_body, doc_flags, base_href) = document_to_html(&tab.path, &raw);
+                initial_flags = doc_flags;
                 build_page(
                     &html_body,
                     &raw,
@@ -4533,7 +4613,17 @@ fn main() {
     let settings_for_event = Arc::clone(&settings);
     update_tabs(&webview, &session_for_event.lock().unwrap());
     update_settings_ui(&webview, &settings_for_event.lock().unwrap());
-    update_author_doc(&webview, &initial_raw);
+    let initial_is_txt = session_for_event
+        .lock()
+        .unwrap()
+        .active()
+        .map(|tab| is_txt_document(&tab.path))
+        .unwrap_or(false);
+    if initial_is_txt {
+        update_author_doc(&webview, "");
+    } else {
+        update_author_doc(&webview, &initial_raw);
+    }
     update_sidebar(
         &webview,
         &session_for_event.lock().unwrap(),
@@ -4638,7 +4728,9 @@ fn main() {
                     return;
                 }
                 if let Some(paths) = rfd::FileDialog::new()
-                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd", "txt"])
+                    .add_filter("Supported Documents", &["md", "markdown", "mdown", "mkd", "txt"])
+                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"])
+                    .add_filter("Text", &["txt"])
                     .pick_files()
                 {
                     let _ = proxy.send_event(UserEvent::OpenPaths(paths, false));
@@ -4733,7 +4825,9 @@ fn main() {
             }
             TaoEvent::UserEvent(UserEvent::LocateTab(id)) => {
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd", "txt"])
+                    .add_filter("Supported Documents", &["md", "markdown", "mdown", "mkd", "txt"])
+                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"])
+                    .add_filter("Text", &["txt"])
                     .pick_file()
                 {
                     let mut session = session_for_event.lock().unwrap();
@@ -4819,8 +4913,8 @@ fn main() {
                 APP_DIRTY.store(false, Ordering::SeqCst);
                 if active_matches {
                     if let Ok(raw) = fs::read_to_string(&path) {
-                        let html = md_to_html_with_base(&raw, path.parent());
-                        let flags = enhance_flags_for(&raw);
+                        let is_txt = is_txt_document(&path);
+                        let (html, flags, _) = document_to_html(&path, &raw);
                         *enhance_flags.lock().unwrap() = flags;
                         let _ = webview.evaluate_script(&format!(
                             "if(window.__setPreview)window.__setPreview('{}', {}, {});if(window.__markSaved)window.__markSaved('{}');",
@@ -4829,7 +4923,11 @@ fn main() {
                             flags.mermaid,
                             escape_js(&raw)
                         ));
-                        update_author_doc(&webview, &raw);
+                        if is_txt {
+                            update_author_doc(&webview, "");
+                        } else {
+                            update_author_doc(&webview, &raw);
+                        }
                         for script in build_enhancer_bootstrap(flags, loaded_enhancers) {
                             let _ = webview.evaluate_script(&script);
                         }

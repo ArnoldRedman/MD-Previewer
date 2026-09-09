@@ -249,6 +249,16 @@ body.empty #preview {
   font-size: 90%;
 }
 
+#preview .mdp-plain-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: -apple-system-ui-monospaced, Menlo, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.65;
+  tab-size: 4;
+}
+
 #preview pre {
   overflow-x: auto;
   margin: 1em -2px;
