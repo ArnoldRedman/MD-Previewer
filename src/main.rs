@@ -437,8 +437,9 @@ try {{
     Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue
     Start-Process -FilePath $downloaded
 }} catch {{
-    Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
+    Start-Process -FilePath '{target_s}'
 }} finally {{
+    Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue
 }}
 "#
@@ -478,6 +479,8 @@ try {{
     if ($copied -and -not $started) {{
         Start-Process -FilePath $target
     }}
+}} catch {{
+    Start-Process -FilePath $target
 }} finally {{
     Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue
