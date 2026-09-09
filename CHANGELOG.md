@@ -2,6 +2,21 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.2.0
+
+- Added native plain text (`.txt`) document reading and preview support:
+  - Preserves original line breaks, whitespace, and tabs without Markdown formatting collisions
+  - Safely escapes HTML special characters while avoiding false header, italic, or table rendering
+  - Automatically disables LaTeX math and Mermaid diagrams for `.txt` files to avoid parsing errors
+  - Full support for content zoom (Cmd/Ctrl +/-/0), in-page search (Cmd/Ctrl+F), and source editing (Cmd/Ctrl+E)
+  - Extended Android and mobile preview shells to accept `.txt` and `text/plain` files
+- Improved editing mode layout:
+  - Docked the floating toolbar into a dedicated sticky top bar when entering edit mode, preventing toolbar controls from obscuring the top lines of source text
+- Fixed author mode copying:
+  - Ensured copied text extracts clean plain text without retaining raw Markdown syntax markers
+- Added product screenshots:
+  - Added preview mode and edit/settings mode screenshots to `docs/` and updated `README.md` / `README_zh.md`
+
 ## 1.1.1
 
 - Fixed author mode copying Markdown source instead of the rendered text: **Copy body** now takes the visible article text from the rendered document, with blank lines between paragraphs and no `#`, `**`, `` ` ``, `>` or `-` markers

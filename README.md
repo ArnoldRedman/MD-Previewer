@@ -9,10 +9,19 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 
 ![MD Previewer icon](docs/icon.png)
 
+## Screenshots
+
+### Preview Mode
+![MD Previewer Preview](docs/preview.png)
+
+### Editor & Settings Mode
+![MD Previewer Editor](docs/editor.png)
+
 ## What it does
 
-- Opens Markdown and text files from the command line, file picker, drag and drop, or OS file associations.
-- Keeps multiple documents in tabs and restores the previous session; opening another Markdown file from Windows Explorer reuses the running window.
+- Opens Markdown and `.txt` plain text files from the command line, file picker, drag and drop, or OS file associations.
+- Dedicated plain text rendering for `.txt` files: preserves line breaks, indentation, and safe escaping without Markdown syntax collisions.
+- Keeps multiple documents in tabs and restores the previous session; opening another file from Windows Explorer reuses the running window.
 - Lets the toolbar gear choose whether a Markdown file reuses the running window or opens its own, and whether the tab bar accumulates tabs or keeps only the current document.
 - Offers a collapsible left sidebar listing the current document's folder and recently opened files, for switching between chapters without the file picker.
 - Includes an author mode that adds copy buttons for the chapter heading line, the title without its chapter number, and the whole body.
