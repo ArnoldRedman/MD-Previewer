@@ -4,6 +4,10 @@ This file tracks MD Previewer releases. The upstream MD Preview history remains 
 
 ## 1.3.0
 
+- Updated brand application icon across all platforms:
+  - Replaced the legacy icon with a freshly designed, crisp document glyph (`< • >`)
+  - Full multi-resolution support for Windows ICO, macOS ICNS, iOS AppIcon, and Android mipmap assets
+  - Added build.rs dependency tracking to ensure icon assets trigger automatic resource recompilation
 - Added automatic update checking and Windows in-app one-click self-upgrade:
   - Startup silent check (deferred by 2.5s) and periodic 4-hour background polling via GitHub Releases API
   - Non-intrusive pulsating rocket badge (`🚀 v1.3.x`) in the top-right toolbar when an update is available
