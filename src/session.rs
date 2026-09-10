@@ -161,15 +161,20 @@ impl DocumentSession {
         self.tabs.iter_mut().find(|tab| tab.id == id)
     }
 
+    /// 另存为前检查目标路径是否已被其他标签占用，避免两个标签指向同一文件
+    pub fn is_open_in_other_tab(&self, id: u64, path: &Path) -> bool {
+        let path = normalize_path(path.to_path_buf());
+        self.tabs.iter().any(|tab| tab.id != id && tab.path == path)
+    }
+
     pub fn relocate(&mut self, id: u64, path: PathBuf) -> bool {
-        let path = normalize_path(path);
-        if self.tabs.iter().any(|tab| tab.id != id && tab.path == path) {
+        if self.is_open_in_other_tab(id, &path) {
             return false;
         }
         let Some(tab) = self.get_mut(id) else {
             return false;
         };
-        tab.path = path;
+        tab.path = normalize_path(path);
         tab.missing = !tab.path.exists();
         true
     }
@@ -294,6 +299,23 @@ mod tests {
         assert_eq!(session.tabs.len(), 1);
         assert_eq!(session.active_id, Some(second));
         assert_eq!(session.tabs[0].id, second);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn save_as_target_already_open_in_another_tab_is_detected() {
+        let dir = temp_dir("open-elsewhere");
+        let first = dir.join("first.md");
+        let second = dir.join("second.md");
+        fs::write(&first, "a").unwrap();
+        fs::write(&second, "b").unwrap();
+        let mut session = DocumentSession::default();
+        let first_id = session.open(first.clone(), false);
+        session.open(second.clone(), false);
+
+        assert!(session.is_open_in_other_tab(first_id, &second));
+        assert!(!session.is_open_in_other_tab(first_id, &first));
+        assert!(!session.is_open_in_other_tab(first_id, &dir.join("third.md")));
         let _ = fs::remove_dir_all(dir);
     }
 

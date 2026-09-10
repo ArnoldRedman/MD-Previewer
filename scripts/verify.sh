@@ -106,6 +106,7 @@ if command -v node >/dev/null 2>&1 && node -e "import('playwright')" >/dev/null 
   node scripts/verify-desktop-edit-topbar.mjs
   node scripts/verify-ux-improvements.mjs
   node scripts/verify-auto-update.mjs
+  node scripts/verify-encoding-convert.mjs
   node mobile/scripts/verify-mobile-renderer.mjs
 else
   echo "[verify] browser checks skipped: Playwright unavailable"

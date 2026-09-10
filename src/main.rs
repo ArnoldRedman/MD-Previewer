@@ -36,7 +36,8 @@ static SESSION_ENABLED: AtomicBool = AtomicBool::new(true);
 struct SelfWriteRecord {
     at: Instant,
     path: PathBuf,
-    content: String,
+    /// 实际写入磁盘的字节；非 UTF-8 编码下与文本不同，必须按字节比较
+    content: Vec<u8>,
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -54,6 +55,10 @@ enum UserEvent {
     RenderPreview(String),
     // 更新弹窗的发布说明是 GitHub Markdown，交给桌面渲染器转 HTML
     RenderReleaseNotes(String),
+    // 编码弹层“转换为”：按新编码改写当前文件，正文随消息带来
+    ConvertEncoding { encoding: String, content: String },
+    // 另存为：正文随消息带来，沿用当前标签编码
+    SaveAs(String),
     FileChanged(PathBuf), // external change: refresh preview AND textarea
     ExternalChangeResolved(bool),
     FileSaved(PathBuf), // our own save: refresh preview only, leave textarea cursor alone
@@ -201,6 +206,16 @@ struct Strings {
     tab_menu_copy_path: &'static str,
     tab_menu_reveal: &'static str,
     encoding_title: &'static str,
+    encoding_reopen_group: &'static str,
+    encoding_convert_group: &'static str,
+    btn_save_as: &'static str,
+    save_as_dialog_title: &'static str,
+    convert_lossy_title: &'static str,
+    convert_lossy_body: &'static str,
+    convert_failed_title: &'static str,
+    save_as_failed_title: &'static str,
+    save_as_already_open: &'static str,
+    save_as_unsupported: &'static str,
     btn_update_title: &'static str,
     btn_update_text: &'static str,
     set_version_label: &'static str,
@@ -274,6 +289,16 @@ impl Strings {
                 tab_menu_copy_path: "复制路径",
                 tab_menu_reveal: "在文件管理器中显示",
                 encoding_title: "编码格式",
+                encoding_reopen_group: "以此编码重新打开",
+                encoding_convert_group: "转换为",
+                btn_save_as: "另存为…",
+                save_as_dialog_title: "另存为",
+                convert_lossy_title: "有损转换",
+                convert_lossy_body: "有 {n} 个字符无法用 {enc} 表示，转换后将被替换为 ?。是否继续？",
+                convert_failed_title: "无法转换编码",
+                save_as_failed_title: "无法另存为",
+                save_as_already_open: "该文件已在另一个标签页中打开，请先关闭那个标签页",
+                save_as_unsupported: "另存为只支持 Markdown 或 .txt 文件",
                 btn_update_title: "发现新版本，点击查看与更新",
                 btn_update_text: "新版本可用",
                 set_version_label: "当前版本",
@@ -343,6 +368,16 @@ impl Strings {
                 tab_menu_copy_path: "Copy Path",
                 tab_menu_reveal: "Reveal in File Manager",
                 encoding_title: "Encoding",
+                encoding_reopen_group: "Reopen with encoding",
+                encoding_convert_group: "Convert to",
+                btn_save_as: "Save As…",
+                save_as_dialog_title: "Save As",
+                convert_lossy_title: "Lossy Conversion",
+                convert_lossy_body: "{n} character(s) cannot be represented in {enc} and will be replaced with ?. Continue?",
+                convert_failed_title: "Could Not Convert Encoding",
+                save_as_failed_title: "Could Not Save As",
+                save_as_already_open: "That file is already open in another tab. Close it first.",
+                save_as_unsupported: "Save As only supports Markdown or .txt files",
                 btn_update_title: "New version available, click to view and update",
                 btn_update_text: "Update Available",
                 set_version_label: "Version",
@@ -1340,7 +1375,7 @@ fn is_txt_document(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// 读取文档文本内容，支持 UTF-8、带 BOM 的 UTF-8/UTF-16 以及 Windows ANSI (GBK/CP936 等) 编码
+/// 读取文档文本内容，支持 UTF-8、带 BOM 的 UTF-8（回报为 UTF-8 BOM）、带 BOM 的 UTF-16 以及 Windows ANSI (GBK/CP936 等) 编码
 /// 返回解析后的文本和实际采用的编码格式名称
 fn read_document_with_encoding(
     path: &Path,
@@ -1349,6 +1384,7 @@ fn read_document_with_encoding(
     let bytes = fs::read(path)?;
     if bytes.is_empty() {
         let enc = match encoding_override {
+            Some("UTF-8 BOM") => "UTF-8 BOM",
             Some("GBK") => "GBK",
             Some("UTF-16 LE") => "UTF-16 LE",
             Some("UTF-16 BE") => "UTF-16 BE",
@@ -1360,16 +1396,22 @@ fn read_document_with_encoding(
     // 若用户明确指定了编码格式，优先按指定格式解码
     if let Some(enc) = encoding_override {
         match enc {
-            "UTF-8" => {
+            "UTF-8" | "UTF-8 BOM" => {
+                // 两者解码方式相同，只是回报的编码名不同，决定保存时是否写 BOM
+                let label = if enc == "UTF-8 BOM" {
+                    "UTF-8 BOM"
+                } else {
+                    "UTF-8"
+                };
                 let slice = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
                     &bytes[3..]
                 } else {
                     &bytes[..]
                 };
                 if let Ok(s) = std::str::from_utf8(slice) {
-                    return Ok((s.to_string(), "UTF-8"));
+                    return Ok((s.to_string(), label));
                 }
-                return Ok((String::from_utf8_lossy(slice).into_owned(), "UTF-8"));
+                return Ok((String::from_utf8_lossy(slice).into_owned(), label));
             }
             "GBK" => {
                 #[cfg(target_os = "windows")]
@@ -1415,10 +1457,10 @@ fn read_document_with_encoding(
     }
 
     // 自动探测编码：
-    // 1. UTF-8 BOM: EF BB BF
+    // 1. UTF-8 BOM: EF BB BF，作为独立编码回报，保存时才能保留 BOM
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
         if let Ok(s) = std::str::from_utf8(&bytes[3..]) {
-            return Ok((s.to_string(), "UTF-8"));
+            return Ok((s.to_string(), "UTF-8 BOM"));
         }
     }
 
@@ -1467,38 +1509,74 @@ fn read_document_to_string(path: &Path) -> std::io::Result<String> {
     read_document_with_encoding(path, None).map(|(content, _)| content)
 }
 
-/// 按照指定或文档已有编码保存文本
-fn write_document_with_encoding(
-    path: &Path,
-    content: &str,
-    encoding: Option<&str>,
-) -> std::io::Result<()> {
-    match encoding {
-        Some("GBK") => {
-            #[cfg(target_os = "windows")]
-            {
-                if let Some(bytes) = encode_windows_codepage(content, 936) {
-                    return fs::write(path, bytes);
-                }
-            }
-            fs::write(path, content)
+/// 文本按目标编码转成写盘字节的结果
+struct EncodedDocument {
+    bytes: Vec<u8>,
+    /// 目标编码无法表示、已替换成 ? 的字符数，目前只有 GBK 会出现
+    lossy_chars: usize,
+}
+
+/// 把文本编码成指定编码的字节；编码名未知或当前系统不支持时返回错误信息
+fn encode_document(content: &str, encoding: &str) -> Result<EncodedDocument, String> {
+    let bytes = match encoding {
+        "UTF-8" => content.as_bytes().to_vec(),
+        "UTF-8 BOM" => {
+            let mut bytes = vec![0xEF, 0xBB, 0xBF];
+            bytes.extend_from_slice(content.as_bytes());
+            bytes
         }
-        Some("UTF-16 LE") => {
+        "UTF-16 LE" => {
             let mut bytes = vec![0xFF, 0xFE];
-            for u in content.encode_utf16() {
-                bytes.extend_from_slice(&u.to_le_bytes());
+            for unit in content.encode_utf16() {
+                bytes.extend_from_slice(&unit.to_le_bytes());
             }
-            fs::write(path, bytes)
+            bytes
         }
-        Some("UTF-16 BE") => {
+        "UTF-16 BE" => {
             let mut bytes = vec![0xFE, 0xFF];
-            for u in content.encode_utf16() {
-                bytes.extend_from_slice(&u.to_be_bytes());
+            for unit in content.encode_utf16() {
+                bytes.extend_from_slice(&unit.to_be_bytes());
             }
-            fs::write(path, bytes)
+            bytes
         }
-        _ => fs::write(path, content),
+        "GBK" => return encode_gbk(content),
+        other => return Err(format!("不支持的编码：{other}")),
+    };
+    Ok(EncodedDocument {
+        bytes,
+        lossy_chars: 0,
+    })
+}
+
+/// GBK 走系统代码页 936；先整体转换，只有确认出现替换字符时才逐字符统计数量
+#[cfg(target_os = "windows")]
+fn encode_gbk(content: &str) -> Result<EncodedDocument, String> {
+    let wide: Vec<u16> = content.encode_utf16().collect();
+    let (bytes, replaced) =
+        encode_wide_to_codepage(&wide, 936).ok_or_else(|| "系统代码页 936 转换失败".to_string())?;
+    if !replaced {
+        return Ok(EncodedDocument {
+            bytes,
+            lossy_chars: 0,
+        });
     }
+    let lossy_chars = content
+        .chars()
+        .filter(|ch| !ch.is_ascii())
+        .filter(|ch| {
+            let mut units = [0u16; 2];
+            matches!(
+                encode_wide_to_codepage(ch.encode_utf16(&mut units), 936),
+                Some((_, true))
+            )
+        })
+        .count();
+    Ok(EncodedDocument { bytes, lossy_chars })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn encode_gbk(_content: &str) -> Result<EncodedDocument, String> {
+    Err("当前系统不支持写入 GBK 编码".to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -1575,8 +1653,9 @@ fn decode_windows_codepage(bytes: &[u8], code_page: u32) -> Option<String> {
     }
 }
 
+/// 用 Windows 代码页编码 UTF-16 码元；返回字节和“是否有字符被替换成 ?”
 #[cfg(target_os = "windows")]
-fn encode_windows_codepage(text: &str, code_page: u32) -> Option<Vec<u8>> {
+fn encode_wide_to_codepage(wide: &[u16], code_page: u32) -> Option<(Vec<u8>, bool)> {
     extern "system" {
         fn WideCharToMultiByte(
             code_page: u32,
@@ -1589,19 +1668,21 @@ fn encode_windows_codepage(text: &str, code_page: u32) -> Option<Vec<u8>> {
             used_default_char: *mut i32,
         ) -> i32;
     }
-    let wide: Vec<u16> = text.encode_utf16().collect();
+    // 关闭“近似字符”映射，无法表示的字符一律记为替换，转码提示才准确
+    const WC_NO_BEST_FIT_CHARS: u32 = 0x0000_0400;
     if wide.is_empty() {
-        return Some(Vec::new());
+        return Some((Vec::new(), false));
     }
+    let default_char = b"?";
     let len = unsafe {
         WideCharToMultiByte(
             code_page,
-            0,
+            WC_NO_BEST_FIT_CHARS,
             wide.as_ptr(),
             wide.len() as i32,
             std::ptr::null_mut(),
             0,
-            std::ptr::null(),
+            default_char.as_ptr(),
             std::ptr::null_mut(),
         )
     };
@@ -1609,23 +1690,23 @@ fn encode_windows_codepage(text: &str, code_page: u32) -> Option<Vec<u8>> {
         return None;
     }
     let mut bytes = vec![0u8; len as usize];
-    let res = unsafe {
+    let mut used_default = 0i32;
+    let written = unsafe {
         WideCharToMultiByte(
             code_page,
-            0,
+            WC_NO_BEST_FIT_CHARS,
             wide.as_ptr(),
             wide.len() as i32,
             bytes.as_mut_ptr(),
             len,
-            std::ptr::null(),
-            std::ptr::null_mut(),
+            default_char.as_ptr(),
+            &mut used_default,
         )
     };
-    if res > 0 {
-        Some(bytes)
-    } else {
-        None
+    if written <= 0 {
+        return None;
     }
+    Some((bytes, used_default != 0))
 }
 
 /// 在系统文件管理器中定位并选中文件
@@ -2099,6 +2180,9 @@ body.has-tabs {{ --chrome-top: 50px; --bar-top: 40px; }}
 	}}
 	.encoding-option:hover {{ background: #f3f4f6; color: #0969da; }}
 	.encoding-option.active {{ font-weight: 600; color: #0969da; background: rgba(9,105,218,0.08); }}
+	.encoding-group-title {{ font-size: 10px; font-weight: 600; color: #8c959f; padding: 6px 8px 2px; }}
+	.encoding-option:disabled {{ color: #a3a3a3; cursor: default; background: transparent; }}
+	.encoding-sep {{ height: 1px; background: rgba(0,0,0,0.08); margin: 4px 2px; }}
 	.missing-file {{ min-height: 55vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }}
 	.missing-file h2, .missing-file p {{ margin: 0; }}
 	.missing-file p {{ color: #777; }}
@@ -2544,6 +2628,9 @@ body.empty .toolbar {{ display: none !important; }}
 	  .encoding-option {{ color: #adbac7; }}
 	  .encoding-option:hover {{ background: #2d333b; color: #58a6ff; }}
 	  .encoding-option.active {{ color: #58a6ff; background: rgba(56,139,253,0.15); }}
+	  .encoding-group-title {{ color: #768390; }}
+	  .encoding-option:disabled {{ color: #545d68; background: transparent; }}
+	  .encoding-sep {{ background: rgba(255,255,255,0.08); }}
 	  body.editing #btn-split[aria-pressed="true"] {{ background: rgba(56,139,253,0.18); color: #58a6ff; border-color: rgba(56,139,253,0.4); }}
 	}}
 
@@ -2619,7 +2706,7 @@ body.editing .findbar {{ display: none !important; }}
   #preview .mdp-table-wrap {{ width: auto; margin: 1em 0; transform: none; overflow: visible; }}
 }}
 	</style></head><body class="{body_class}">
-	<div class="tabbar" id="tabbar"><div class="tabs" id="tabs"></div><div class="doc-stats" id="doc-stats" aria-live="polite"></div><div class="encoding-control" id="encoding-control"><button class="encoding-btn" id="btn-encoding" type="button" title="{encoding_title}">{initial_encoding}</button><div class="encoding-popover" id="encoding-popover" style="display:none;" role="menu"><div class="encoding-popover-title">{encoding_title}</div><button type="button" class="encoding-option{opt_utf8}" data-encoding="UTF-8">UTF-8</button><button type="button" class="encoding-option{opt_gbk}" data-encoding="GBK">GBK / ANSI</button><button type="button" class="encoding-option{opt_u16le}" data-encoding="UTF-16 LE">UTF-16 LE</button><button type="button" class="encoding-option{opt_u16be}" data-encoding="UTF-16 BE">UTF-16 BE</button></div></div><button class="tab-open" id="tab-open" type="button" title="{btn_new}" aria-label="{btn_new}">+</button></div>
+	<div class="tabbar" id="tabbar"><div class="tabs" id="tabs"></div><div class="doc-stats" id="doc-stats" aria-live="polite"></div><div class="encoding-control" id="encoding-control"><button class="encoding-btn" id="btn-encoding" type="button" title="{encoding_title}">{initial_encoding}</button><div class="encoding-popover" id="encoding-popover" style="display:none;" role="menu"><div class="encoding-popover-title">{encoding_title}</div><div class="encoding-group-title">{encoding_reopen_group}</div><button type="button" class="encoding-option{opt_utf8}" data-encoding="UTF-8">UTF-8</button><button type="button" class="encoding-option{opt_utf8bom}" data-encoding="UTF-8 BOM">UTF-8 BOM</button><button type="button" class="encoding-option{opt_gbk}" data-encoding="GBK">GBK / ANSI</button><button type="button" class="encoding-option{opt_u16le}" data-encoding="UTF-16 LE">UTF-16 LE</button><button type="button" class="encoding-option{opt_u16be}" data-encoding="UTF-16 BE">UTF-16 BE</button><div class="encoding-group-title">{encoding_convert_group}</div><button type="button" class="encoding-option" data-convert-encoding="UTF-8">UTF-8</button><button type="button" class="encoding-option" data-convert-encoding="UTF-8 BOM">UTF-8 BOM</button><button type="button" class="encoding-option" data-convert-encoding="GBK">GBK / ANSI</button><button type="button" class="encoding-option" data-convert-encoding="UTF-16 LE">UTF-16 LE</button><button type="button" class="encoding-option" data-convert-encoding="UTF-16 BE">UTF-16 BE</button><div class="encoding-sep"></div><button type="button" class="encoding-option" id="btn-save-as">{btn_save_as}</button></div></div><button class="tab-open" id="tab-open" type="button" title="{btn_new}" aria-label="{btn_new}">+</button></div>
 	<aside class="sidebar" id="sidebar" aria-label="{btn_sidebar}">
 	  <div class="sidebar-sections">
 	    <button type="button" data-sidebar-section="folder" aria-pressed="true">{sidebar_folder}</button>
@@ -2903,17 +2990,18 @@ body.editing .findbar {{ display: none !important; }}
     if (!enc) return;
     currentEncoding = enc;
     if (btnEncoding) btnEncoding.textContent = enc;
-    if (encodingPopover) {{
-      var options = encodingPopover.querySelectorAll('.encoding-option');
-      for (var i = 0; i < options.length; i++) {{
-        if (options[i].getAttribute('data-encoding') === enc) {{
-          options[i].classList.add('active');
-        }} else {{
-          options[i].classList.remove('active');
-        }}
-      }}
+    if (!encodingPopover) return;
+    var options = encodingPopover.querySelectorAll('[data-encoding]');
+    for (var i = 0; i < options.length; i++) {{
+      options[i].classList.toggle('active', options[i].getAttribute('data-encoding') === enc);
+    }}
+    // 转换组里当前编码没有意义，置灰防止误点
+    var converts = encodingPopover.querySelectorAll('[data-convert-encoding]');
+    for (var j = 0; j < converts.length; j++) {{
+      converts[j].disabled = converts[j].getAttribute('data-convert-encoding') === enc;
     }}
   }}
+  setEncodingUi(currentEncoding);
   window.__setEncoding = setEncodingUi;
   if (btnEncoding && encodingPopover) {{
     btnEncoding.addEventListener('click', function(e) {{
@@ -2922,7 +3010,18 @@ body.editing .findbar {{ display: none !important; }}
       encodingPopover.style.display = isOpen ? 'none' : 'block';
     }});
     encodingPopover.addEventListener('click', function(e) {{
-      var opt = e.target.closest('.encoding-option');
+      var convert = e.target.closest('[data-convert-encoding]');
+      if (convert) {{
+        encodingPopover.style.display = 'none';
+        convertEncoding(convert.getAttribute('data-convert-encoding'));
+        return;
+      }}
+      if (e.target.closest('#btn-save-as')) {{
+        encodingPopover.style.display = 'none';
+        saveAs();
+        return;
+      }}
+      var opt = e.target.closest('[data-encoding]');
       if (opt) {{
         var enc = opt.getAttribute('data-encoding');
         encodingPopover.style.display = 'none';
@@ -2949,6 +3048,16 @@ body.editing .findbar {{ display: none !important; }}
 	    cancelPendingAutosave();
 	    if (!dirty) return;
 	    window.ipc.postMessage('save:' + ta.value);
+	  }}
+	  // 转码与另存为都把编辑器全文随消息带上，未保存的编辑不会丢；先取消待触发的自动保存，避免两次写盘交错
+	  function convertEncoding(enc) {{
+	    cancelPendingAutosave();
+	    window.ipc.postMessage('convert-encoding:' + enc + '\n' + ta.value);
+	  }}
+	  function saveAs() {{
+	    if (document.body.classList.contains('empty')) return;
+	    cancelPendingAutosave();
+	    window.ipc.postMessage('save-as\n' + ta.value);
 	  }}
 	  function scheduleAutosave() {{
 	    cancelPendingAutosave();
@@ -3751,6 +3860,11 @@ body.editing .findbar {{ display: none !important; }}
       if (inEdit()) leaveEdit(); else enterEdit();
       return;
     }}
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {{
+      e.preventDefault();
+      saveAs();
+      return;
+    }}
     if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {{
       if (inEdit()) {{ e.preventDefault(); save(); }}
       return;
@@ -4247,6 +4361,9 @@ if(window.__enhancePreview)window.__enhancePreview();
         stat_words_js = escape_js(s.stat_words),
         stat_chars_js = escape_js(s.stat_chars),
         encoding_title = s.encoding_title,
+        encoding_reopen_group = s.encoding_reopen_group,
+        encoding_convert_group = s.encoding_convert_group,
+        btn_save_as = s.btn_save_as,
         cargo_version = env!("CARGO_PKG_VERSION"),
         btn_update_title = s.btn_update_title,
         btn_update_text = s.btn_update_text,
@@ -4265,6 +4382,11 @@ if(window.__enhancePreview)window.__enhancePreview();
         update_close = s.update_close,
         initial_encoding = initial_encoding,
         opt_utf8 = if initial_encoding == "UTF-8" {
+            " active"
+        } else {
+            ""
+        },
+        opt_utf8bom = if initial_encoding == "UTF-8 BOM" {
             " active"
         } else {
             ""
@@ -4895,13 +5017,41 @@ mod tests {
         let record = SelfWriteRecord {
             at: Instant::now(),
             path: path.clone(),
-            content: "saved by app".to_string(),
+            content: b"saved by app".to_vec(),
         };
 
         assert!(self_write_still_matches_disk(Some(&record), &path));
 
         fs::write(&path, "external edit").unwrap();
         assert!(!self_write_still_matches_disk(Some(&record), &path));
+    }
+
+    #[test]
+    fn write_document_bytes_records_encoded_bytes_for_watcher() {
+        let dir = temp_test_dir("self-write-bytes");
+        let path = dir.join("utf16.md");
+        let holder = Mutex::new(None);
+        let bytes = encode_document("字节比较", "UTF-16 LE").unwrap().bytes;
+
+        write_document_bytes(&holder, &path, bytes.clone()).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        let record = holder.lock().unwrap();
+        assert!(self_write_still_matches_disk(record.as_ref(), &path));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn save_document_text_reports_unknown_encoding() {
+        let dir = temp_test_dir("save-text");
+        let path = dir.join("note.md");
+        let holder = Mutex::new(None);
+
+        assert!(save_document_text(&holder, &path, "x", Some("Latin-1")).is_err());
+        assert!(!path.exists());
+        save_document_text(&holder, &path, "正文", None).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "正文");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -5019,24 +5169,164 @@ mod tests {
     }
 
     #[test]
+    fn build_page_includes_encoding_convert_and_save_as() {
+        let strings = Strings::for_lang(Lang::Zh);
+        let page = build_page_with_encoding(
+            "<p>x</p>",
+            "x",
+            None,
+            EnhanceFlags::default(),
+            &strings,
+            false,
+            "UTF-8 BOM",
+        );
+        assert!(page.contains("data-encoding=\"UTF-8 BOM\">UTF-8 BOM</button>"));
+        assert!(page.contains("class=\"encoding-option active\" data-encoding=\"UTF-8 BOM\""));
+        assert!(page.contains("class=\"encoding-option\" data-encoding=\"UTF-8\">"));
+        for encoding in ["UTF-8", "UTF-8 BOM", "GBK", "UTF-16 LE", "UTF-16 BE"] {
+            assert!(page.contains(&format!("data-convert-encoding=\"{encoding}\"")));
+        }
+        assert!(page.contains("id=\"btn-save-as\""));
+        assert!(page.contains(">以此编码重新打开<"));
+        assert!(page.contains(">转换为<"));
+        assert!(page.contains("'convert-encoding:' + enc + '\\n' + ta.value"));
+        assert!(page.contains("'save-as\\n' + ta.value"));
+        assert!(page.contains("e.shiftKey && (e.key === 's' || e.key === 'S')"));
+    }
+
+    #[test]
+    fn save_as_target_path_fills_missing_extension_from_current_file() {
+        let current = Path::new("D:/docs/readme.md");
+        assert_eq!(
+            save_as_target_path(PathBuf::from("D:/docs/copy"), current),
+            PathBuf::from("D:/docs/copy.md")
+        );
+        assert_eq!(
+            save_as_target_path(PathBuf::from("D:/docs/copy.txt"), current),
+            PathBuf::from("D:/docs/copy.txt")
+        );
+        assert!(!is_supported_document(&save_as_target_path(
+            PathBuf::from("D:/docs/copy.html"),
+            current
+        )));
+    }
+
+    #[test]
+    fn build_page_wires_convert_and_save_as_ipc() {
+        let source = include_str!("main.rs");
+        assert!(source.contains("body.strip_prefix(\"convert-encoding:\")"));
+        assert!(source.contains("body.strip_prefix(\"save-as\\n\")"));
+        assert!(source.contains("UserEvent::ConvertEncoding { encoding, content }) =>"));
+        assert!(source.contains("UserEvent::SaveAs(content)) =>"));
+    }
+
+    #[test]
+    fn encode_document_prefixes_bom_for_unicode_encodings() {
+        let utf8 = encode_document("中a", "UTF-8").unwrap();
+        assert_eq!(utf8.bytes, "中a".as_bytes());
+        assert_eq!(utf8.lossy_chars, 0);
+
+        let utf8_bom = encode_document("中a", "UTF-8 BOM").unwrap();
+        assert_eq!(&utf8_bom.bytes[..3], &[0xEF, 0xBB, 0xBF]);
+        assert_eq!(&utf8_bom.bytes[3..], "中a".as_bytes());
+
+        let le = encode_document("中a", "UTF-16 LE").unwrap();
+        assert_eq!(le.bytes, vec![0xFF, 0xFE, 0x2D, 0x4E, 0x61, 0x00]);
+
+        let be = encode_document("中a", "UTF-16 BE").unwrap();
+        assert_eq!(be.bytes, vec![0xFE, 0xFF, 0x4E, 0x2D, 0x00, 0x61]);
+
+        assert!(encode_document("x", "Latin-1").is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn encode_document_counts_characters_gbk_cannot_represent() {
+        let clean = encode_document("测试 GBK 编码", "GBK").unwrap();
+        assert_eq!(clean.lossy_chars, 0);
+        assert_eq!(
+            decode_windows_codepage(&clean.bytes, 936).unwrap(),
+            "测试 GBK 编码"
+        );
+
+        let lossy = encode_document("前😀中🚀后", "GBK").unwrap();
+        assert_eq!(lossy.lossy_chars, 2);
+        let decoded = decode_windows_codepage(&lossy.bytes, 936).unwrap();
+        assert_eq!(decoded.replace('?', ""), "前中后");
+        assert!(decoded.contains('?'));
+    }
+
+    #[test]
+    fn utf8_bom_is_detected_and_preserved_on_write() {
+        let dir = temp_test_dir("utf8-bom");
+        let path = dir.join("bom.md");
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice("带 BOM".as_bytes());
+        fs::write(&path, &bytes).unwrap();
+
+        let (content, encoding) = read_document_with_encoding(&path, None).unwrap();
+        assert_eq!(content, "带 BOM");
+        assert_eq!(encoding, "UTF-8 BOM");
+
+        let (content, encoding) = read_document_with_encoding(&path, Some("UTF-8 BOM")).unwrap();
+        assert_eq!((content.as_str(), encoding), ("带 BOM", "UTF-8 BOM"));
+
+        let (_, encoding) = read_document_with_encoding(&path, Some("UTF-8")).unwrap();
+        assert_eq!(encoding, "UTF-8");
+
+        fs::write(&path, encode_document("改写", "UTF-8 BOM").unwrap().bytes).unwrap();
+        assert!(fs::read(&path).unwrap().starts_with(&[0xEF, 0xBB, 0xBF]));
+        assert_eq!(
+            read_document_with_encoding(&path, None).unwrap(),
+            ("改写".to_string(), "UTF-8 BOM")
+        );
+
+        fs::write(&path, b"").unwrap();
+        assert_eq!(
+            read_document_with_encoding(&path, Some("UTF-8 BOM"))
+                .unwrap()
+                .1,
+            "UTF-8 BOM"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn read_and_write_document_with_encoding_roundtrips() {
         let dir = temp_test_dir("encoding-roundtrip");
         let p = dir.join("test.txt");
 
         // UTF-8
-        write_document_with_encoding(&p, "测试 UTF-8 编码", Some("UTF-8")).unwrap();
+        fs::write(
+            &p,
+            encode_document("测试 UTF-8 编码", "UTF-8").unwrap().bytes,
+        )
+        .unwrap();
         let (content, enc) = read_document_with_encoding(&p, None).unwrap();
         assert_eq!(content, "测试 UTF-8 编码");
         assert_eq!(enc, "UTF-8");
 
         // UTF-16 LE
-        write_document_with_encoding(&p, "测试 UTF-16 LE", Some("UTF-16 LE")).unwrap();
+        fs::write(
+            &p,
+            encode_document("测试 UTF-16 LE", "UTF-16 LE")
+                .unwrap()
+                .bytes,
+        )
+        .unwrap();
         let (content, enc) = read_document_with_encoding(&p, None).unwrap();
         assert_eq!(content, "测试 UTF-16 LE");
         assert_eq!(enc, "UTF-16 LE");
 
         // UTF-16 BE
-        write_document_with_encoding(&p, "测试 UTF-16 BE", Some("UTF-16 BE")).unwrap();
+        fs::write(
+            &p,
+            encode_document("测试 UTF-16 BE", "UTF-16 BE")
+                .unwrap()
+                .bytes,
+        )
+        .unwrap();
         let (content, enc) = read_document_with_encoding(&p, None).unwrap();
         assert_eq!(content, "测试 UTF-16 BE");
         assert_eq!(enc, "UTF-16 BE");
@@ -5044,7 +5334,7 @@ mod tests {
         #[cfg(target_os = "windows")]
         {
             // GBK
-            write_document_with_encoding(&p, "测试 GBK 编码", Some("GBK")).unwrap();
+            fs::write(&p, encode_document("测试 GBK 编码", "GBK").unwrap().bytes).unwrap();
             let (content, enc) = read_document_with_encoding(&p, Some("GBK")).unwrap();
             assert_eq!(content, "测试 GBK 编码");
             assert_eq!(enc, "GBK");
@@ -5714,6 +6004,31 @@ fn install_file_watcher(
     }
 }
 
+/// 先登记自写记录再落盘，文件监听才能把这次写入识别为应用自己的保存
+fn write_document_bytes(
+    last_self_write: &Mutex<Option<SelfWriteRecord>>,
+    path: &Path,
+    bytes: Vec<u8>,
+) -> std::io::Result<()> {
+    *last_self_write.lock().unwrap() = Some(SelfWriteRecord {
+        at: Instant::now(),
+        path: path.to_path_buf(),
+        content: bytes.clone(),
+    });
+    fs::write(path, bytes)
+}
+
+/// 按标签编码把编辑器内容写回磁盘；标签尚无编码时按 UTF-8
+fn save_document_text(
+    last_self_write: &Mutex<Option<SelfWriteRecord>>,
+    path: &Path,
+    content: &str,
+    encoding: Option<&str>,
+) -> Result<(), String> {
+    let encoded = encode_document(content, encoding.unwrap_or("UTF-8"))?;
+    write_document_bytes(last_self_write, path, encoded.bytes).map_err(|error| error.to_string())
+}
+
 fn self_write_still_matches_disk(record: Option<&SelfWriteRecord>, path: &Path) -> bool {
     let Some(record) = record else {
         return false;
@@ -5721,7 +6036,7 @@ fn self_write_still_matches_disk(record: Option<&SelfWriteRecord>, path: &Path) 
     record.path == path
         && record.at.elapsed() < Duration::from_millis(500)
         && fs::read(path)
-            .map(|content| content == record.content.as_bytes())
+            .map(|content| content == record.content)
             .unwrap_or(false)
 }
 
@@ -5779,6 +6094,34 @@ fn create_finder_file(folder: &Path, kind: &str) -> std::io::Result<PathBuf> {
     }
     fs::write(&path, contents)?;
     Ok(path)
+}
+
+/// 另存为对话框返回的路径没有扩展名时补上当前文件的扩展名，新文件才仍能被本应用打开
+fn save_as_target_path(mut target: PathBuf, current: &Path) -> PathBuf {
+    if target.extension().is_none() {
+        if let Some(extension) = current.extension() {
+            target.set_extension(extension);
+        }
+    }
+    target
+}
+
+/// 目标编码无法表示部分字符时弹系统确认框；用户拒绝返回 false
+fn confirm_lossy_conversion(strings: &Strings, encoding: &str, lossy_chars: usize) -> bool {
+    if lossy_chars == 0 {
+        return true;
+    }
+    let body = strings
+        .convert_lossy_body
+        .replace("{n}", &lossy_chars.to_string())
+        .replace("{enc}", encoding);
+    let result = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title(strings.convert_lossy_title)
+        .set_description(body)
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .show();
+    matches!(result, rfd::MessageDialogResult::Yes)
 }
 
 fn normalize_new_markdown_path(mut path: PathBuf) -> PathBuf {
@@ -6285,12 +6628,12 @@ fn main() {
                     let Some((path, encoding)) = active_info else {
                         return;
                     };
-                    *last_self_write_for_ipc.lock().unwrap() = Some(SelfWriteRecord {
-                        at: Instant::now(),
-                        path: path.clone(),
-                        content: content.to_string(),
-                    });
-                    match write_document_with_encoding(&path, content, encoding.as_deref()) {
+                    match save_document_text(
+                        &last_self_write_for_ipc,
+                        &path,
+                        content,
+                        encoding.as_deref(),
+                    ) {
                         Ok(()) => {
                             let _ = proxy_for_ipc.send_event(UserEvent::FileSaved(path));
                         }
@@ -6336,6 +6679,15 @@ fn main() {
             } else if let Some(markdown) = body.strip_prefix("render-release-notes:") {
                 let _ =
                     proxy_for_ipc.send_event(UserEvent::RenderReleaseNotes(markdown.to_string()));
+            } else if let Some(rest) = body.strip_prefix("convert-encoding:") {
+                if let Some((encoding, content)) = rest.split_once('\n') {
+                    let _ = proxy_for_ipc.send_event(UserEvent::ConvertEncoding {
+                        encoding: encoding.to_string(),
+                        content: content.to_string(),
+                    });
+                }
+            } else if let Some(content) = body.strip_prefix("save-as\n") {
+                let _ = proxy_for_ipc.send_event(UserEvent::SaveAs(content.to_string()));
             } else if body == "dirty:1" {
                 let _ = proxy_for_ipc.send_event(UserEvent::DirtyChanged(true));
             } else if body == "dirty:0" {
@@ -6364,12 +6716,12 @@ fn main() {
                     .active()
                     .map(|tab| (tab.path.clone(), tab.encoding.clone()));
                 if let Some((path, encoding)) = active_info {
-                    *last_self_write_for_ipc.lock().unwrap() = Some(SelfWriteRecord {
-                        at: Instant::now(),
-                        path: path.clone(),
-                        content: content.to_string(),
-                    });
-                    match write_document_with_encoding(&path, content, encoding.as_deref()) {
+                    match save_document_text(
+                        &last_self_write_for_ipc,
+                        &path,
+                        content,
+                        encoding.as_deref(),
+                    ) {
                         Ok(()) => {
                             let _ = proxy_for_ipc.send_event(UserEvent::FileSaved(path));
                         }
@@ -6790,6 +7142,132 @@ fn main() {
                     &strings,
                 );
                 persist_session(&session);
+            }
+            TaoEvent::UserEvent(UserEvent::ConvertEncoding { encoding, content }) => {
+                let path = session_for_event
+                    .lock()
+                    .unwrap()
+                    .active()
+                    .map(|tab| tab.path.clone());
+                let Some(path) = path else {
+                    return;
+                };
+                let encoded = match encode_document(&content, &encoding) {
+                    Ok(encoded) => encoded,
+                    Err(message) => {
+                        show_warning_dialog(strings.convert_failed_title, &message);
+                        return;
+                    }
+                };
+                if !confirm_lossy_conversion(&strings, &encoding, encoded.lossy_chars) {
+                    return;
+                }
+                if let Err(error) = write_document_bytes(&last_self_write, &path, encoded.bytes) {
+                    show_warning_dialog(
+                        strings.convert_failed_title,
+                        &format!("{}: {error}", path.display()),
+                    );
+                    return;
+                }
+                let mut session = session_for_event.lock().unwrap();
+                if let Some(tab) = session.active_mut() {
+                    tab.encoding = Some(encoding);
+                    tab.dirty = false;
+                    tab.missing = false;
+                }
+                APP_DIRTY.store(false, Ordering::SeqCst);
+                persist_session(&session);
+                // 先清前端脏标记，再按新编码从磁盘重读，编辑器才会显示磁盘实际内容（有损时可见 ?）
+                let _ = webview.evaluate_script("if(window.__markSaved)window.__markSaved();");
+                render_active_document(
+                    &webview,
+                    &window,
+                    &mut session,
+                    &recent_files,
+                    &enhance_flags,
+                    &mut loaded_enhancers,
+                    &strings,
+                );
+            }
+            TaoEvent::UserEvent(UserEvent::SaveAs(content)) => {
+                let active_info = session_for_event
+                    .lock()
+                    .unwrap()
+                    .active()
+                    .map(|tab| (tab.id, tab.path.clone(), tab.encoding.clone()));
+                let Some((id, current_path, encoding)) = active_info else {
+                    return;
+                };
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title(strings.save_as_dialog_title)
+                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"])
+                    .add_filter("Text", &["txt"]);
+                if let Some(dir) = current_path
+                    .parent()
+                    .filter(|dir| !dir.as_os_str().is_empty())
+                {
+                    dialog = dialog.set_directory(dir);
+                }
+                if let Some(name) = current_path.file_name().and_then(|name| name.to_str()) {
+                    dialog = dialog.set_file_name(name);
+                }
+                let Some(target) = dialog.save_file() else {
+                    return;
+                };
+                let target = save_as_target_path(target, &current_path);
+                if !is_supported_document(&target) {
+                    show_warning_dialog(strings.save_as_failed_title, strings.save_as_unsupported);
+                    return;
+                }
+                if session_for_event
+                    .lock()
+                    .unwrap()
+                    .is_open_in_other_tab(id, &target)
+                {
+                    show_warning_dialog(strings.save_as_failed_title, strings.save_as_already_open);
+                    return;
+                }
+                let encoding = encoding.unwrap_or_else(|| "UTF-8".to_string());
+                let encoded = match encode_document(&content, &encoding) {
+                    Ok(encoded) => encoded,
+                    Err(message) => {
+                        show_warning_dialog(strings.save_as_failed_title, &message);
+                        return;
+                    }
+                };
+                if !confirm_lossy_conversion(&strings, &encoding, encoded.lossy_chars) {
+                    return;
+                }
+                if let Err(error) = write_document_bytes(&last_self_write, &target, encoded.bytes) {
+                    show_warning_dialog(
+                        strings.save_as_failed_title,
+                        &format!("{}: {error}", target.display()),
+                    );
+                    return;
+                }
+                let mut session = session_for_event.lock().unwrap();
+                // 目标已排除其他标签占用，relocate 只会因标签不存在而失败
+                if session.relocate(id, target) {
+                    if let Some(tab) = session.get_mut(id) {
+                        tab.dirty = false;
+                        tab.missing = false;
+                    }
+                }
+                APP_DIRTY.store(false, Ordering::SeqCst);
+                persist_session(&session);
+                let _ = webview.evaluate_script("if(window.__markSaved)window.__markSaved();");
+                render_active_document(
+                    &webview,
+                    &window,
+                    &mut session,
+                    &recent_files,
+                    &enhance_flags,
+                    &mut loaded_enhancers,
+                    &strings,
+                );
+                let path = session.active().map(|tab| tab.path.clone());
+                drop(session);
+                install_file_watcher(&watcher_for_event, &proxy, &last_self_write, path);
             }
             TaoEvent::UserEvent(UserEvent::FileSaved(path)) => {
                 if warned_external_change.as_ref() == Some(&path) {
