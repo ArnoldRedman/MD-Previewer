@@ -16,6 +16,7 @@ This file tracks MD Previewer releases. The upstream MD Preview history remains 
   - Window close protection now consults session-level dirty tracking; returns `save-skipped` when clean to eliminate deadlock.
   - Encoding switches automatically save dirty content before transcoding; relocating missing files resets detected encoding.
   - Unified modal and popover overlay hierarchy: pressing `Escape` closes one layer at a time.
+  - Fixed startup blank screen issue by allowing initial in-memory document data URI navigation while continuing to intercept subsequent script-bearing protocols.
   - Architectural consolidation: introduced `App` structure to unify event loop state and deduplicate file persistence, repaint, and directory watching logic.
 
 ## 1.4.0
