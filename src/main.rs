@@ -4838,6 +4838,37 @@ fn escape_js(s: &str) -> String {
         .replace('\u{2029}', "\\u2029")
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Navigation {
+    Allow,
+    Block,
+    OpenExternally,
+    OpenDocument(PathBuf),
+}
+
+/// 页面内导航的处理决定。首屏由 with_html 载入，在 WebView2 里表现为一次 data:text/html 导航，
+/// 只放行这第一次；之后再出现的 data:/blob:/javascript: 导航都不是应用自己发起的，一律拦下。
+/// 外部链接交给系统浏览器，本地文档进标签页，file: 导航会离开当前页面所以也拦下
+fn navigation_decision(url: &str, initial_page_loaded: &mut bool) -> Navigation {
+    if is_script_bearing_url(url) {
+        if *initial_page_loaded {
+            return Navigation::Block;
+        }
+        *initial_page_loaded = true;
+        return Navigation::Allow;
+    }
+    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
+        return Navigation::OpenExternally;
+    }
+    if let Some(path) = local_document_path_from_url(url) {
+        return Navigation::OpenDocument(path);
+    }
+    if url.starts_with("file:") {
+        return Navigation::Block;
+    }
+    Navigation::Allow
+}
+
 fn is_script_bearing_url(url: &str) -> bool {
     let lower = url.trim_start().to_ascii_lowercase();
     lower.starts_with("data:")
@@ -5060,6 +5091,55 @@ mod tests {
         assert!(is_script_bearing_url(" DATA:text/html,x"));
         assert!(is_script_bearing_url("blob:null/abc"));
         assert!(!is_script_bearing_url("https://example.com"));
+    }
+
+    #[test]
+    fn navigation_allows_only_the_first_data_url_and_routes_the_rest() {
+        let mut loaded = false;
+        // 首屏就是一次 data: 导航，拦掉它就是白屏
+        assert_eq!(
+            navigation_decision("data:text/html;charset=utf-8;base64,PGh0bWw+", &mut loaded),
+            Navigation::Allow
+        );
+        assert!(loaded);
+        assert_eq!(
+            navigation_decision("data:text/html,<script>", &mut loaded),
+            Navigation::Block
+        );
+        assert_eq!(
+            navigation_decision("javascript:alert(1)", &mut loaded),
+            Navigation::Block
+        );
+        assert_eq!(
+            navigation_decision("blob:null/abc", &mut loaded),
+            Navigation::Block
+        );
+        assert_eq!(
+            navigation_decision("https://example.com", &mut loaded),
+            Navigation::OpenExternally
+        );
+        assert_eq!(
+            navigation_decision("mailto:a@b.c", &mut loaded),
+            Navigation::OpenExternally
+        );
+        assert_eq!(
+            navigation_decision("file:///nowhere/missing.md", &mut loaded),
+            Navigation::Block
+        );
+        assert_eq!(
+            navigation_decision("about:blank", &mut loaded),
+            Navigation::Allow
+        );
+
+        let dir = temp_test_dir("navigation");
+        let doc = dir.join("doc.md");
+        fs::write(&doc, "# doc").unwrap();
+        let url = url::Url::from_file_path(&doc).unwrap().to_string();
+        assert_eq!(
+            navigation_decision(&url, &mut loaded),
+            Navigation::OpenDocument(strip_verbatim_prefix(fs::canonicalize(&doc).unwrap()))
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -8061,27 +8141,28 @@ fn main() {
     let proxy_for_navigation = proxy.clone();
     let proxy_for_ipc = proxy.clone();
     let proxy_for_drop = proxy.clone();
+    // with_html 的首屏在 WebView2 里表现为一次 data:text/html 导航，必须放行；见 navigation_decision
+    let initial_page_loaded = std::cell::Cell::new(false);
     let builder = WebViewBuilder::with_web_context(&mut web_context)
         .with_html(&initial_page)
         .with_navigation_handler(move |url: String| {
-            // Let wry load the initial in-memory document; route any real URL click
-            // to the app's tab model or the system default handler.
-            if url.starts_with("http://")
-                || url.starts_with("https://")
-                || url.starts_with("mailto:")
-            {
-                if let Err(error) = open::that(&url) {
-                    eprintln!("Could not open {url}: {error}");
+            let mut loaded = initial_page_loaded.get();
+            let decision = navigation_decision(&url, &mut loaded);
+            initial_page_loaded.set(loaded);
+            match decision {
+                Navigation::Allow => true,
+                Navigation::Block => false,
+                Navigation::OpenExternally => {
+                    if let Err(error) = open::that(&url) {
+                        eprintln!("Could not open {url}: {error}");
+                    }
+                    false
                 }
-                false
-            } else if let Some(path) = local_document_path_from_url(&url) {
-                let _ = proxy_for_navigation.send_event(UserEvent::OpenPaths(vec![path], false));
-                false
-            } else if url.starts_with("file:") || is_script_bearing_url(&url) {
-                // data:/blob:/javascript: 导航会离开当前文档并在同一 WebView 里执行内容，一律拦下
-                false
-            } else {
-                true
+                Navigation::OpenDocument(path) => {
+                    let _ =
+                        proxy_for_navigation.send_event(UserEvent::OpenPaths(vec![path], false));
+                    false
+                }
             }
         })
         .with_ipc_handler(move |msg| {
