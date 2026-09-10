@@ -3,19 +3,20 @@
     windows_subsystem = "windows"
 )]
 
+mod recent;
 mod session;
 mod settings;
 mod single_instance;
 
 use notify::{Event, RecursiveMode, Watcher};
 use pulldown_cmark::{html, CowStr, Event as MdEvent, Options, Parser, Tag, TagEnd};
+use recent::{RecentFiles, MAX_RECENT_FILES};
 use session::{strip_verbatim_prefix, DocumentSession};
 use settings::{OpenMode, Settings, TabMode};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Component;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tao::dpi::{LogicalPosition, LogicalSize};
@@ -27,12 +28,8 @@ use wry::{WebView, WebViewBuilder};
 const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.ico");
 const DEFAULT_W: f64 = 900.0;
 const DEFAULT_H: f64 = 700.0;
-static APP_DIRTY: AtomicBool = AtomicBool::new(false);
-/// 当前设置是否需要跨启动的 `session.json`。用静态量是为了让 `persist_session`
-/// 的十来个调用点不必都拿到设置，语义见 `Settings::keeps_session`
-static SESSION_ENABLED: AtomicBool = AtomicBool::new(true);
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct SelfWriteRecord {
     at: Instant,
     path: PathBuf,
@@ -43,37 +40,20 @@ struct SelfWriteRecord {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug)]
 enum UserEvent {
+    /// 页面发来的原始 IPC 消息，在事件循环里解析和处理，页面回调线程不碰任何状态
+    Ipc(String),
     NewFile,
     OpenFile,
     OpenPaths(Vec<PathBuf>, bool),
-    ActivateTab(u64),
-    CloseTab(u64),
-    CloseOthers(u64),
     CloseActiveTab,
-    LocateTab(u64),
-    RevealTab(u64),
-    RenderPreview(String),
-    // 更新弹窗的发布说明是 GitHub Markdown，交给桌面渲染器转 HTML
-    RenderReleaseNotes(String),
-    // 编码弹层“转换为”：按新编码改写当前文件，正文随消息带来
-    ConvertEncoding { encoding: String, content: String },
-    // 另存为：正文随消息带来，沿用当前标签编码
-    SaveAs(String),
-    FileChanged(PathBuf), // external change: refresh preview AND textarea
-    ExternalChangeResolved(bool),
-    FileSaved(PathBuf), // our own save: refresh preview only, leave textarea cursor alone
-    SaveFailed(String),
-    DirtyChanged(bool),
+    /// 文件监听线程发现磁盘上的活动文档变了
+    FileChanged(PathBuf),
     ToggleEdit,
     ShowFind,
     Print, // route print through wry's native API (WKWebView ignores window.print())
     SetTheme(ThemeChoice),
-    SettingsChanged,
-    SetEncoding(String),
     OpenUrl(&'static str),
     Quit,
-    RecentChanged,
-    Ready, // first paint landed: inject hljs now; if bench mode, also exit
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
@@ -230,16 +210,18 @@ struct Strings {
     btn_dismiss: &'static str,
     update_downloading: &'static str,
     update_close: &'static str,
+    overwrite_title: &'static str,
+    overwrite_body: &'static str,
 }
 
 impl Strings {
     fn for_lang(lang: Lang) -> Self {
         match lang {
             Lang::Zh => Strings {
-                drop_hint: "Drop a .md or .txt file here or press Cmd/Ctrl+O to open",
+                drop_hint: "把 Markdown 或文本文件拖到这里，或按 Cmd/Ctrl+O 打开",
                 cannot_read: "无法读取文件",
-                open_file: "Open File",
-                recent_title: "Recent",
+                open_file: "打开文件",
+                recent_title: "最近打开",
                 missing_title: "文件已移动或删除",
                 missing_body: "这个标签会继续保留。你可以重新定位文件，或关闭标签。",
                 locate_file: "重新定位",
@@ -248,7 +230,7 @@ impl Strings {
                 btn_preview: "预览 (Cmd/Ctrl+E)",
                 btn_new: "新建 Markdown (Cmd/Ctrl+N)",
                 new_filename: "新建.md",
-                btn_open: "Open File (Cmd/Ctrl+O)",
+                btn_open: "打开文件 (Cmd/Ctrl+O)",
                 btn_search: "搜索 (Cmd/Ctrl+F)",
                 btn_print: "打印 (Cmd/Ctrl+P)",
                 btn_zoom: "正文缩放",
@@ -314,9 +296,11 @@ impl Strings {
                 btn_dismiss: "稍后提醒",
                 update_downloading: "正在下载更新并准备重启...",
                 update_close: "关闭",
+                overwrite_title: "文件已存在",
+                overwrite_body: "{name} 已经存在，新建会清空它的内容。要继续吗？",
             },
             Lang::En => Strings {
-                drop_hint: "Drop a .md or .txt file here or press Cmd/Ctrl+O to open",
+                drop_hint: "Drop a Markdown or text file here or press Cmd/Ctrl+O to open",
                 cannot_read: "Cannot read file",
                 open_file: "Open File",
                 recent_title: "Recent",
@@ -394,6 +378,8 @@ impl Strings {
                 btn_dismiss: "Later",
                 update_downloading: "Downloading update and restarting...",
                 update_close: "Close",
+                overwrite_title: "File Exists",
+                overwrite_body: "{name} already exists and will be emptied. Continue?",
             },
         }
     }
@@ -734,8 +720,9 @@ fn md_to_html_with_base(md: &str, base_dir: Option<&Path>) -> String {
         | Options::ENABLE_MATH
         | Options::ENABLE_GFM;
     let parser = Parser::new_ext(markdown, opts);
+    // 过滤必须在 add_mark_highlights 之前，它自己注入的 <mark> 不能被当成用户 HTML 处理
     let events = embed_local_images(
-        add_mark_highlights(add_heading_ids(parser.collect())),
+        add_mark_highlights(add_heading_ids(sanitize_raw_html(parser.collect()))),
         base_dir,
     );
     let mut html_out = String::new();
@@ -919,6 +906,312 @@ fn base64_encode(bytes: &[u8]) -> String {
     out
 }
 
+/// 用户 Markdown 里的原始 HTML 会直接进页面，而页面握着 window.ipc，
+/// 一段 `<script>` 或 `onerror` 就能替用户改写当前文件。这里把相邻的 HTML 事件合并后统一过滤：
+/// pulldown-cmark 按行切分 HTML 块，跨行的标签只有拼起来才看得出真实结构
+fn sanitize_raw_html<'a>(events: Vec<MdEvent<'a>>) -> Vec<MdEvent<'a>> {
+    fn flush<'a>(pending: &mut Option<(bool, String)>, out: &mut Vec<MdEvent<'a>>) {
+        let Some((inline, raw)) = pending.take() else {
+            return;
+        };
+        let clean = sanitize_html_fragment(&raw);
+        if clean.is_empty() {
+            return;
+        }
+        let text = CowStr::from(clean);
+        out.push(if inline {
+            MdEvent::InlineHtml(text)
+        } else {
+            MdEvent::Html(text)
+        });
+    }
+
+    let mut out = Vec::with_capacity(events.len());
+    let mut pending: Option<(bool, String)> = None;
+    for event in events {
+        let (inline, raw) = match event {
+            MdEvent::Html(raw) => (false, raw),
+            MdEvent::InlineHtml(raw) => (true, raw),
+            other => {
+                flush(&mut pending, &mut out);
+                out.push(other);
+                continue;
+            }
+        };
+        match pending.as_mut() {
+            Some((kind, buffer)) if *kind == inline => buffer.push_str(&raw),
+            _ => {
+                flush(&mut pending, &mut out);
+                pending = Some((inline, raw.into_string()));
+            }
+        }
+    }
+    flush(&mut pending, &mut out);
+    out
+}
+
+/// 连同内容一起丢弃的标签：能执行脚本、嵌入外部文档，或者会改掉整个页面的样式
+const HTML_DROP_WITH_CONTENT: &[&str] = &[
+    "script",
+    "style",
+    "iframe",
+    "object",
+    "svg",
+    "math",
+    "xmp",
+    "plaintext",
+    "noembed",
+    "noframes",
+];
+/// 只丢标签本身、保留后续内容的标签
+const HTML_DROP_TAG: &[&str] = &[
+    "embed", "link", "meta", "base", "applet", "frame", "frameset", "param",
+];
+/// 取值是 URL 的属性，需要检查协议
+const HTML_URL_ATTRS: &[&str] = &[
+    "href",
+    "src",
+    "action",
+    "cite",
+    "poster",
+    "background",
+    "data",
+    "ping",
+    "longdesc",
+    "codebase",
+    "srcset",
+];
+
+/// 最小 HTML 词法过滤：逐个标签重建，去掉事件属性、危险协议和 data-* 属性；
+/// 没有闭合的 `<` 一律转义，避免和后面的文本拼成新标签
+fn sanitize_html_fragment(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            let ch = raw[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
+        if raw[i..].starts_with("<!--") {
+            match raw[i + 4..].find("-->") {
+                Some(end) => i += 4 + end + 3,
+                None => {
+                    out.push_str("&lt;");
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        let Some(tag) = parse_html_tag(raw, i) else {
+            out.push_str("&lt;");
+            i += 1;
+            continue;
+        };
+        let name = tag.name.to_ascii_lowercase();
+        i = tag.end;
+        if tag.closing {
+            if !HTML_DROP_WITH_CONTENT.contains(&name.as_str())
+                && !HTML_DROP_TAG.contains(&name.as_str())
+            {
+                out.push_str("</");
+                out.push_str(&name);
+                out.push('>');
+            }
+            continue;
+        }
+        if HTML_DROP_WITH_CONTENT.contains(&name.as_str()) {
+            i = skip_past_closing_tag(raw, i, &name);
+            continue;
+        }
+        if HTML_DROP_TAG.contains(&name.as_str()) {
+            continue;
+        }
+        out.push('<');
+        out.push_str(&name);
+        for (attr_name, value) in &tag.attrs {
+            let attr = attr_name.to_ascii_lowercase();
+            if attr.starts_with("on")
+                || attr.starts_with("data-")
+                || attr == "srcdoc"
+                || attr == "formaction"
+            {
+                continue;
+            }
+            if HTML_URL_ATTRS.contains(&attr.as_str()) {
+                let unsafe_url = match value {
+                    Some(value) if attr == "srcset" => value
+                        .split(',')
+                        .filter_map(|candidate| candidate.split_whitespace().next())
+                        .any(|url| !is_safe_url(url)),
+                    Some(value) => !is_safe_url(value),
+                    None => false,
+                };
+                if unsafe_url {
+                    continue;
+                }
+            }
+            out.push(' ');
+            out.push_str(&attr);
+            if let Some(value) = value {
+                out.push_str("=\"");
+                out.push_str(&value.replace('"', "&quot;").replace('<', "&lt;"));
+                out.push('"');
+            }
+        }
+        if tag.self_closing {
+            out.push_str(" /");
+        }
+        out.push('>');
+    }
+    out
+}
+
+struct HtmlTag<'a> {
+    name: &'a str,
+    closing: bool,
+    self_closing: bool,
+    attrs: Vec<(&'a str, Option<&'a str>)>,
+    /// 紧随 `>` 之后的字节下标
+    end: usize,
+}
+
+// 从 `<` 开始解析一个标签；不是合法标签或没遇到 `>` 就返回 None
+fn parse_html_tag(raw: &str, start: usize) -> Option<HtmlTag<'_>> {
+    let bytes = raw.as_bytes();
+    let mut i = start + 1;
+    let closing = bytes.get(i) == Some(&b'/');
+    if closing {
+        i += 1;
+    }
+    let name_start = i;
+    if !bytes.get(i).map(u8::is_ascii_alphabetic).unwrap_or(false) {
+        return None;
+    }
+    while i < bytes.len()
+        && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-' || bytes[i] == b':')
+    {
+        i += 1;
+    }
+    let name = &raw[name_start..i];
+    let mut attrs = Vec::new();
+    let mut self_closing = false;
+    loop {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let current = *bytes.get(i)?;
+        if current == b'>' {
+            i += 1;
+            break;
+        }
+        if current == b'/' {
+            if bytes.get(i + 1) == Some(&b'>') {
+                self_closing = true;
+                i += 2;
+                break;
+            }
+            i += 1;
+            continue;
+        }
+        let attr_start = i;
+        while i < bytes.len()
+            && !bytes[i].is_ascii_whitespace()
+            && !matches!(bytes[i], b'=' | b'>' | b'/')
+        {
+            i += 1;
+        }
+        if i == attr_start {
+            i += 1;
+            continue;
+        }
+        let attr_name = &raw[attr_start..i];
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if bytes.get(i) != Some(&b'=') {
+            attrs.push((attr_name, None));
+            continue;
+        }
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let quote = *bytes.get(i)?;
+        let value = if quote == b'"' || quote == b'\'' {
+            let value_start = i + 1;
+            let len = raw[value_start..].find(quote as char)?;
+            i = value_start + len + 1;
+            &raw[value_start..value_start + len]
+        } else {
+            let value_start = i;
+            while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'>' {
+                i += 1;
+            }
+            &raw[value_start..i]
+        };
+        attrs.push((attr_name, Some(value)));
+    }
+    Some(HtmlTag {
+        name,
+        closing,
+        self_closing,
+        attrs,
+        end: i,
+    })
+}
+
+// 跳到 `</name>` 之后；找不到闭合标签就把剩余内容全部丢掉
+fn skip_past_closing_tag(raw: &str, from: usize, name: &str) -> usize {
+    let lower = raw[from..].to_ascii_lowercase();
+    let marker = format!("</{name}");
+    let mut search = 0;
+    while let Some(found) = lower[search..].find(&marker) {
+        let after = search + found + marker.len();
+        let boundary = lower.as_bytes().get(after).copied();
+        if boundary
+            .map(|b| b.is_ascii_whitespace() || b == b'>')
+            .unwrap_or(false)
+        {
+            return match lower[after..].find('>') {
+                Some(close) => from + after + close + 1,
+                None => raw.len(),
+            };
+        }
+        search = after;
+    }
+    raw.len()
+}
+
+/// 浏览器会忽略 URL 里的控制字符和空白，并解码实体，所以先压缩再看协议；
+/// 协议部分出现实体一律拒绝，`java&Tab;script:` 这类写法才拦得住
+fn is_safe_url(value: &str) -> bool {
+    let compact: String = value
+        .chars()
+        .filter(|ch| !ch.is_control() && !ch.is_whitespace())
+        .collect();
+    let head_end = compact.find(['/', '?', '#']).unwrap_or(compact.len());
+    let head = &compact[..head_end];
+    if head.contains('&') {
+        return false;
+    }
+    let Some(colon) = head.find(':') else {
+        return true;
+    };
+    let scheme = head[..colon].to_ascii_lowercase();
+    match scheme.as_str() {
+        "http" | "https" | "mailto" | "tel" | "file" | "ftp" => true,
+        "data" => {
+            let media = compact[colon + 1..].to_ascii_lowercase();
+            // SVG 图片可以带脚本，作为文档导航目标时会执行
+            media.starts_with("image/") && !media.starts_with("image/svg")
+        }
+        _ => false,
+    }
+}
+
 fn add_mark_highlights<'a>(events: Vec<MdEvent<'a>>) -> Vec<MdEvent<'a>> {
     let mut out = Vec::with_capacity(events.len());
 
@@ -1077,7 +1370,6 @@ const PREVIEW_ENHANCE_JS: &str = include_str!("../assets/enhance/preview-enhance
 const KATEX_JS: &str = include_str!("../assets/katex/katex.min.js");
 const KATEX_CSS: &str = include_str!("../assets/katex/katex.inline.css");
 const MERMAID_JS: &str = include_str!("../assets/mermaid/mermaid.min.js");
-const MAX_RECENT_FILES: usize = 8;
 
 fn html_escape_ta(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;")
@@ -1294,66 +1586,6 @@ fn missing_preview_html(tab_id: u64, path: &Path, s: &Strings) -> String {
     )
 }
 
-fn load_recent_files() -> Vec<PathBuf> {
-    let Ok(txt) = fs::read_to_string(recent_files_path()) else {
-        return Vec::new();
-    };
-    let mut files = Vec::new();
-    for line in txt.lines() {
-        // 旧版本写入的是 `\\?\` 前缀路径，读回来时统一还原，否则同一文件会以两种写法各占一条
-        let path = strip_verbatim_prefix(PathBuf::from(line));
-        if line.is_empty() || !path.exists() || files.iter().any(|p| p == &path) {
-            continue;
-        }
-        files.push(path);
-        if files.len() == MAX_RECENT_FILES {
-            break;
-        }
-    }
-    files
-}
-
-fn save_recent_files(files: &[PathBuf]) {
-    let dir = config_dir();
-    let _ = fs::create_dir_all(&dir);
-    let body = files
-        .iter()
-        .take(MAX_RECENT_FILES)
-        .map(|p| p.to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let _ = fs::write(dir.join("recent-files.txt"), body);
-}
-
-fn remember_recent_file(files: &Arc<Mutex<Vec<PathBuf>>>, path: &Path) {
-    let mut recent = files.lock().unwrap();
-    recent.retain(|p| p != path);
-    recent.insert(0, path.to_path_buf());
-    recent.truncate(MAX_RECENT_FILES);
-    save_recent_files(&recent);
-}
-
-fn forget_recent_file(files: &Arc<Mutex<Vec<PathBuf>>>, path: &Path) -> bool {
-    let mut recent = files.lock().unwrap();
-    let original_len = recent.len();
-    recent.retain(|p| p != path);
-    if recent.len() == original_len {
-        return false;
-    }
-    save_recent_files(&recent);
-    true
-}
-
-fn clear_recent_files(files: &Arc<Mutex<Vec<PathBuf>>>) -> bool {
-    let mut recent = files.lock().unwrap();
-    if recent.is_empty() {
-        return false;
-    }
-    recent.clear();
-    save_recent_files(&recent);
-    true
-}
-
 fn percent_encode_file_path(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
@@ -1461,93 +1693,75 @@ fn read_document_with_encoding(
                 return Ok((String::from_utf8_lossy(slice).into_owned(), label));
             }
             "GBK" => {
+                // 用户明确选了 GBK，非法序列按替换字符处理也要给出结果
                 #[cfg(target_os = "windows")]
                 {
-                    if let Some(s) = decode_windows_codepage(&bytes, 936) {
+                    if let Some(s) = decode_windows_codepage(&bytes, 936, false) {
                         return Ok((s, "GBK"));
                     }
                 }
                 return Ok((String::from_utf8_lossy(&bytes).into_owned(), "GBK"));
             }
             "UTF-16 LE" => {
-                let slice = if bytes.starts_with(&[0xFF, 0xFE]) {
-                    &bytes[2..]
-                } else {
-                    &bytes[..]
-                };
-                let u16s: Vec<u16> = slice
-                    .chunks_exact(2)
-                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-                    .collect();
-                if let Ok(s) = String::from_utf16(&u16s) {
-                    return Ok((s, "UTF-16 LE"));
-                }
-                return Ok((String::from_utf16_lossy(&u16s), "UTF-16 LE"));
+                return Ok((
+                    decode_utf16(strip_bom(&bytes, &[0xFF, 0xFE]), false),
+                    "UTF-16 LE",
+                ));
             }
             "UTF-16 BE" => {
-                let slice = if bytes.starts_with(&[0xFE, 0xFF]) {
-                    &bytes[2..]
-                } else {
-                    &bytes[..]
-                };
-                let u16s: Vec<u16> = slice
-                    .chunks_exact(2)
-                    .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
-                    .collect();
-                if let Ok(s) = String::from_utf16(&u16s) {
-                    return Ok((s, "UTF-16 BE"));
-                }
-                return Ok((String::from_utf16_lossy(&u16s), "UTF-16 BE"));
+                return Ok((
+                    decode_utf16(strip_bom(&bytes, &[0xFE, 0xFF]), true),
+                    "UTF-16 BE",
+                ));
             }
             _ => {}
         }
     }
 
-    // 自动探测编码：
-    // 1. UTF-8 BOM: EF BB BF，作为独立编码回报，保存时才能保留 BOM
-    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        if let Ok(s) = std::str::from_utf8(&bytes[3..]) {
-            return Ok((s.to_string(), "UTF-8 BOM"));
-        }
+    // 自动探测编码。带 BOM 的文件已经声明了编码，内容不合法也按该编码容错解码，
+    // 不再退回后面的探测分支，否则 BOM 字节会被当成 GBK 正文
+    if let Some(body) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return Ok((String::from_utf8_lossy(body).into_owned(), "UTF-8 BOM"));
     }
-
-    // 2. UTF-16 LE BOM: FF FE
-    if bytes.starts_with(&[0xFF, 0xFE]) {
-        let u16s: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect();
-        if let Ok(s) = String::from_utf16(&u16s) {
-            return Ok((s, "UTF-16 LE"));
-        }
+    if let Some(body) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return Ok((decode_utf16(body, false), "UTF-16 LE"));
     }
-
-    // 3. UTF-16 BE BOM: FE FF
-    if bytes.starts_with(&[0xFE, 0xFF]) {
-        let u16s: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
-            .collect();
-        if let Ok(s) = String::from_utf16(&u16s) {
-            return Ok((s, "UTF-16 BE"));
-        }
+    if let Some(body) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return Ok((decode_utf16(body, true), "UTF-16 BE"));
     }
-
-    // 4. 标准 UTF-8
     if let Ok(s) = std::str::from_utf8(&bytes) {
         return Ok((s.to_string(), "UTF-8"));
     }
 
-    // 5. Windows ANSI (GBK/CP936 等系统代码页回退)
+    // Windows 上按 GBK 严格探测：非法序列直接失败，Latin-1、Big5 这类文件不会被误标成 GBK 后再按 GBK 写坏
     #[cfg(target_os = "windows")]
     {
-        if let Some(decoded) = decode_windows_codepage(&bytes, 936) {
+        if let Some(decoded) = decode_windows_codepage(&bytes, 936, true) {
             return Ok((decoded, "GBK"));
         }
     }
 
-    // 兜底：容错转 UTF-8
+    // 兜底：容错转 UTF-8。此时文件编码未知，编辑保存会把替换字符写回去
     Ok((String::from_utf8_lossy(&bytes).into_owned(), "UTF-8"))
+}
+
+fn strip_bom<'a>(bytes: &'a [u8], bom: &[u8]) -> &'a [u8] {
+    bytes.strip_prefix(bom).unwrap_or(bytes)
+}
+
+/// UTF-16 码元解码；尾部多出的单字节和无效代理对都属于损坏数据，按替换字符处理
+fn decode_utf16(bytes: &[u8], big_endian: bool) -> String {
+    let units = bytes
+        .chunks_exact(2)
+        .map(|chunk| {
+            if big_endian {
+                u16::from_be_bytes([chunk[0], chunk[1]])
+            } else {
+                u16::from_le_bytes([chunk[0], chunk[1]])
+            }
+        })
+        .collect::<Vec<_>>();
+    String::from_utf16_lossy(&units)
 }
 
 /// 读取文档文本内容快捷入口
@@ -1626,11 +1840,15 @@ fn encode_gbk(_content: &str) -> Result<EncodedDocument, String> {
     Err("当前系统不支持写入 GBK 编码".to_string())
 }
 
+/// `strict` 为真时非法字节序列直接返回 None，用于编码探测；
+/// 为假时按系统默认替换字符解码，用于用户明确指定编码的场景
 #[cfg(target_os = "windows")]
-fn decode_windows_codepage(bytes: &[u8], code_page: u32) -> Option<String> {
+fn decode_windows_codepage(bytes: &[u8], code_page: u32, strict: bool) -> Option<String> {
     if bytes.is_empty() {
         return Some(String::new());
     }
+    const MB_ERR_INVALID_CHARS: u32 = 0x0000_0008;
+    let flags = if strict { MB_ERR_INVALID_CHARS } else { 0 };
     extern "system" {
         fn MultiByteToWideChar(
             code_page: u32,
@@ -1644,7 +1862,7 @@ fn decode_windows_codepage(bytes: &[u8], code_page: u32) -> Option<String> {
     let len = unsafe {
         MultiByteToWideChar(
             code_page,
-            0,
+            flags,
             bytes.as_ptr(),
             bytes.len() as i32,
             std::ptr::null_mut(),
@@ -1652,41 +1870,13 @@ fn decode_windows_codepage(bytes: &[u8], code_page: u32) -> Option<String> {
         )
     };
     if len <= 0 {
-        let len_acp = unsafe {
-            MultiByteToWideChar(
-                0,
-                0,
-                bytes.as_ptr(),
-                bytes.len() as i32,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-        if len_acp <= 0 {
-            return None;
-        }
-        let mut wide = vec![0u16; len_acp as usize];
-        let res = unsafe {
-            MultiByteToWideChar(
-                0,
-                0,
-                bytes.as_ptr(),
-                bytes.len() as i32,
-                wide.as_mut_ptr(),
-                len_acp,
-            )
-        };
-        return if res > 0 {
-            String::from_utf16(&wide).ok()
-        } else {
-            None
-        };
+        return None;
     }
     let mut wide = vec![0u16; len as usize];
     let res = unsafe {
         MultiByteToWideChar(
             code_page,
-            0,
+            flags,
             bytes.as_ptr(),
             bytes.len() as i32,
             wide.as_mut_ptr(),
@@ -2919,7 +3109,7 @@ body.editing .findbar {{ display: none !important; }}
 	  var ICON_DOWN = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
 	  var ICON_CLOSE = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
 	  var ICON_SPLIT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>';
-	  var L_EDIT = '{btn_edit}', L_VIEW = '{btn_preview}';
+	  var L_EDIT = '{btn_edit_js}', L_VIEW = '{btn_preview_js}';
 	  var L_COPY = '{code_copy_js}', L_COPIED = '{code_copied_js}';
 	  var L_SPLIT = '{btn_split}';
 	  var SIDEBAR_OUTLINE_EMPTY = '{sidebar_outline_empty_js}';
@@ -2978,6 +3168,18 @@ body.editing .findbar {{ display: none !important; }}
 	  var lbStartX = 0;
 	  var lbStartY = 0;
 	  var pendingLiveRenderTimer = 0;
+	  var liveRenderInFlight = false;
+	  var LIVE_RENDER_DEBOUNCE_MS = 150;
+	  var TOOLTIP_DELAY_MS = 300;
+	  var COPY_FLASH_MS = 1500;
+	  var AUTHOR_FLASH_MS = 1200;
+	  var OVERLAY_MARGIN_PX = 8;
+	  var OUTLINE_ACTIVE_OFFSET_PX = 120;
+	  // 事件委托统一取命中元素；e.target 可能是文本节点或没有 closest 的对象
+	  function hit(e, selector) {{
+	    var target = e.target;
+	    return target && target.closest ? target.closest(selector) : null;
+	  }}
 	  var dirty = false;
 	  var activeTabId = 0;
 	  var pendingAutosaveTimer = 0;
@@ -3083,7 +3285,6 @@ body.editing .findbar {{ display: none !important; }}
   window.__setEncoding = setEncodingUi;
   if (btnEncoding && encodingPopover) {{
     btnEncoding.addEventListener('click', function(e) {{
-      e.stopPropagation();
       var isOpen = encodingPopover.style.display !== 'none';
       encodingPopover.style.display = isOpen ? 'none' : 'block';
     }});
@@ -3104,6 +3305,8 @@ body.editing .findbar {{ display: none !important; }}
         var enc = opt.getAttribute('data-encoding');
         encodingPopover.style.display = 'none';
         if (enc && enc !== currentEncoding && window.ipc) {{
+          // 先把未保存的编辑写回再切换编码重读；Rust 按消息顺序处理，保存一定先落盘
+          if (dirty) save();
           window.ipc.postMessage('set-encoding:' + enc);
         }}
       }}
@@ -3145,9 +3348,18 @@ body.editing .findbar {{ display: none !important; }}
 	      if (dirty) save();
 	    }}, AUTOSAVE_DEBOUNCE_MS);
 	  }}
-	  window.__mdPreviewerSave = save;
+	  // 关窗前由 Rust 调用：没有脏内容时也要回一句，否则 Rust 会一直等保存结果、窗口关不掉
+	  window.__mdPreviewerSave = function() {{
+	    if (dirty) {{
+	      save();
+	      return;
+	    }}
+	    cancelPendingAutosave();
+	    window.ipc.postMessage('save-skipped');
+	  }};
 	  function requestTabAction(action, id) {{
 	    cancelPendingAutosave();
+	    cancelLiveRender();
 	    var message = 'tab-action:' + action + ':' + id;
 	    if (dirty) message += '\n' + ta.value;
 	    window.ipc.postMessage(message);
@@ -3231,7 +3443,7 @@ body.editing .findbar {{ display: none !important; }}
 	    if (!query) return;
 	    lastFindQuery = query;
 	    var needle = query.toLowerCase();
-	    var previewEl = document.getElementById('preview');
+
 	    var walker = document.createTreeWalker(previewEl, NodeFilter.SHOW_TEXT, {{
 	      acceptNode: function(node) {{
 	        if (!node.nodeValue || node.nodeValue.toLowerCase().indexOf(needle) < 0) {{
@@ -3301,6 +3513,9 @@ body.editing .findbar {{ display: none !important; }}
     window.scrollTo(x, y);
   }}
 	  function enterEdit() {{
+	    // 空白页和文件缺失页没有可编辑的文档，进入编辑只会把输入保存到虚空
+	    if (document.body.classList.contains('empty') || document.body.classList.contains('missing')) return;
+	    hideFind();
 	    var progress = currentScrollProgress();
 	    document.body.classList.add('editing');
 	    btnToggle.innerHTML = ICON_VIEW;
@@ -3322,7 +3537,7 @@ body.editing .findbar {{ display: none !important; }}
     btnToggle.innerHTML = ICON_EDIT;
     btnToggle.title = L_EDIT;
     btnToggle.setAttribute('aria-label', L_EDIT);
-    if (pendingLiveRenderTimer) {{ clearTimeout(pendingLiveRenderTimer); pendingLiveRenderTimer = 0; }}
+    cancelLiveRender();
     restoreScrollProgress(progress);
   }}
   function toggleSplitView() {{
@@ -3333,17 +3548,27 @@ body.editing .findbar {{ display: none !important; }}
       scheduleLiveRender(0);
     }}
   }}
+  function cancelLiveRender() {{
+    if (pendingLiveRenderTimer) {{
+      clearTimeout(pendingLiveRenderTimer);
+      pendingLiveRenderTimer = 0;
+    }}
+    liveRenderInFlight = false;
+  }}
   function scheduleLiveRender(delay) {{
     if (!document.body.classList.contains('split-view')) return;
     if (pendingLiveRenderTimer) clearTimeout(pendingLiveRenderTimer);
     pendingLiveRenderTimer = setTimeout(function() {{
       pendingLiveRenderTimer = 0;
+      liveRenderInFlight = true;
       if (window.ipc) window.ipc.postMessage('render-preview:' + ta.value);
-    }}, typeof delay === 'number' ? delay : 150);
+    }}, typeof delay === 'number' ? delay : LIVE_RENDER_DEBOUNCE_MS);
   }}
+  // 只接受自己发起且仍在等待的渲染结果；切换标签或退出编辑后迟到的回包直接丢弃，不能盖掉新文档
   window.__setLivePreview = function(html, math, mermaid) {{
-    if (!document.body.classList.contains('split-view')) return;
-    document.getElementById('preview').innerHTML = html;
+    if (!liveRenderInFlight || !inEdit() || !document.body.classList.contains('split-view')) return;
+    liveRenderInFlight = false;
+    previewEl.innerHTML = html;
     if (typeof hljs !== 'undefined') hljs.highlightAll();
     setupCodeBlockCopyButtons();
     if (sidebarSection === 'outline') renderSidebar();
@@ -3367,32 +3592,27 @@ body.editing .findbar {{ display: none !important; }}
 	  }}
 	  btnSearch.addEventListener('click', showFind);
 	  document.addEventListener('click', function(e) {{
-	    if (tabContextMenu && tabContextMenu.style.display !== 'none' && !tabContextMenu.contains(e.target)) {{
-	      hideTabContextMenu();
-	    }}
-	    if (recentContextMenu && recentContextMenu.style.display !== 'none' && !recentContextMenu.contains(e.target)) {{
-	      hideRecentContextMenu();
-	    }}
-	    var closeTab = e.target && e.target.closest ? e.target.closest('[data-close-tab]') : null;
+	    closeOverlaysOutside(e.target);
+	    var closeTab = hit(e, '#tabs [data-close-tab], .missing-file [data-close-tab]');
 	    if (closeTab) {{
 	      e.preventDefault();
 	      e.stopPropagation();
 	      requestTabAction('close', closeTab.getAttribute('data-close-tab'));
 	      return;
 	    }}
-	    var locateTab = e.target && e.target.closest ? e.target.closest('[data-locate-tab]') : null;
+	    var locateTab = hit(e, '.missing-file [data-locate-tab]');
 	    if (locateTab) {{
 	      e.preventDefault();
 	      window.ipc.postMessage('locate-tab:' + locateTab.getAttribute('data-locate-tab'));
 	      return;
 	    }}
-	    var tab = e.target && e.target.closest ? e.target.closest('[data-tab-id]') : null;
+	    var tab = hit(e, '#tabs [data-tab-id]');
 	    if (tab) {{
 	      e.preventDefault();
 	      requestTabAction('activate', tab.getAttribute('data-tab-id'));
 	      return;
 	    }}
-	    var copyBtn = e.target && e.target.closest ? e.target.closest('.code-copy-btn') : null;
+	    var copyBtn = hit(e, '.code-copy-btn');
 	    if (copyBtn) {{
 	      e.preventDefault();
 	      e.stopPropagation();
@@ -3410,23 +3630,23 @@ body.editing .findbar {{ display: none !important; }}
 	        setTimeout(function() {{
 	          copyBtn.textContent = orig;
 	          copyBtn.classList.remove('copied');
-	        }}, 1500);
+	        }}, COPY_FLASH_MS);
 	      }});
 	      return;
 	    }}
-	    var img = e.target && e.target.closest ? e.target.closest('#preview img') : null;
+	    var img = hit(e, '#preview img');
 	    if (img && !inEdit()) {{
 	      e.preventDefault();
 	      openLightbox(img.src, img.alt || img.title || '');
 	      return;
 	    }}
-	    var openBtn = e.target && e.target.closest ? e.target.closest('[data-open-file]') : null;
+	    var openBtn = hit(e, '.empty [data-open-file]');
 	    if (openBtn) {{
 	      e.preventDefault();
 	      openFile();
 	      return;
 	    }}
-	    var recentBtn = e.target && e.target.closest ? e.target.closest('[data-recent-index]') : null;
+	    var recentBtn = hit(e, '.empty [data-recent-index]');
 	    if (recentBtn) {{
 	      e.preventDefault();
 	      window.ipc.postMessage('open-recent:' + recentBtn.getAttribute('data-recent-index'));
@@ -3451,18 +3671,16 @@ body.editing .findbar {{ display: none !important; }}
 	    window.__mdPreviewerToggleEdit();
 	  }});
 	  btnZoom.addEventListener('click', function(e) {{
-	    e.stopPropagation();
 	    settingsControl.classList.remove('open');
 	    zoomControl.classList.toggle('open');
 	  }});
 	  btnSettings.addEventListener('click', function(e) {{
-	    e.stopPropagation();
 	    zoomControl.classList.remove('open');
 	    settingsControl.classList.toggle('open');
 	  }});
 	  // 只上报点击，选中态一律等 Rust 存盘后通过 __setSettings 回显，避免界面和实际配置不一致
 	  settingsControl.addEventListener('click', function(e) {{
-	    var btn = e.target && e.target.closest ? e.target.closest('[data-setting]') : null;
+	    var btn = hit(e, '[data-setting]');
 	    if (!btn) return;
 	    e.preventDefault();
 	    window.ipc.postMessage('set-setting:' + btn.getAttribute('data-setting') + '=' + btn.getAttribute('data-value'));
@@ -3478,7 +3696,7 @@ body.editing .findbar {{ display: none !important; }}
 	    var hasRecent = sidebarSection === 'recent' && (sidebarData.recent || []).length > 0;
 	    if (sidebarFooter) sidebarFooter.style.display = hasRecent ? 'block' : 'none';
 	    if (sidebarSection === 'outline') {{
-	      var preview = document.getElementById('preview');
+	      var preview = previewEl;
 	      var headings = preview ? preview.querySelectorAll('h1, h2, h3, h4, h5, h6') : [];
 	      if (!headings || !headings.length) {{
 	        var empty = document.createElement('div');
@@ -3539,14 +3757,14 @@ body.editing .findbar {{ display: none !important; }}
 	  }}
 	  function updateOutlineActive() {{
 	    if (sidebarSection !== 'outline') return;
-	    var preview = document.getElementById('preview');
+	    var preview = previewEl;
 	    if (!preview) return;
 	    var headings = preview.querySelectorAll('h1, h2, h3, h4, h5, h6');
 	    if (!headings.length) return;
 	    var activeId = null;
 	    for (var i = 0; i < headings.length; i++) {{
 	      var rect = headings[i].getBoundingClientRect();
-	      if (rect.top <= 120) {{
+	      if (rect.top <= OUTLINE_ACTIVE_OFFSET_PX) {{
 	        activeId = headings[i].id;
 	      }} else {{
 	        break;
@@ -3567,20 +3785,19 @@ body.editing .findbar {{ display: none !important; }}
 	    renderSidebar();
 	  }};
 	  btnSidebar.addEventListener('click', function(e) {{
-	    e.stopPropagation();
 	    // 立刻切换视觉状态，落盘交给 Rust；回显时状态一致，不会来回跳
 	    var open = !document.body.classList.contains('sidebar-open');
 	    document.body.classList.toggle('sidebar-open', open);
 	    window.ipc.postMessage('set-setting:sidebar=' + (open ? '1' : '0'));
 	  }});
 	  sidebarEl.addEventListener('click', function(e) {{
-	    var section = e.target && e.target.closest ? e.target.closest('[data-sidebar-section]') : null;
+	    var section = hit(e, '[data-sidebar-section]');
 	    if (section) {{
 	      sidebarSection = section.getAttribute('data-sidebar-section');
 	      renderSidebar();
 	      return;
 	    }}
-	    var outlineItem = e.target && e.target.closest ? e.target.closest('[data-outline-id]') : null;
+	    var outlineItem = hit(e, '[data-outline-id]');
 	    if (outlineItem) {{
 	      var targetHeading = document.getElementById(outlineItem.getAttribute('data-outline-id'));
 	      if (targetHeading) {{
@@ -3588,7 +3805,7 @@ body.editing .findbar {{ display: none !important; }}
 	      }}
 	      return;
 	    }}
-	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
+	    var item = hit(e, '[data-sidebar-path]');
 	    if (item) window.ipc.postMessage('open-doc:' + item.getAttribute('data-sidebar-path'));
 	  }});
 	  renderSidebar();
@@ -3600,10 +3817,10 @@ body.editing .findbar {{ display: none !important; }}
 	    sidebarTooltip.style.display = 'block';
 	    var width = sidebarTooltip.offsetWidth || 200;
 	    var height = sidebarTooltip.offsetHeight || 40;
-	    var left = Math.min(rect.right + 8, window.innerWidth - width - 8);
-	    var top = Math.min(rect.top, window.innerHeight - height - 8);
-	    sidebarTooltip.style.left = Math.max(8, left) + 'px';
-	    sidebarTooltip.style.top = Math.max(8, top) + 'px';
+	    var left = Math.min(rect.right + OVERLAY_MARGIN_PX, window.innerWidth - width - OVERLAY_MARGIN_PX);
+	    var top = Math.min(rect.top, window.innerHeight - height - OVERLAY_MARGIN_PX);
+	    sidebarTooltip.style.left = Math.max(OVERLAY_MARGIN_PX, left) + 'px';
+	    sidebarTooltip.style.top = Math.max(OVERLAY_MARGIN_PX, top) + 'px';
 	  }}
 	  function hideSidebarTooltip() {{
 	    if (sidebarTooltipTimer) {{
@@ -3613,7 +3830,7 @@ body.editing .findbar {{ display: none !important; }}
 	    if (sidebarTooltip) sidebarTooltip.style.display = 'none';
 	  }}
 	  sidebarList.addEventListener('mouseover', function(e) {{
-	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
+	    var item = hit(e, '[data-sidebar-path]');
 	    if (!item) return;
 	    // 在同一条目内部的子元素之间移动不算重新进入
 	    if (e.relatedTarget && item.contains(e.relatedTarget)) return;
@@ -3621,10 +3838,10 @@ body.editing .findbar {{ display: none !important; }}
 	    sidebarTooltipTimer = setTimeout(function() {{
 	      sidebarTooltipTimer = 0;
 	      showSidebarTooltip(item);
-	    }}, 300);
+	    }}, TOOLTIP_DELAY_MS);
 	  }});
 	  sidebarList.addEventListener('mouseout', function(e) {{
-	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
+	    var item = hit(e, '[data-sidebar-path]');
 	    if (!item) return;
 	    if (e.relatedTarget && item.contains(e.relatedTarget)) return;
 	    hideSidebarTooltip();
@@ -3638,8 +3855,8 @@ body.editing .findbar {{ display: none !important; }}
 	    recentContextMenu.style.display = 'block';
 	    var menuWidth = recentContextMenu.offsetWidth || 160;
 	    var menuHeight = recentContextMenu.offsetHeight || 110;
-	    recentContextMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8)) + 'px';
-	    recentContextMenu.style.top = Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8)) + 'px';
+	    recentContextMenu.style.left = Math.max(OVERLAY_MARGIN_PX, Math.min(x, window.innerWidth - menuWidth - OVERLAY_MARGIN_PX)) + 'px';
+	    recentContextMenu.style.top = Math.max(OVERLAY_MARGIN_PX, Math.min(y, window.innerHeight - menuHeight - OVERLAY_MARGIN_PX)) + 'px';
 	  }}
 	  function hideRecentContextMenu() {{
 	    if (recentContextMenu) recentContextMenu.style.display = 'none';
@@ -3648,7 +3865,7 @@ body.editing .findbar {{ display: none !important; }}
 	  sidebarList.addEventListener('contextmenu', function(e) {{
 	    // 右键菜单只针对最近打开的历史条目，当前文件夹列表没有移除语义
 	    if (sidebarSection !== 'recent') return;
-	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
+	    var item = hit(e, '[data-sidebar-path]');
 	    if (!item) return;
 	    e.preventDefault();
 	    e.stopPropagation();
@@ -3656,7 +3873,7 @@ body.editing .findbar {{ display: none !important; }}
 	  }});
 	  if (recentContextMenu) {{
 	    recentContextMenu.addEventListener('click', function(e) {{
-	      var item = e.target && e.target.closest ? e.target.closest('[data-recent-action]') : null;
+	      var item = hit(e, '[data-recent-action]');
 	      if (!item) return;
 	      var action = item.getAttribute('data-recent-action');
 	      var path = recentContextPath;
@@ -3696,7 +3913,7 @@ body.editing .findbar {{ display: none !important; }}
 	  // 正文按屏幕上看到的取：逐个顶层块读 innerText，段落之间留空行。
 	  // 用渲染结果而不是 Markdown 原文，复制出来才不会带 # * ` 这些语法
 	  function authorBodyText() {{
-	    var preview = document.getElementById('preview');
+	    var preview = previewEl;
 	    if (!preview) return '';
 	    var heading = preview.querySelector('h1, h2, h3, h4, h5, h6');
 	    var reached = !heading;
@@ -3714,7 +3931,7 @@ body.editing .findbar {{ display: none !important; }}
 	    return blocks.join('\n\n');
 	  }}
 	  function applyAuthorMode() {{
-	    var preview = document.getElementById('preview');
+	    var preview = previewEl;
 	    if (!preview) return;
 	    var stale = preview.querySelectorAll('.author-actions, .author-body-actions');
 	    for (var i = 0; i < stale.length; i++) {{
@@ -3768,7 +3985,7 @@ body.editing .findbar {{ display: none !important; }}
 	    }}
 	  }}
 	  function setupCodeBlockCopyButtons() {{
-	    var preview = document.getElementById('preview');
+	    var preview = previewEl;
 	    if (!preview) return;
 	    var pres = preview.querySelectorAll('pre');
 	    for (var i = 0; i < pres.length; i++) {{
@@ -3790,10 +4007,10 @@ body.editing .findbar {{ display: none !important; }}
 	    tabContextMenu.style.display = 'block';
 	    var menuWidth = tabContextMenu.offsetWidth || 160;
 	    var menuHeight = tabContextMenu.offsetHeight || 130;
-	    var posX = Math.min(x, window.innerWidth - menuWidth - 8);
-	    var posY = Math.min(y, window.innerHeight - menuHeight - 8);
-	    tabContextMenu.style.left = Math.max(8, posX) + 'px';
-	    tabContextMenu.style.top = Math.max(8, posY) + 'px';
+	    var posX = Math.min(x, window.innerWidth - menuWidth - OVERLAY_MARGIN_PX);
+	    var posY = Math.min(y, window.innerHeight - menuHeight - OVERLAY_MARGIN_PX);
+	    tabContextMenu.style.left = Math.max(OVERLAY_MARGIN_PX, posX) + 'px';
+	    tabContextMenu.style.top = Math.max(OVERLAY_MARGIN_PX, posY) + 'px';
 	  }}
 	  function hideTabContextMenu() {{
 	    if (tabContextMenu) tabContextMenu.style.display = 'none';
@@ -3802,7 +4019,7 @@ body.editing .findbar {{ display: none !important; }}
 	  }}
 	  if (tabsEl) {{
 	    tabsEl.addEventListener('contextmenu', function(e) {{
-	      var tab = e.target && e.target.closest ? e.target.closest('[data-tab-id]') : null;
+	      var tab = hit(e, '[data-tab-id]');
 	      if (!tab) return;
 	      e.preventDefault();
 	      e.stopPropagation();
@@ -3810,7 +4027,7 @@ body.editing .findbar {{ display: none !important; }}
 	    }});
 	    tabsEl.addEventListener('auxclick', function(e) {{
 	      if (e.button === 1) {{
-	        var tab = e.target && e.target.closest ? e.target.closest('[data-tab-id]') : null;
+	        var tab = hit(e, '[data-tab-id]');
 	        if (tab) {{
 	          e.preventDefault();
 	          e.stopPropagation();
@@ -3821,7 +4038,7 @@ body.editing .findbar {{ display: none !important; }}
 	  }}
 	  if (tabContextMenu) {{
 	    tabContextMenu.addEventListener('click', function(e) {{
-	      var item = e.target && e.target.closest ? e.target.closest('[data-tab-action]') : null;
+	      var item = hit(e, '[data-tab-action]');
 	      if (!item) return;
 	      var action = item.getAttribute('data-tab-action');
 	      var id = contextMenuTabId;
@@ -3924,10 +4141,10 @@ body.editing .findbar {{ display: none !important; }}
 	    setTimeout(function() {{
 	      btn.textContent = original;
 	      btn.classList.remove('done');
-	    }}, 1200);
+	    }}, AUTHOR_FLASH_MS);
 	  }}
 	  document.addEventListener('click', function(e) {{
-	    var btn = e.target && e.target.closest ? e.target.closest('[data-author-copy]') : null;
+	    var btn = hit(e, '.author-actions [data-author-copy], .author-body-actions [data-author-copy]');
 	    if (!btn) return;
 	    e.preventDefault();
 	    var kind = btn.getAttribute('data-author-copy');
@@ -3971,13 +4188,35 @@ body.editing .findbar {{ display: none !important; }}
 	    updateDocumentStats(ta.value);
 	  }});
   window.addEventListener('resize', function() {{ if (inEdit()) autoResize(); }});
-  document.addEventListener('click', function(e) {{
-    if (!zoomControl.contains(e.target)) zoomControl.classList.remove('open');
-    if (!settingsControl.contains(e.target)) settingsControl.classList.remove('open');
-    if (encodingPopover && !encodingPopover.contains(e.target) && (!btnEncoding || !btnEncoding.contains(e.target))) {{
+  // 所有浮层的统一关闭入口：Escape 和点击空白处都走这里，新增浮层只需登记一处
+  function closeAllOverlays() {{
+    var closed = false;
+    if (encodingPopover && encodingPopover.style.display !== 'none') {{ encodingPopover.style.display = 'none'; closed = true; }}
+    if (zoomControl.classList.contains('open')) {{ zoomControl.classList.remove('open'); closed = true; }}
+    if (settingsControl.classList.contains('open')) {{ settingsControl.classList.remove('open'); closed = true; }}
+    if (tabContextMenu && tabContextMenu.style.display !== 'none') {{ hideTabContextMenu(); closed = true; }}
+    if (recentContextMenu && recentContextMenu.style.display !== 'none') {{ hideRecentContextMenu(); closed = true; }}
+    if (lightbox && lightbox.style.display !== 'none') {{ closeLightbox(); closed = true; }}
+    if (updateModal && updateModal.style.display !== 'none') {{ hideUpdateModal(); closed = true; }}
+    return closed;
+  }}
+  // 点击浮层自身以外的地方就关掉它；各按钮不再 stopPropagation，右键菜单等才会在点击工具栏时一并收起
+  function closeOverlaysOutside(target) {{
+    if (!zoomControl.contains(target)) zoomControl.classList.remove('open');
+    if (!settingsControl.contains(target)) settingsControl.classList.remove('open');
+    if (encodingPopover && !encodingPopover.contains(target) && (!btnEncoding || !btnEncoding.contains(target))) {{
       encodingPopover.style.display = 'none';
     }}
-  }});
+    if (tabContextMenu && !tabContextMenu.contains(target)) hideTabContextMenu();
+    if (recentContextMenu && !recentContextMenu.contains(target)) hideRecentContextMenu();
+  }}
+  // 文档切换时所有与旧文档绑定的临时状态都要归零：搜索、浮层、菜单、悬浮框和待触发的实时渲染
+  function resetTransientUi() {{
+    hideFind();
+    closeAllOverlays();
+    hideSidebarTooltip();
+    cancelLiveRender();
+  }}
 
   document.addEventListener('keydown', function(e) {{
 	if ((e.metaKey || e.ctrlKey) && (e.key === 'w' || e.key === 'W')) {{
@@ -4049,12 +4288,11 @@ body.editing .findbar {{ display: none !important; }}
 	      toggleSplitView();
 	      return;
 	    }}
-	    if (e.key === 'Escape' && encodingPopover && encodingPopover.style.display !== 'none') {{ encodingPopover.style.display = 'none'; return; }}
-	    if (e.key === 'Escape' && lightbox && lightbox.style.display !== 'none') {{ closeLightbox(); return; }}
-	    if (e.key === 'Escape' && tabContextMenu && tabContextMenu.style.display !== 'none') {{ hideTabContextMenu(); return; }}
-	    if (e.key === 'Escape' && recentContextMenu && recentContextMenu.style.display !== 'none') {{ hideRecentContextMenu(); return; }}
-	    if (e.key === 'Escape' && document.body.classList.contains('finding')) {{ hideFind(); return; }}
-	    if (e.key === 'Escape' && inEdit()) {{ leaveEdit(); }}
+	    if (e.key === 'Escape') {{
+	      if (closeAllOverlays()) return;
+	      if (document.body.classList.contains('finding')) {{ hideFind(); return; }}
+	      if (inEdit()) leaveEdit();
+	    }}
   }});
 
   // Called by Rust after a save (only preview is refreshed) or after an
@@ -4063,7 +4301,13 @@ body.editing .findbar {{ display: none !important; }}
     if (arguments.length > 1 && window.__setFeatureFlags) {{
       window.__setFeatureFlags(needsMath, needsMermaid);
     }}
-    document.getElementById('preview').innerHTML = previewHtml;
+    // 旧的搜索高亮节点随 innerHTML 一起没了，命中列表必须重建，否则 n/m 和跳转都指向已脱离的节点
+    findHits = [];
+    currentFindHit = -1;
+    lastFindQuery = '';
+    previewEl.innerHTML = previewHtml;
+    if (document.body.classList.contains('finding') && findInput.value.trim()) runFindQuery(findInput.value);
+    else updateFindState();
     if (window.__applyAuthorMode) window.__applyAuthorMode();
     setupCodeBlockCopyButtons();
     if (sidebarSection === 'outline') renderSidebar();
@@ -4132,7 +4376,7 @@ body.editing .findbar {{ display: none !important; }}
 	}};
 	tabsEl.addEventListener('keydown', function(e) {{
 	  if (e.key !== 'Enter' && e.key !== ' ') return;
-	  var tab = e.target && e.target.closest ? e.target.closest('[data-tab-id]') : null;
+	  var tab = hit(e, '[data-tab-id]');
 	  if (!tab) return;
 	  e.preventDefault();
 	  requestTabAction('activate', tab.getAttribute('data-tab-id'));
@@ -4140,10 +4384,12 @@ body.editing .findbar {{ display: none !important; }}
 	  window.__setContent = function(previewHtml, rawMd, baseHref, needsMath, needsMermaid) {{
 	    document.body.classList.remove('empty');
 	    document.body.classList.remove('missing');
-	    hideFind();
+	    resetTransientUi();
 	    window.__setBaseHref(baseHref);
 	    window.__setPreview(previewHtml, needsMath, needsMermaid);
-    if (!inEdit() || !dirty) {{
+	    // 编辑中且有未保存内容时保留编辑框，只刷新预览；待触发的自动保存也必须留着
+	    if (!inEdit() || !dirty) {{
+	      cancelPendingAutosave();
 	      autosavePaused = false;
 	      ta.value = rawMd;
 	      updateDocumentStats(rawMd);
@@ -4151,40 +4397,26 @@ body.editing .findbar {{ display: none !important; }}
       if (inEdit()) autoResize();
     }}
   }};
-	  window.__setEmptyPreview = function(previewHtml) {{
-	    document.body.classList.add('empty');
-	    document.body.classList.remove('missing');
+	  // 空白页与缺失页共用一套复位：退出编辑、收起所有浮层和定时器、清空编辑框
+	  function showPlaceholder(state, previewHtml) {{
+	    document.body.classList.toggle('empty', state === 'empty');
+	    document.body.classList.toggle('missing', state === 'missing');
 	    document.body.classList.remove('editing');
 	    btnToggle.innerHTML = ICON_EDIT;
 	    btnToggle.title = L_EDIT;
 	    btnToggle.setAttribute('aria-label', L_EDIT);
+	    resetTransientUi();
 	    cancelPendingAutosave();
 	    autosavePaused = false;
-	    hideFind();
 	    window.__setBaseHref('');
-	    document.getElementById('preview').innerHTML = previewHtml;
+	    previewEl.innerHTML = previewHtml;
 	    ta.value = '';
 	    updateDocumentStats('');
 	    setDirty(false);
 	    window.scrollTo(0, 0);
-	  }};
-	  window.__setMissing = function(previewHtml) {{
-	    document.body.classList.remove('empty');
-	    document.body.classList.add('missing');
-	    document.body.classList.remove('editing');
-	    btnToggle.innerHTML = ICON_EDIT;
-	    btnToggle.title = L_EDIT;
-	    btnToggle.setAttribute('aria-label', L_EDIT);
-	    cancelPendingAutosave();
-	    autosavePaused = false;
-	    hideFind();
-	    window.__setBaseHref('');
-	    document.getElementById('preview').innerHTML = previewHtml;
-	    ta.value = '';
-	    updateDocumentStats('');
-	    setDirty(false);
-	    window.scrollTo(0, 0);
-	  }};
+	  }}
+	  window.__setEmptyPreview = function(previewHtml) {{ showPlaceholder('empty', previewHtml); }};
+	  window.__setMissing = function(previewHtml) {{ showPlaceholder('missing', previewHtml); }};
 
   // Defer hljs parse + initial highlight to idle time.
   // hljs itself is NOT inlined in this page — Rust injects it via
@@ -4487,7 +4719,8 @@ if(window.__enhancePreview)window.__enhancePreview();
         btn_new = s.btn_new,
         btn_search = s.btn_search,
         btn_edit = s.btn_edit,
-        btn_preview = s.btn_preview,
+        btn_edit_js = escape_js(s.btn_edit),
+        btn_preview_js = escape_js(s.btn_preview),
         btn_print = s.btn_print,
         btn_zoom = s.btn_zoom,
         btn_zoom_out = s.btn_zoom_out,
@@ -4596,10 +4829,21 @@ fn build_page(
 }
 
 fn escape_js(s: &str) -> String {
+    // U+2028/2029 在旧引擎里会终止字符串字面量，一并转义
     s.replace('\\', "\\\\")
         .replace('\'', "\\'")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
+fn is_script_bearing_url(url: &str) -> bool {
+    let lower = url.trim_start().to_ascii_lowercase();
+    lower.starts_with("data:")
+        || lower.starts_with("blob:")
+        || lower.starts_with("javascript:")
+        || lower.starts_with("vbscript:")
 }
 
 fn watch_scope_for_file(path: &Path) -> &Path {
@@ -4743,6 +4987,114 @@ mod tests {
         assert!(supported.contains(&"txt"));
         assert!(supported.contains(&"json"));
         assert!(supported.contains(&"toml"));
+    }
+
+    #[test]
+    fn raw_html_scripts_and_event_handlers_are_stripped() {
+        let html = md_to_html(
+            "<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>\n\n<a href=\"javascript:alert(1)\">x</a>",
+        );
+        assert!(!html.contains("<script"));
+        assert!(!html.contains("alert(1)"));
+        assert!(html.contains("<img src=\"x\">"));
+        assert!(!html.contains("onerror"));
+        assert!(html.contains("<a>x</a>"));
+        assert!(!html.contains("javascript:"));
+    }
+
+    #[test]
+    fn raw_html_split_across_lines_is_joined_before_filtering() {
+        let html = md_to_html("<img\nsrc=x\nonerror=alert(1)>");
+        assert!(html.contains("<img src=\"x\">"));
+        assert!(!html.contains("onerror"));
+    }
+
+    #[test]
+    fn unterminated_raw_tags_are_escaped() {
+        let html = md_to_html("<div class=\"a\n\nonclick=alert(1)>text");
+        assert!(!html.contains("<div"));
+        assert!(html.contains("&lt;div"));
+        assert!(!html.contains("onclick=alert(1)>"));
+    }
+
+    #[test]
+    fn harmless_raw_html_survives_filtering() {
+        let html = md_to_html(
+            "<details>\n<summary>More</summary>\n\nBody <kbd>Ctrl</kbd> <a href=\"https://x.y/?a=1&amp;b=2\" title=\"t\">link</a>\n\n</details>",
+        );
+        assert!(html.contains("<details>"));
+        assert!(html.contains("<summary>More</summary>"));
+        assert!(html.contains("<kbd>Ctrl</kbd>"));
+        assert!(html.contains(r#"<a href="https://x.y/?a=1&amp;b=2" title="t">link</a>"#));
+        assert!(html.contains("</details>"));
+    }
+
+    #[test]
+    fn raw_html_rejects_entity_schemes_data_attributes_style_and_svg() {
+        let html = md_to_html(
+            "<a href=\"&#106;avascript:alert(1)\">a</a> <a href=\"java&Tab;script:alert(1)\">b</a>\n\n<div data-tab-id=\"1\" class=\"x\">c</div>\n\n<style>body{display:none}</style>\n\n<!-- hidden -->\n\n<svg onload=alert(1)><circle r=1/></svg>",
+        );
+        assert!(!html.contains("href"));
+        assert!(html.contains(r#"<div class="x">c</div>"#));
+        assert!(!html.contains("data-tab-id"));
+        assert!(!html.contains("<style"));
+        assert!(!html.contains("display:none"));
+        assert!(!html.contains("hidden"));
+        assert!(!html.contains("<svg"));
+        assert!(!html.contains("onload"));
+    }
+
+    #[test]
+    fn safe_url_check_covers_schemes_and_obfuscation() {
+        assert!(is_safe_url("https://example.com/a?b=1&c=2"));
+        assert!(is_safe_url("./docs/readme.md"));
+        assert!(is_safe_url("#section"));
+        assert!(is_safe_url("data:image/png;base64,AAAA"));
+        assert!(!is_safe_url("data:image/svg+xml,<svg/>"));
+        assert!(!is_safe_url("javascript:alert(1)"));
+        assert!(!is_safe_url("JaVaScRiPt:alert(1)"));
+        assert!(!is_safe_url("java\tscript:alert(1)"));
+        assert!(!is_safe_url("java&Tab;script:alert(1)"));
+        assert!(!is_safe_url("&#106;avascript:alert(1)"));
+        assert!(!is_safe_url("data:text/html,<script>"));
+        assert!(is_script_bearing_url(" DATA:text/html,x"));
+        assert!(is_script_bearing_url("blob:null/abc"));
+        assert!(!is_script_bearing_url("https://example.com"));
+    }
+
+    #[test]
+    fn utf8_bom_with_invalid_body_still_reports_bom_encoding() {
+        let dir = temp_test_dir("bom-invalid");
+        let path = dir.join("bad.md");
+        fs::write(&path, [0xEF, 0xBB, 0xBF, b'a', 0xFF, b'b']).unwrap();
+        let (text, encoding) = read_document_with_encoding(&path, None).unwrap();
+        assert_eq!(encoding, "UTF-8 BOM");
+        assert_eq!(text, "a\u{FFFD}b");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn utf16_with_trailing_stray_byte_decodes_the_complete_units() {
+        let dir = temp_test_dir("utf16-odd");
+        let path = dir.join("odd.txt");
+        fs::write(&path, [0xFF, 0xFE, b'h', 0, b'i', 0, 0x41]).unwrap();
+        let (text, encoding) = read_document_with_encoding(&path, None).unwrap();
+        assert_eq!(encoding, "UTF-16 LE");
+        assert_eq!(text, "hi");
+        assert_eq!(decode_utf16(&[0x00, 0x41, 0xD8, 0x00], true), "A\u{FFFD}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn strict_codepage_detection_rejects_invalid_gbk() {
+        // UTF-8 的“中”是 E4 B8 AD，末尾的 AD 是没有尾字节的 GBK 首字节，严格模式必须拒绝
+        assert!(decode_windows_codepage("中".as_bytes(), 936, true).is_none());
+        assert!(decode_windows_codepage("中".as_bytes(), 936, false).is_some());
+        assert_eq!(
+            decode_windows_codepage(&[0xD6, 0xD0], 936, true).as_deref(),
+            Some("中")
+        );
     }
 
     #[test]
@@ -5158,12 +5510,20 @@ mod tests {
             &strings,
             false,
         );
-        let empty_start = page.find("window.__setEmptyPreview = function").unwrap();
-        let missing_start = page.find("window.__setMissing = function").unwrap();
-        let empty_handler = &page[empty_start..missing_start];
-
-        assert!(empty_handler.contains("document.body.classList.remove('editing')"));
-        assert!(empty_handler.contains("btnToggle.innerHTML = ICON_EDIT"));
+        // 空白页和缺失页共用 showPlaceholder：退出编辑、复位工具栏按钮、收起所有浮层
+        let start = page
+            .find("function showPlaceholder(state, previewHtml)")
+            .unwrap();
+        let end = page[start..]
+            .find("window.__setMissing = function")
+            .unwrap()
+            + start;
+        let handler = &page[start..end];
+        assert!(handler.contains("document.body.classList.remove('editing')"));
+        assert!(handler.contains("btnToggle.innerHTML = ICON_EDIT"));
+        assert!(handler.contains("resetTransientUi();"));
+        assert!(handler.contains("showPlaceholder('empty', previewHtml)"));
+        assert!(page.contains("window.__setMissing = function(previewHtml) {{ showPlaceholder('missing', previewHtml); }};".replace("{{", "{").replace("}}", "}").as_str()));
     }
 
     #[test]
@@ -5450,12 +5810,77 @@ mod tests {
     }
 
     #[test]
-    fn build_page_wires_convert_and_save_as_ipc() {
-        let source = include_str!("main.rs");
-        assert!(source.contains("body.strip_prefix(\"convert-encoding:\")"));
-        assert!(source.contains("body.strip_prefix(\"save-as\\n\")"));
-        assert!(source.contains("UserEvent::ConvertEncoding { encoding, content }) =>"));
-        assert!(source.contains("UserEvent::SaveAs(content)) =>"));
+    fn ipc_messages_parse_into_typed_commands() {
+        assert_eq!(parse_ipc_message("open"), Some(IpcMessage::OpenFile));
+        assert_eq!(
+            parse_ipc_message("open-doc:D:\\docs\\a.md"),
+            Some(IpcMessage::OpenDoc(PathBuf::from("D:\\docs\\a.md")))
+        );
+        assert_eq!(
+            parse_ipc_message("open-recent:2"),
+            Some(IpcMessage::OpenRecent(2))
+        );
+        assert_eq!(parse_ipc_message("open-recent:x"), None);
+        assert_eq!(
+            parse_ipc_message("tab-action:close-others:7"),
+            Some(IpcMessage::TabAction {
+                action: TabAction::CloseOthers,
+                id: 7,
+                content: None,
+            })
+        );
+        assert_eq!(
+            parse_ipc_message("tab-action:activate:3\nline one\nline: two"),
+            Some(IpcMessage::TabAction {
+                action: TabAction::Activate,
+                id: 3,
+                content: Some("line one\nline: two".to_string()),
+            })
+        );
+        assert_eq!(parse_ipc_message("tab-action:activate:abc"), None);
+        assert_eq!(parse_ipc_message("tab-action:rename:3"), None);
+        assert_eq!(
+            parse_ipc_message("convert-encoding:GBK\n正文"),
+            Some(IpcMessage::ConvertEncoding {
+                encoding: "GBK".to_string(),
+                content: "正文".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_ipc_message("save-as\nbody"),
+            Some(IpcMessage::SaveAs("body".to_string()))
+        );
+        assert_eq!(
+            parse_ipc_message("save:a:b"),
+            Some(IpcMessage::Save("a:b".to_string()))
+        );
+        assert_eq!(
+            parse_ipc_message("save-skipped"),
+            Some(IpcMessage::SaveSkipped)
+        );
+        assert_eq!(
+            parse_ipc_message("set-setting:tab-mode=single"),
+            Some(IpcMessage::SetSetting {
+                key: "tab-mode".to_string(),
+                value: "single".to_string(),
+            })
+        );
+        assert_eq!(parse_ipc_message("set-setting:broken"), None);
+        assert_eq!(
+            parse_ipc_message("dirty:1"),
+            Some(IpcMessage::DirtyChanged(true))
+        );
+        assert_eq!(
+            parse_ipc_message("external-change:clean"),
+            Some(IpcMessage::ExternalChangeResolved { dirty: false })
+        );
+        assert_eq!(
+            parse_ipc_message("clear-recent"),
+            Some(IpcMessage::ClearRecent)
+        );
+        assert_eq!(parse_ipc_message("refresh"), Some(IpcMessage::Refresh));
+        assert_eq!(parse_ipc_message("open:"), None);
+        assert_eq!(parse_ipc_message("bogus"), None);
     }
 
     #[test]
@@ -5483,13 +5908,13 @@ mod tests {
         let clean = encode_document("测试 GBK 编码", "GBK").unwrap();
         assert_eq!(clean.lossy_chars, 0);
         assert_eq!(
-            decode_windows_codepage(&clean.bytes, 936).unwrap(),
+            decode_windows_codepage(&clean.bytes, 936, true).unwrap(),
             "测试 GBK 编码"
         );
 
         let lossy = encode_document("前😀中🚀后", "GBK").unwrap();
         assert_eq!(lossy.lossy_chars, 2);
-        let decoded = decode_windows_codepage(&lossy.bytes, 936).unwrap();
+        let decoded = decode_windows_codepage(&lossy.bytes, 936, true).unwrap();
         assert_eq!(decoded.replace('?', ""), "前中后");
         assert!(decoded.contains('?'));
     }
@@ -6218,38 +6643,6 @@ fn local_document_path_from_url(value: &str) -> Option<PathBuf> {
     fs::canonicalize(path).ok().map(strip_verbatim_prefix)
 }
 
-fn install_file_watcher(
-    holder: &Arc<Mutex<Option<notify::RecommendedWatcher>>>,
-    proxy: &EventLoopProxy<UserEvent>,
-    last_self_write: &Arc<Mutex<Option<SelfWriteRecord>>>,
-    path: Option<PathBuf>,
-) {
-    let mut current = holder.lock().unwrap();
-    *current = None;
-    let Some(path) = path else {
-        return;
-    };
-    let target_path = path.clone();
-    let callback_path = path.clone();
-    let proxy = proxy.clone();
-    let last_self_write = Arc::clone(last_self_write);
-    if let Ok(mut watcher) = notify::recommended_watcher(move |result: Result<Event, _>| {
-        if let Ok(event) = result {
-            if event_should_reload_file(&event, &callback_path) {
-                let last_self_write = last_self_write.lock().unwrap();
-                if !self_write_still_matches_disk(last_self_write.as_ref(), &callback_path) {
-                    let _ = proxy.send_event(UserEvent::FileChanged(callback_path.clone()));
-                }
-            }
-        }
-    }) {
-        let scope = watch_scope_for_file(&target_path);
-        if scope.exists() && watcher.watch(scope, RecursiveMode::NonRecursive).is_ok() {
-            *current = Some(watcher);
-        }
-    }
-}
-
 /// 先登记自写记录再落盘，文件监听才能把这次写入识别为应用自己的保存
 fn write_document_bytes(
     last_self_write: &Mutex<Option<SelfWriteRecord>>,
@@ -6459,16 +6852,6 @@ fn register_finder_extension() {
 #[cfg(not(target_os = "macos"))]
 fn register_finder_extension() {}
 
-fn persist_session(session: &DocumentSession) {
-    // 新窗口模式是多进程、单标签模式按设计不恢复，这两种情况下落盘只会互相覆盖或把老标签带回来
-    if !SESSION_ENABLED.load(Ordering::SeqCst) {
-        return;
-    }
-    if let Err(error) = session.save(&session_path()) {
-        eprintln!("Could not save tab session: {error}");
-    }
-}
-
 fn update_author_doc(webview: &WebView, raw_md: &str) {
     let doc = author_doc(raw_md);
     let state = serde_json::json!({
@@ -6518,99 +6901,979 @@ fn update_window_title(window: &Window, session: &DocumentSession) {
     window.set_title(&title);
 }
 
-fn render_active_document(
-    webview: &WebView,
-    window: &Window,
-    session: &mut DocumentSession,
-    recent_files: &Arc<Mutex<Vec<PathBuf>>>,
-    enhance_flags: &Arc<Mutex<EnhanceFlags>>,
-    loaded_enhancers: &mut EnhanceFlags,
-    strings: &Strings,
-) {
-    let Some(active) = session.active().cloned() else {
-        APP_DIRTY.store(false, Ordering::SeqCst);
-        let html = empty_preview_html(strings, &recent_files.lock().unwrap());
-        let _ = webview.evaluate_script(&format!(
-            "if(window.__setEmptyPreview)window.__setEmptyPreview('{}');",
-            escape_js(&html)
-        ));
-        update_author_doc(webview, "");
-        update_tabs(webview, session);
-        update_sidebar(webview, session, &recent_files.lock().unwrap());
-        update_window_title(window, session);
-        return;
-    };
+/// 页面发来的 IPC 消息。字符串协议只在这里解析一次，事件循环按类型分发
+#[derive(Debug, PartialEq, Eq)]
+enum IpcMessage {
+    NewFile,
+    OpenFile,
+    OpenRecent(usize),
+    OpenDoc(PathBuf),
+    ForgetRecent(PathBuf),
+    ClearRecent,
+    RevealPath(PathBuf),
+    OpenLocalLink(String),
+    /// 切换或关闭标签；活动标签有未保存正文时随消息带上，先落盘再执行动作
+    TabAction {
+        action: TabAction,
+        id: u64,
+        content: Option<String>,
+    },
+    SetSetting {
+        key: String,
+        value: String,
+    },
+    LocateTab(u64),
+    RevealTab(u64),
+    RenderPreview(String),
+    RenderReleaseNotes(String),
+    ConvertEncoding {
+        encoding: String,
+        content: String,
+    },
+    SaveAs(String),
+    Save(String),
+    /// 关窗前请求页面保存，页面发现没有脏内容时回这条，事件循环据此继续退出
+    SaveSkipped,
+    DirtyChanged(bool),
+    ExternalChangeResolved {
+        dirty: bool,
+    },
+    Print,
+    Ready,
+    Refresh,
+    SetEncoding(String),
+    SelfUpdate(String),
+}
 
-    match read_document_with_encoding(&active.path, active.encoding.as_deref()) {
-        Ok((raw, resolved_encoding)) => {
-            if let Some(tab) = session.get_mut(active.id) {
-                tab.missing = false;
-                if tab.encoding.is_none() {
-                    tab.encoding = Some(resolved_encoding.to_string());
-                }
-            }
-            remember_recent_file(recent_files, &active.path);
-            let is_plain_text = !is_markdown_document(&active.path);
-            let (html, flags, base_href) = document_to_html(&active.path, &raw);
-            let base_href = base_href.unwrap_or_default();
-            *enhance_flags.lock().unwrap() = flags;
-            let _ = webview.evaluate_script(&format!(
-                "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
-                escape_js(&html),
-                escape_js(&raw),
-                escape_js(&base_href),
-                flags.math,
-                flags.mermaid,
-                escape_js(resolved_encoding)
-            ));
-            if is_plain_text {
-                update_author_doc(webview, "");
-            } else {
-                update_author_doc(webview, &raw);
-            }
-            for script in build_enhancer_bootstrap(flags, *loaded_enhancers) {
-                let _ = webview.evaluate_script(&script);
-            }
-            loaded_enhancers.math |= flags.math;
-            loaded_enhancers.mermaid |= flags.mermaid;
-            if active.edit_on_open {
-                if let Some(tab) = session.get_mut(active.id) {
-                    tab.edit_on_open = false;
-                }
-                let _ = webview.evaluate_script(
-                    "if(window.__mdPreviewerEnterEdit)window.__mdPreviewerEnterEdit();",
-                );
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if let Some(tab) = session.get_mut(active.id) {
-                tab.missing = true;
-            }
-            if active.dirty {
-                show_warning_dialog(
-                    strings.missing_title,
-                    "The file disappeared while it still has unsaved edits. The editor content has been kept.",
-                );
-            } else {
-                let html = missing_preview_html(active.id, &active.path, strings);
-                let _ = webview.evaluate_script(&format!(
-                    "if(window.__setMissing)window.__setMissing('{}');",
-                    escape_js(&html)
-                ));
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TabAction {
+    Activate,
+    Close,
+    CloseOthers,
+}
+
+fn parse_ipc_message(body: &str) -> Option<IpcMessage> {
+    let exact = match body {
+        "new-file" => Some(IpcMessage::NewFile),
+        "open" => Some(IpcMessage::OpenFile),
+        "clear-recent" => Some(IpcMessage::ClearRecent),
+        "dirty:1" => Some(IpcMessage::DirtyChanged(true)),
+        "dirty:0" => Some(IpcMessage::DirtyChanged(false)),
+        "external-change:dirty" => Some(IpcMessage::ExternalChangeResolved { dirty: true }),
+        "external-change:clean" => Some(IpcMessage::ExternalChangeResolved { dirty: false }),
+        "print" => Some(IpcMessage::Print),
+        "ready" => Some(IpcMessage::Ready),
+        "refresh" => Some(IpcMessage::Refresh),
+        "save-skipped" => Some(IpcMessage::SaveSkipped),
+        _ => None,
+    };
+    if exact.is_some() {
+        return exact;
+    }
+    if let Some(content) = body.strip_prefix("save-as\n") {
+        return Some(IpcMessage::SaveAs(content.to_string()));
+    }
+    let (prefix, rest) = body.split_once(':')?;
+    let message = match prefix {
+        "open-recent" => IpcMessage::OpenRecent(rest.parse().ok()?),
+        "open-doc" => IpcMessage::OpenDoc(PathBuf::from(rest)),
+        "forget-recent" => IpcMessage::ForgetRecent(PathBuf::from(rest)),
+        "reveal-path" => IpcMessage::RevealPath(PathBuf::from(rest)),
+        "open-local-link" => IpcMessage::OpenLocalLink(rest.to_string()),
+        "tab-action" => {
+            let (header, content) = rest
+                .split_once('\n')
+                .map(|(header, content)| (header, Some(content.to_string())))
+                .unwrap_or((rest, None));
+            let (action, id) = header.split_once(':')?;
+            let action = match action {
+                "activate" => TabAction::Activate,
+                "close" => TabAction::Close,
+                "close-others" => TabAction::CloseOthers,
+                _ => return None,
+            };
+            IpcMessage::TabAction {
+                action,
+                id: id.parse().ok()?,
+                content,
             }
         }
-        Err(error) => {
-            show_warning_dialog(strings.cannot_read, &error.to_string());
+        "set-setting" => {
+            let (key, value) = rest.split_once('=')?;
+            IpcMessage::SetSetting {
+                key: key.to_string(),
+                value: value.to_string(),
+            }
+        }
+        "locate-tab" => IpcMessage::LocateTab(rest.parse().ok()?),
+        "reveal-tab" => IpcMessage::RevealTab(rest.parse().ok()?),
+        "render-preview" => IpcMessage::RenderPreview(rest.to_string()),
+        "render-release-notes" => IpcMessage::RenderReleaseNotes(rest.to_string()),
+        "convert-encoding" => {
+            let (encoding, content) = rest.split_once('\n')?;
+            IpcMessage::ConvertEncoding {
+                encoding: encoding.to_string(),
+                content: content.to_string(),
+            }
+        }
+        "save" => IpcMessage::Save(rest.to_string()),
+        "set-encoding" => IpcMessage::SetEncoding(rest.to_string()),
+        "self-update" => IpcMessage::SelfUpdate(rest.to_string()),
+        _ => return None,
+    };
+    Some(message)
+}
+
+fn confirm_overwrite(strings: &Strings, path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+    let result = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title(strings.overwrite_title)
+        .set_description(strings.overwrite_body.replace("{name}", &name))
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .show();
+    matches!(result, rfd::MessageDialogResult::Yes)
+}
+
+fn document_picker() -> rfd::FileDialog {
+    let supported = supported_dialog_extensions();
+    rfd::FileDialog::new()
+        .add_filter("Supported Documents", supported.as_slice())
+        .add_filter("Markdown", MARKDOWN_EXTENSIONS)
+        .add_filter("Text", TEXT_EXTENSIONS)
+        .add_filter("All Files", &["*"])
+}
+
+/// 事件循环持有的全部状态。页面回调只把消息转成 `UserEvent::Ipc`，
+/// 所有状态改动都在事件循环里串行发生，不需要跨线程共享；
+/// 只有文件监听线程要读的自写记录仍用 Arc<Mutex>
+struct App {
+    webview: WebView,
+    window: Window,
+    proxy: EventLoopProxy<UserEvent>,
+    strings: Strings,
+    settings: Settings,
+    session: DocumentSession,
+    recent: RecentFiles,
+    enhance_flags: EnhanceFlags,
+    loaded_enhancers: EnhanceFlags,
+    watcher: Option<notify::RecommendedWatcher>,
+    last_self_write: Arc<Mutex<Option<SelfWriteRecord>>>,
+    /// hljs 不进首屏 HTML，页面报告就绪后再注入，缩短冷启动首屏解析路径
+    hljs_bootstrap: String,
+    /// 首屏文档的标签 id 和原文：页面由 with_html 一次成型，不经过 __setContent，
+    /// 作者模式要的标题和正文得在页面就绪后单独推一次
+    initial_author: Option<(u64, String)>,
+    pending_window_close: bool,
+    warned_external_change: Option<PathBuf>,
+    pending_external_change: Option<PathBuf>,
+    sidebar_open_applied: bool,
+    /// MD_PREVIEWER_BENCH=1 时记录启动时刻，首屏就绪即打印耗时并退出
+    bench_started: Option<Instant>,
+}
+
+impl App {
+    fn eval(&self, script: &str) {
+        let _ = self.webview.evaluate_script(script);
+    }
+
+    // 新窗口模式是多进程、单标签模式按设计不恢复，这两种情况下落盘只会互相覆盖或把老标签带回来
+    fn persist_session(&self) {
+        if !self.settings.keeps_session() {
+            return;
+        }
+        if let Err(error) = self.session.save(&session_path()) {
+            eprintln!("Could not save tab session: {error}");
         }
     }
 
-    APP_DIRTY.store(
-        session.active().map(|tab| tab.dirty).unwrap_or(false),
-        Ordering::SeqCst,
-    );
-    update_tabs(webview, session);
-    update_sidebar(webview, session, &recent_files.lock().unwrap());
-    update_window_title(window, session);
+    fn refresh_tabs(&self) {
+        update_tabs(&self.webview, &self.session);
+        update_window_title(&self.window, &self.session);
+    }
+
+    fn refresh_sidebar(&self) {
+        update_sidebar(&self.webview, &self.session, self.recent.paths());
+    }
+
+    fn push_empty_preview(&self) {
+        let html = empty_preview_html(&self.strings, self.recent.paths());
+        self.eval(&format!(
+            "if(window.__setEmptyPreview)window.__setEmptyPreview('{}');",
+            escape_js(&html)
+        ));
+    }
+
+    // 空白启动页上也列着最近文件，只有没有活动文档时才重画它；有文档打开时重画会把正文整个换成空白页
+    fn on_recent_changed(&self) {
+        if self.session.active().is_none() {
+            self.push_empty_preview();
+        }
+        self.refresh_sidebar();
+    }
+
+    // 纯文本文档没有标题结构，作者模式的复制按钮不该出现
+    fn push_author_doc(&self, path: &Path, raw: &str) {
+        let raw = if is_markdown_document(path) { raw } else { "" };
+        update_author_doc(&self.webview, raw);
+    }
+
+    fn bootstrap_enhancers(&mut self, flags: EnhanceFlags) {
+        for script in build_enhancer_bootstrap(flags, self.loaded_enhancers) {
+            self.eval(&script);
+        }
+        self.loaded_enhancers.math |= flags.math;
+        self.loaded_enhancers.mermaid |= flags.mermaid;
+    }
+
+    /// 页面就绪前 evaluate_script 不一定生效，首屏需要的状态在构建后和 ready 时各推一遍
+    fn push_ui_state(&self) {
+        self.refresh_tabs();
+        self.refresh_sidebar();
+        update_settings_ui(&self.webview, &self.settings);
+        if let Some((id, raw)) = &self.initial_author {
+            if let Some(tab) = self.session.active().filter(|tab| tab.id == *id) {
+                self.push_author_doc(&tab.path, raw);
+            }
+        }
+    }
+
+    /// 切换活动文档后的固定流程：落盘会话、重绘、把文件监听挪到新文档上
+    fn show_active(&mut self) {
+        self.persist_session();
+        self.render_active();
+        self.install_watcher();
+    }
+
+    fn install_watcher(&mut self) {
+        self.watcher = None;
+        let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
+            return;
+        };
+        let scope = watch_scope_for_file(&path).to_path_buf();
+        if !scope.exists() {
+            return;
+        }
+        let callback_path = path.clone();
+        let proxy = self.proxy.clone();
+        let last_self_write = Arc::clone(&self.last_self_write);
+        let watcher = notify::recommended_watcher(move |result: Result<Event, _>| {
+            let Ok(event) = result else {
+                return;
+            };
+            if !event_should_reload_file(&event, &callback_path) {
+                return;
+            }
+            // 只在锁内拷贝记录；比对磁盘内容要读文件，不能让保存路径等在这把锁上
+            let record = last_self_write.lock().unwrap().clone();
+            if !self_write_still_matches_disk(record.as_ref(), &callback_path) {
+                let _ = proxy.send_event(UserEvent::FileChanged(callback_path.clone()));
+            }
+        });
+        let mut watcher = match watcher {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                eprintln!("无法创建文件监听，外部修改将不会自动刷新: {error}");
+                return;
+            }
+        };
+        match watcher.watch(&scope, RecursiveMode::NonRecursive) {
+            Ok(()) => self.watcher = Some(watcher),
+            Err(error) => eprintln!("无法监听目录 {}: {error}", scope.display()),
+        }
+    }
+
+    fn render_active(&mut self) {
+        let Some(active) = self.session.active().cloned() else {
+            self.push_empty_preview();
+            update_author_doc(&self.webview, "");
+            self.refresh_tabs();
+            self.refresh_sidebar();
+            return;
+        };
+
+        match read_document_with_encoding(&active.path, active.encoding.as_deref()) {
+            Ok((raw, resolved_encoding)) => {
+                if let Some(tab) = self.session.get_mut(active.id) {
+                    tab.missing = false;
+                    if tab.encoding.is_none() {
+                        tab.encoding = Some(resolved_encoding.to_string());
+                    }
+                }
+                self.recent.remember(&active.path);
+                let (html, flags, base_href) = document_to_html(&active.path, &raw);
+                self.enhance_flags = flags;
+                self.eval(&format!(
+                    "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
+                    escape_js(&html),
+                    escape_js(&raw),
+                    escape_js(&base_href.unwrap_or_default()),
+                    flags.math,
+                    flags.mermaid,
+                    escape_js(resolved_encoding)
+                ));
+                self.push_author_doc(&active.path, &raw);
+                self.bootstrap_enhancers(flags);
+                if active.edit_on_open {
+                    if let Some(tab) = self.session.get_mut(active.id) {
+                        tab.edit_on_open = false;
+                    }
+                    self.eval("if(window.__mdPreviewerEnterEdit)window.__mdPreviewerEnterEdit();");
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(tab) = self.session.get_mut(active.id) {
+                    tab.missing = true;
+                }
+                if active.dirty {
+                    show_warning_dialog(
+                        self.strings.missing_title,
+                        "The file disappeared while it still has unsaved edits. The editor content has been kept.",
+                    );
+                } else {
+                    let html = missing_preview_html(active.id, &active.path, &self.strings);
+                    self.eval(&format!(
+                        "if(window.__setMissing)window.__setMissing('{}');",
+                        escape_js(&html)
+                    ));
+                }
+            }
+            Err(error) => {
+                show_warning_dialog(self.strings.cannot_read, &error.to_string());
+            }
+        }
+
+        self.refresh_tabs();
+        self.refresh_sidebar();
+    }
+
+    /// 把页面正文按活动标签的编码写回磁盘；成功后刷新预览并清脏标记，失败弹窗并取消待关窗
+    fn save_active_content(&mut self, content: &str) -> bool {
+        let Some((path, encoding)) = self
+            .session
+            .active()
+            .map(|tab| (tab.path.clone(), tab.encoding.clone()))
+        else {
+            return false;
+        };
+        match save_document_text(&self.last_self_write, &path, content, encoding.as_deref()) {
+            Ok(()) => {
+                self.on_file_saved(path);
+                true
+            }
+            Err(error) => {
+                self.pending_window_close = false;
+                show_warning_dialog("Could Not Save", &format!("{}: {error}", path.display()));
+                false
+            }
+        }
+    }
+
+    // 自己的保存只刷新预览，编辑框和光标保持不动
+    fn on_file_saved(&mut self, path: PathBuf) {
+        if self.warned_external_change.as_ref() == Some(&path) {
+            self.warned_external_change = None;
+        }
+        let active_matches =
+            self.session.active().map(|tab| tab.path.as_path()) == Some(path.as_path());
+        self.session.mark_saved(&path);
+        if active_matches {
+            let encoding = self.session.active().and_then(|tab| tab.encoding.clone());
+            match read_document_with_encoding(&path, encoding.as_deref()) {
+                Ok((raw, _)) => {
+                    let (html, flags, _) = document_to_html(&path, &raw);
+                    self.enhance_flags = flags;
+                    self.eval(&format!(
+                        "if(window.__setPreview)window.__setPreview('{}', {}, {});if(window.__markSaved)window.__markSaved('{}');",
+                        escape_js(&html),
+                        flags.math,
+                        flags.mermaid,
+                        escape_js(&raw)
+                    ));
+                    self.push_author_doc(&path, &raw);
+                    self.bootstrap_enhancers(flags);
+                }
+                Err(error) => show_warning_dialog(
+                    self.strings.cannot_read,
+                    &format!("{}: {error}", path.display()),
+                ),
+            }
+        }
+        self.persist_session();
+        self.refresh_tabs();
+    }
+
+    fn exit(&self, control_flow: &mut ControlFlow) {
+        save_window_geom(&self.window);
+        self.persist_session();
+        *control_flow = ControlFlow::Exit;
+    }
+
+    /// 关窗前先让页面把未保存正文回写；页面没有脏内容时会回 save-skipped，随后再真正退出
+    fn request_close(&mut self, control_flow: &mut ControlFlow) {
+        if self.pending_window_close {
+            return;
+        }
+        if self.session.active_is_dirty() {
+            self.pending_window_close = true;
+            self.eval("if(window.__mdPreviewerSave)window.__mdPreviewerSave();");
+            return;
+        }
+        self.exit(control_flow);
+    }
+
+    fn open_paths(&mut self, paths: Vec<PathBuf>, edit_on_open: bool) {
+        let paths = paths
+            .into_iter()
+            .filter(|path| is_supported_document(path))
+            .collect::<Vec<_>>();
+        self.open_checked_paths(paths, edit_on_open);
+    }
+
+    /// 调用方已确认路径可打开时直接走这里，避免再嗅探一次文件内容
+    fn open_checked_paths(&mut self, paths: Vec<PathBuf>, edit_on_open: bool) {
+        self.window.set_minimized(false);
+        self.window.set_visible(true);
+        self.window.set_focus();
+        if paths.is_empty() {
+            return;
+        }
+        let previous_active = self.session.active_id;
+        // 活动标签有未保存内容时，新文件在后台打开，不打断正在进行的编辑
+        let keep_active = self.session.active_is_dirty();
+        for path in paths {
+            self.session.open(path, edit_on_open);
+        }
+        if keep_active {
+            if let Some(id) = previous_active {
+                self.session.activate(id);
+            }
+            self.persist_session();
+            self.refresh_tabs();
+            return;
+        }
+        self.show_active();
+    }
+
+    fn activate_tab(&mut self, id: u64) {
+        if !self.session.activate(id) {
+            return;
+        }
+        // 单标签模式下脏标签会被暂时保留，切换成功说明它已经回写磁盘，这时收敛回只剩当前一个
+        if self.session.single_tab {
+            self.session.collapse_to_active();
+        }
+        self.show_active();
+    }
+
+    fn close_tab(&mut self, id: u64) {
+        let was_active = self.session.active_id == Some(id);
+        if !self.session.close(id) {
+            return;
+        }
+        if was_active {
+            self.show_active();
+        } else {
+            self.persist_session();
+            self.refresh_tabs();
+        }
+    }
+
+    fn close_others(&mut self, id: u64) {
+        let was_active = self.session.active_id == Some(id);
+        if !self.session.close_others(id) {
+            return;
+        }
+        if was_active {
+            self.persist_session();
+            self.refresh_tabs();
+        } else {
+            self.show_active();
+        }
+    }
+
+    fn new_file(&mut self) {
+        if self.session.active_is_dirty() {
+            self.eval("if(window.__mdPreviewerNewFile)window.__mdPreviewerNewFile();");
+            return;
+        }
+        let current_dir = self
+            .session
+            .active()
+            .and_then(|tab| tab.path.parent().map(Path::to_path_buf));
+        let mut dialog = rfd::FileDialog::new()
+            .add_filter("Markdown", MARKDOWN_EXTENSIONS)
+            .set_file_name(self.strings.new_filename);
+        if let Some(current_dir) = current_dir {
+            dialog = dialog.set_directory(current_dir);
+        }
+        let Some(chosen) = dialog.save_file() else {
+            return;
+        };
+        let path = normalize_new_markdown_path(chosen.clone());
+        // 系统对话框只对用户输入的文件名做过覆盖确认；补上 .md 后撞到别的文件时必须再问一次
+        if path != chosen && path.exists() && !confirm_overwrite(&self.strings, &path) {
+            return;
+        }
+        match fs::write(&path, "") {
+            Ok(()) => self.open_paths(vec![path], true),
+            Err(error) => show_warning_dialog("Could Not Create File", &error.to_string()),
+        }
+    }
+
+    fn open_file(&mut self) {
+        if self.session.active_is_dirty() {
+            self.eval("if(window.__mdPreviewerOpenFile)window.__mdPreviewerOpenFile();");
+            return;
+        }
+        if let Some(paths) = document_picker().pick_files() {
+            self.open_paths(paths, false);
+        }
+    }
+
+    fn locate_tab(&mut self, id: u64) {
+        let Some(path) = document_picker().pick_file() else {
+            return;
+        };
+        if self.session.relocate(id, path) && self.session.activate(id) {
+            self.show_active();
+        } else {
+            show_warning_dialog("Already Open", "That file is already open in another tab.");
+        }
+    }
+
+    fn reveal_tab(&self, id: u64) {
+        if let Some(tab) = self.session.tabs.iter().find(|tab| tab.id == id) {
+            reveal_in_file_manager(&tab.path);
+        }
+    }
+
+    fn render_preview(&self, content: &str) {
+        let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
+            return;
+        };
+        let (html, flags, _) = document_to_html(&path, content);
+        self.eval(&format!(
+            "if(window.__setLivePreview)window.__setLivePreview('{}', {}, {});",
+            escape_js(&html),
+            flags.math,
+            flags.mermaid
+        ));
+    }
+
+    fn on_file_changed(&mut self, path: PathBuf) {
+        if self.session.active().map(|tab| tab.path.as_path()) != Some(path.as_path()) {
+            return;
+        }
+        self.pending_external_change = Some(path);
+        self.eval(
+            "if(window.__mdPreviewerResolveExternalChange)window.__mdPreviewerResolveExternalChange();",
+        );
+    }
+
+    fn on_external_change_resolved(&mut self, webview_dirty: bool) {
+        let Some(path) = self.pending_external_change.take() else {
+            return;
+        };
+        if self.session.active().map(|tab| tab.path.as_path()) != Some(path.as_path()) {
+            return;
+        }
+        if should_protect_external_change(webview_dirty, self.session.active_is_dirty()) {
+            self.session.set_active_dirty(true);
+            self.eval("if(window.__mdPreviewerPauseAutosave)window.__mdPreviewerPauseAutosave();");
+            self.refresh_tabs();
+            if self.warned_external_change.as_ref() != Some(&path) {
+                show_warning_dialog(
+                    "File Changed on Disk",
+                    "Automatic saving is paused and your edits are still in the editor. Press Cmd/Ctrl+S to replace the disk version, or reopen the file to keep the external version.",
+                );
+                self.warned_external_change = Some(path);
+            }
+            return;
+        }
+        self.render_active();
+        self.persist_session();
+    }
+
+    // 页面切换编码前会先保存脏内容；若保存失败标签仍是脏的，此时重读磁盘会丢掉编辑，直接忽略
+    fn set_encoding(&mut self, encoding: String) {
+        if self.session.active_is_dirty() {
+            return;
+        }
+        let Some(tab) = self.session.active_mut() else {
+            return;
+        };
+        tab.encoding = Some(encoding);
+        self.render_active();
+        self.persist_session();
+    }
+
+    fn refresh_active(&mut self) {
+        if self.session.active_is_dirty() {
+            return;
+        }
+        self.render_active();
+    }
+
+    fn convert_encoding(&mut self, encoding: String, content: &str) {
+        let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
+            return;
+        };
+        let encoded = match encode_document(content, &encoding) {
+            Ok(encoded) => encoded,
+            Err(message) => {
+                show_warning_dialog(self.strings.convert_failed_title, &message);
+                return;
+            }
+        };
+        if !confirm_lossy_conversion(&self.strings, &encoding, encoded.lossy_chars) {
+            return;
+        }
+        if let Err(error) = write_document_bytes(&self.last_self_write, &path, encoded.bytes) {
+            show_warning_dialog(
+                self.strings.convert_failed_title,
+                &format!("{}: {error}", path.display()),
+            );
+            return;
+        }
+        if let Some(tab) = self.session.active_mut() {
+            tab.encoding = Some(encoding);
+        }
+        self.session.mark_saved(&path);
+        self.persist_session();
+        // 先清前端脏标记，再按新编码从磁盘重读，编辑器才会显示磁盘实际内容（有损时可见 ?）
+        self.eval("if(window.__markSaved)window.__markSaved();");
+        self.render_active();
+    }
+
+    fn save_as(&mut self, content: &str) {
+        let Some((id, current_path, encoding)) = self
+            .session
+            .active()
+            .map(|tab| (tab.id, tab.path.clone(), tab.encoding.clone()))
+        else {
+            return;
+        };
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(self.strings.save_as_dialog_title)
+            .add_filter("Markdown", MARKDOWN_EXTENSIONS)
+            .add_filter("Text", TEXT_EXTENSIONS)
+            .add_filter("All Files", &["*"]);
+        if let Some(dir) = current_path
+            .parent()
+            .filter(|dir| !dir.as_os_str().is_empty())
+        {
+            dialog = dialog.set_directory(dir);
+        }
+        if let Some(name) = current_path.file_name().and_then(|name| name.to_str()) {
+            dialog = dialog.set_file_name(name);
+        }
+        let Some(target) = dialog.save_file() else {
+            return;
+        };
+        let target = save_as_target_path(target, &current_path);
+        if self.session.is_open_in_other_tab(id, &target) {
+            show_warning_dialog(
+                self.strings.save_as_failed_title,
+                self.strings.save_as_already_open,
+            );
+            return;
+        }
+        let encoding = encoding.unwrap_or_else(|| "UTF-8".to_string());
+        let encoded = match encode_document(content, &encoding) {
+            Ok(encoded) => encoded,
+            Err(message) => {
+                show_warning_dialog(self.strings.save_as_failed_title, &message);
+                return;
+            }
+        };
+        if !confirm_lossy_conversion(&self.strings, &encoding, encoded.lossy_chars) {
+            return;
+        }
+        if let Err(error) = write_document_bytes(&self.last_self_write, &target, encoded.bytes) {
+            show_warning_dialog(
+                self.strings.save_as_failed_title,
+                &format!("{}: {error}", target.display()),
+            );
+            return;
+        }
+        // 目标已排除其他标签占用，relocate 只会因标签不存在而失败；
+        // relocate 会清掉编码，另存为刚按这个编码写过盘，必须设回去
+        if self.session.relocate(id, target.clone()) {
+            if let Some(tab) = self.session.get_mut(id) {
+                tab.encoding = Some(encoding);
+                tab.dirty = false;
+                tab.missing = false;
+            }
+        }
+        self.eval("if(window.__markSaved)window.__markSaved();");
+        self.show_active();
+    }
+
+    fn on_settings_changed(&mut self) {
+        let current = self.settings;
+        if current.sidebar_open != self.sidebar_open_applied {
+            resize_for_sidebar(&self.window, current.sidebar_open);
+            self.sidebar_open_applied = current.sidebar_open;
+        }
+        if let Err(error) = current.save(&settings_path()) {
+            eprintln!("Could not save settings: {error}");
+        }
+        self.session.single_tab = current.tab_mode == TabMode::Single;
+        if self.session.single_tab {
+            self.session.collapse_to_active();
+        }
+        if current.keeps_session() {
+            self.persist_session();
+        } else {
+            // 留着旧会话文件会在下次启动又把老标签拉回来，正是这个设置要避免的
+            if let Err(error) = fs::remove_file(session_path()) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("Could not remove tab session: {error}");
+                }
+            }
+        }
+        self.refresh_tabs();
+        update_settings_ui(&self.webview, &current);
+    }
+
+    fn on_ready(&mut self, control_flow: &mut ControlFlow) {
+        let hljs = std::mem::take(&mut self.hljs_bootstrap);
+        if !hljs.is_empty() {
+            self.eval(&hljs);
+        }
+        let flags = self.enhance_flags;
+        self.bootstrap_enhancers(flags);
+        self.push_ui_state();
+        // 命令行 --edit 与新建文件都要求首屏直接进入编辑，只有页面就绪后这条脚本才可靠
+        let enter_edit = self
+            .session
+            .active()
+            .map(|tab| tab.edit_on_open && !tab.missing)
+            .unwrap_or(false);
+        if enter_edit {
+            if let Some(tab) = self.session.active_mut() {
+                tab.edit_on_open = false;
+            }
+            self.eval("if(window.__mdPreviewerEnterEdit)window.__mdPreviewerEnterEdit();");
+        }
+        if let Some(started) = self.bench_started {
+            eprintln!("[bench] +{}ms ready", started.elapsed().as_millis());
+            *control_flow = ControlFlow::Exit;
+        }
+    }
+
+    fn handle_ipc(&mut self, message: IpcMessage, control_flow: &mut ControlFlow) {
+        match message {
+            IpcMessage::NewFile => self.new_file(),
+            IpcMessage::OpenFile => self.open_file(),
+            IpcMessage::OpenRecent(index) => {
+                let Some(path) = self.recent.get(index).cloned() else {
+                    return;
+                };
+                if path.exists() {
+                    self.open_paths(vec![path], false);
+                } else if self.recent.forget(&path) {
+                    self.on_recent_changed();
+                }
+            }
+            IpcMessage::OpenDoc(path) => {
+                if path.is_file() && is_supported_document(&path) {
+                    self.open_checked_paths(vec![path], false);
+                } else if self.recent.forget(&path) {
+                    // 侧栏里点到已经不存在的历史条目，顺手把它从最近列表剔掉
+                    self.on_recent_changed();
+                }
+            }
+            IpcMessage::ForgetRecent(path) => {
+                if self.recent.forget(&path) {
+                    self.on_recent_changed();
+                }
+            }
+            IpcMessage::ClearRecent => {
+                if self.recent.clear() {
+                    self.on_recent_changed();
+                }
+            }
+            IpcMessage::RevealPath(path) => {
+                if path.exists() {
+                    reveal_in_file_manager(&path);
+                } else if self.recent.forget(&path) {
+                    // 历史条目对应的文件已经不在了，定位不到就直接从列表剔掉
+                    self.on_recent_changed();
+                }
+            }
+            IpcMessage::OpenLocalLink(url) => {
+                if let Some(path) = local_document_path_from_url(&url) {
+                    self.open_checked_paths(vec![path], false);
+                }
+            }
+            IpcMessage::TabAction {
+                action,
+                id,
+                content,
+            } => {
+                if let Some(content) = content {
+                    if !self.save_active_content(&content) {
+                        return;
+                    }
+                }
+                match action {
+                    TabAction::Activate => self.activate_tab(id),
+                    TabAction::Close => self.close_tab(id),
+                    TabAction::CloseOthers => self.close_others(id),
+                }
+            }
+            IpcMessage::SetSetting { key, value } => {
+                // 只有取值真的变了才落盘和重绘，重复点同一项不做事
+                if self.settings.apply(&key, &value) {
+                    self.on_settings_changed();
+                }
+            }
+            IpcMessage::LocateTab(id) => self.locate_tab(id),
+            IpcMessage::RevealTab(id) => self.reveal_tab(id),
+            IpcMessage::RenderPreview(content) => self.render_preview(&content),
+            IpcMessage::RenderReleaseNotes(markdown) => {
+                // 发布说明不属于任何标签页，不走 document_to_html，也不解析本地图片路径
+                self.eval(&format!(
+                    "if(window.__setUpdateNotes)window.__setUpdateNotes('{}');",
+                    escape_js(&md_to_html(&markdown))
+                ));
+            }
+            IpcMessage::ConvertEncoding { encoding, content } => {
+                self.convert_encoding(encoding, &content)
+            }
+            IpcMessage::SaveAs(content) => self.save_as(&content),
+            IpcMessage::Save(content) => {
+                if self.save_active_content(&content) && self.pending_window_close {
+                    self.exit(control_flow);
+                }
+            }
+            IpcMessage::SaveSkipped => {
+                if self.pending_window_close {
+                    self.exit(control_flow);
+                }
+            }
+            IpcMessage::DirtyChanged(dirty) => {
+                if self.session.set_active_dirty(dirty) {
+                    self.refresh_tabs();
+                }
+            }
+            IpcMessage::ExternalChangeResolved { dirty } => self.on_external_change_resolved(dirty),
+            IpcMessage::Print => {
+                if let Err(error) = self.webview.print() {
+                    eprintln!("Could not print: {error}");
+                }
+            }
+            IpcMessage::Ready => self.on_ready(control_flow),
+            IpcMessage::Refresh => self.refresh_active(),
+            IpcMessage::SetEncoding(encoding) => self.set_encoding(encoding),
+            IpcMessage::SelfUpdate(download_url) => {
+                #[cfg(target_os = "windows")]
+                {
+                    if let Err(err) = windows_updater::apply_update(&download_url) {
+                        eprintln!("[update error] {err}");
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    if let Err(error) = open::that(&download_url) {
+                        eprintln!("Could not open {download_url}: {error}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_user_event(&mut self, event: UserEvent, control_flow: &mut ControlFlow) {
+        match event {
+            UserEvent::Ipc(body) => {
+                if let Some(message) = parse_ipc_message(&body) {
+                    self.handle_ipc(message, control_flow);
+                }
+            }
+            UserEvent::NewFile => self.new_file(),
+            UserEvent::OpenFile => self.open_file(),
+            UserEvent::OpenPaths(paths, edit_on_open) => self.open_paths(paths, edit_on_open),
+            UserEvent::CloseActiveTab => {
+                if self.session.active_id.is_some() {
+                    self.eval(
+                        "if(window.__mdPreviewerCloseActiveTab)window.__mdPreviewerCloseActiveTab();",
+                    );
+                } else {
+                    self.exit(control_flow);
+                }
+            }
+            UserEvent::FileChanged(path) => self.on_file_changed(path),
+            UserEvent::ToggleEdit => {
+                self.eval("if(window.__mdPreviewerToggleEdit)window.__mdPreviewerToggleEdit();");
+            }
+            UserEvent::ShowFind => {
+                self.eval("if(window.__mdPreviewerShowFind)window.__mdPreviewerShowFind();");
+            }
+            UserEvent::Print => {
+                if let Err(error) = self.webview.print() {
+                    eprintln!("Could not print: {error}");
+                }
+            }
+            UserEvent::SetTheme(choice) => {
+                save_theme_choice(choice);
+                self.window.set_theme(choice.tao_theme());
+            }
+            UserEvent::OpenUrl(url) => {
+                if let Err(error) = open::that(url) {
+                    eprintln!("Could not open {url}: {error}");
+                }
+            }
+            UserEvent::Quit => self.request_close(control_flow),
+        }
+    }
+
+    // macOS: Finder file opens and embedded Finder Sync actions arrive here.
+    fn handle_opened_urls(&mut self, urls: Vec<url::Url>) {
+        let mut paths = Vec::new();
+        for url in urls {
+            if let Ok(path) = url.to_file_path() {
+                if is_supported_document(&path) {
+                    paths.push(path);
+                }
+                continue;
+            }
+            let Some(action) = parse_finder_action(url.as_str()) else {
+                continue;
+            };
+            match action {
+                FinderAction::Create { folder, kind } => match create_finder_file(&folder, &kind) {
+                    Ok(path) if kind == "md" => self.open_paths(vec![path], true),
+                    Ok(_) => {}
+                    Err(error) => show_warning_dialog("Could Not Create File", &error.to_string()),
+                },
+                FinderAction::Terminal { folder } => {
+                    if !open_terminal(&folder) {
+                        show_warning_dialog("Could Not Open Terminal", &folder.to_string_lossy());
+                    }
+                }
+            }
+        }
+        if !paths.is_empty() {
+            self.open_checked_paths(paths, false);
+        }
+    }
+
+    fn handle(&mut self, event: TaoEvent<'_, UserEvent>, control_flow: &mut ControlFlow) {
+        match event {
+            TaoEvent::UserEvent(event) => self.handle_user_event(event, control_flow),
+            TaoEvent::Opened { urls } => self.handle_opened_urls(urls),
+            TaoEvent::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => self.request_close(control_flow),
+            _ => {}
+        }
+    }
 }
 
 fn main() {
@@ -6659,7 +7922,6 @@ fn main() {
     let lang = detect_lang();
     let strings = Strings::for_lang(lang);
     let settings = Settings::load(&settings_path());
-    SESSION_ENABLED.store(settings.keeps_session(), Ordering::SeqCst);
     let instance = match single_instance::prepare(
         &config_dir(),
         &cli_paths,
@@ -6673,14 +7935,14 @@ fn main() {
     register_finder_extension();
     bench_log("after_register");
 
-    let mut initial_session = if settings.keeps_session() {
+    let mut session = if settings.keeps_session() {
         DocumentSession::load(&session_path())
     } else {
         DocumentSession::default()
     };
-    initial_session.single_tab = settings.tab_mode == TabMode::Single;
+    session.single_tab = settings.tab_mode == TabMode::Single;
     for path in cli_paths {
-        initial_session.open(path, edit_from_cli);
+        session.open(path, edit_from_cli);
     }
 
     let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build();
@@ -6689,7 +7951,7 @@ fn main() {
     let initial_theme = load_theme_choice();
     install_macos_menu(proxy.clone(), initial_theme);
 
-    let title = initial_session
+    let title = session
         .active()
         .and_then(|tab| tab.path.file_name())
         .map(|name| format!("{} — MD Previewer", name.to_string_lossy()))
@@ -6711,25 +7973,22 @@ fn main() {
         .build(&event_loop)
         .expect("failed to build window");
     bench_log("window_built");
-    let recent_files: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(load_recent_files()));
+    let mut recent = RecentFiles::load(recent_files_path());
 
     let mut initial_flags = EnhanceFlags::default();
-    // 首屏文档的原文：页面是用 with_html 一次成型的，不经过 __setContent，
-    // 作者模式要的标题/正文只能在 webview 建好后单独推一次
-    let mut initial_raw = String::new();
-    let initial_page = match initial_session.active().cloned() {
+    let mut initial_author = None;
+    let initial_page = match session.active().cloned() {
         Some(tab) => match read_document_with_encoding(&tab.path, tab.encoding.as_deref()) {
             Ok((raw, resolved_encoding)) => {
-                if let Some(active) = initial_session.active_mut() {
+                if let Some(active) = session.active_mut() {
                     if active.encoding.is_none() {
                         active.encoding = Some(resolved_encoding.to_string());
                     }
                 }
-                remember_recent_file(&recent_files, &tab.path);
-                initial_raw = raw.clone();
+                recent.remember(&tab.path);
                 let (html_body, doc_flags, base_href) = document_to_html(&tab.path, &raw);
                 initial_flags = doc_flags;
-                build_page_with_encoding(
+                let page = build_page_with_encoding(
                     &html_body,
                     &raw,
                     base_href.as_deref(),
@@ -6737,10 +7996,12 @@ fn main() {
                     &strings,
                     false,
                     resolved_encoding,
-                )
+                );
+                initial_author = Some((tab.id, raw));
+                page
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if let Some(active) = initial_session.active_mut() {
+                if let Some(active) = session.active_mut() {
                     active.missing = true;
                 }
                 build_page(
@@ -6767,7 +8028,7 @@ fn main() {
             ),
         },
         None => build_page(
-            &empty_preview_html(&strings, &recent_files.lock().unwrap()),
+            &empty_preview_html(&strings, recent.paths()),
             "",
             None,
             EnhanceFlags::default(),
@@ -6776,24 +8037,18 @@ fn main() {
         ),
     };
 
-    persist_session(&initial_session);
-    let document_session = Arc::new(Mutex::new(initial_session));
-    let settings = Arc::new(Mutex::new(settings));
-    let enhance_flags: Arc<Mutex<EnhanceFlags>> = Arc::new(Mutex::new(initial_flags));
-    let last_self_write: Arc<Mutex<Option<SelfWriteRecord>>> = Arc::new(Mutex::new(None));
-    let session_for_ipc = Arc::clone(&document_session);
-    let settings_for_ipc = Arc::clone(&settings);
-    let recent_files_for_ipc = Arc::clone(&recent_files);
-    let last_self_write_for_ipc = Arc::clone(&last_self_write);
-    let proxy_for_ipc = proxy.clone();
-
     // Windows: steer WebView2's cache/cookie tree into %LOCALAPPDATA% instead of
     // letting it drop next to the exe. Other platforms: use default (None).
     let data_dir: Option<PathBuf> = {
         #[cfg(target_os = "windows")]
         {
             let d = config_dir().join("WebView2");
-            let _ = fs::create_dir_all(&d);
+            if let Err(error) = fs::create_dir_all(&d) {
+                eprintln!(
+                    "Could not create WebView2 data dir {}: {error}",
+                    d.display()
+                );
+            }
             Some(d)
         }
         #[cfg(not(target_os = "windows"))]
@@ -6804,6 +8059,8 @@ fn main() {
     let mut web_context = wry::WebContext::new(data_dir);
 
     let proxy_for_navigation = proxy.clone();
+    let proxy_for_ipc = proxy.clone();
+    let proxy_for_drop = proxy.clone();
     let builder = WebViewBuilder::with_web_context(&mut web_context)
         .with_html(&initial_page)
         .with_navigation_handler(move |url: String| {
@@ -6813,217 +8070,28 @@ fn main() {
                 || url.starts_with("https://")
                 || url.starts_with("mailto:")
             {
-                let _ = open::that(&url);
+                if let Err(error) = open::that(&url) {
+                    eprintln!("Could not open {url}: {error}");
+                }
                 false
             } else if let Some(path) = local_document_path_from_url(&url) {
                 let _ = proxy_for_navigation.send_event(UserEvent::OpenPaths(vec![path], false));
                 false
-            } else if url.starts_with("file:") {
+            } else if url.starts_with("file:") || is_script_bearing_url(&url) {
+                // data:/blob:/javascript: 导航会离开当前文档并在同一 WebView 里执行内容，一律拦下
                 false
             } else {
                 true
             }
         })
         .with_ipc_handler(move |msg| {
-            let body = msg.body();
-            if body == "new-file" {
-                let _ = proxy_for_ipc.send_event(UserEvent::NewFile);
-            } else if body == "open" {
-                let _ = proxy_for_ipc.send_event(UserEvent::OpenFile);
-            } else if let Some(index) = body.strip_prefix("open-recent:") {
-                if let Ok(index) = index.parse::<usize>() {
-                    let path = recent_files_for_ipc.lock().unwrap().get(index).cloned();
-                    if let Some(path) = path {
-                        if path.exists() {
-                            let _ =
-                                proxy_for_ipc.send_event(UserEvent::OpenPaths(vec![path], false));
-                        } else if forget_recent_file(&recent_files_for_ipc, &path) {
-                            let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
-                        }
-                    }
-                }
-            } else if let Some(raw) = body.strip_prefix("open-doc:") {
-                let path = PathBuf::from(raw);
-                if path.is_file() && is_supported_document(&path) {
-                    let _ = proxy_for_ipc.send_event(UserEvent::OpenPaths(vec![path], false));
-                } else if forget_recent_file(&recent_files_for_ipc, &path) {
-                    // 侧栏里点到已经不存在的历史条目，顺手把它从最近列表剔掉
-                    let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
-                }
-            } else if let Some(raw) = body.strip_prefix("forget-recent:") {
-                if forget_recent_file(&recent_files_for_ipc, &PathBuf::from(raw)) {
-                    let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
-                }
-            } else if body == "clear-recent" {
-                if clear_recent_files(&recent_files_for_ipc) {
-                    let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
-                }
-            } else if let Some(raw) = body.strip_prefix("reveal-path:") {
-                let path = PathBuf::from(raw);
-                if path.exists() {
-                    reveal_in_file_manager(&path);
-                } else if forget_recent_file(&recent_files_for_ipc, &path) {
-                    // 历史条目对应的文件已经不在了，定位不到就直接从列表剔掉
-                    let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
-                }
-            } else if let Some(url) = body.strip_prefix("open-local-link:") {
-                if let Some(path) = local_document_path_from_url(url) {
-                    let _ = proxy_for_ipc.send_event(UserEvent::OpenPaths(vec![path], false));
-                }
-            } else if let Some(rest) = body.strip_prefix("tab-action:") {
-                let (header, pending_content) = rest
-                    .split_once('\n')
-                    .map(|(header, content)| (header, Some(content)))
-                    .unwrap_or((rest, None));
-                let mut parts = header.splitn(2, ':');
-                let action = parts.next().unwrap_or("");
-                let id = parts.next().and_then(|value| value.parse::<u64>().ok());
-                let Some(id) = id else {
-                    return;
-                };
-                if let Some(content) = pending_content {
-                    let active_info = session_for_ipc
-                        .lock()
-                        .unwrap()
-                        .active()
-                        .map(|tab| (tab.path.clone(), tab.encoding.clone()));
-                    let Some((path, encoding)) = active_info else {
-                        return;
-                    };
-                    match save_document_text(
-                        &last_self_write_for_ipc,
-                        &path,
-                        content,
-                        encoding.as_deref(),
-                    ) {
-                        Ok(()) => {
-                            let _ = proxy_for_ipc.send_event(UserEvent::FileSaved(path));
-                        }
-                        Err(error) => {
-                            let _ = proxy_for_ipc.send_event(UserEvent::SaveFailed(format!(
-                                "{}: {error}",
-                                path.display()
-                            )));
-                            return;
-                        }
-                    }
-                }
-                match action {
-                    "activate" => {
-                        let _ = proxy_for_ipc.send_event(UserEvent::ActivateTab(id));
-                    }
-                    "close" => {
-                        let _ = proxy_for_ipc.send_event(UserEvent::CloseTab(id));
-                    }
-                    "close-others" => {
-                        let _ = proxy_for_ipc.send_event(UserEvent::CloseOthers(id));
-                    }
-                    _ => {}
-                }
-            } else if let Some(change) = body.strip_prefix("set-setting:") {
-                let Some((key, value)) = change.split_once('=') else {
-                    return;
-                };
-                // 只有取值真的变了才唤醒事件循环，避免重复点同一项也走一遍落盘和重绘
-                if settings_for_ipc.lock().unwrap().apply(key, value) {
-                    let _ = proxy_for_ipc.send_event(UserEvent::SettingsChanged);
-                }
-            } else if let Some(id) = body.strip_prefix("locate-tab:") {
-                if let Ok(id) = id.parse::<u64>() {
-                    let _ = proxy_for_ipc.send_event(UserEvent::LocateTab(id));
-                }
-            } else if let Some(id) = body.strip_prefix("reveal-tab:") {
-                if let Ok(id) = id.parse::<u64>() {
-                    let _ = proxy_for_ipc.send_event(UserEvent::RevealTab(id));
-                }
-            } else if let Some(content) = body.strip_prefix("render-preview:") {
-                let _ = proxy_for_ipc.send_event(UserEvent::RenderPreview(content.to_string()));
-            } else if let Some(markdown) = body.strip_prefix("render-release-notes:") {
-                let _ =
-                    proxy_for_ipc.send_event(UserEvent::RenderReleaseNotes(markdown.to_string()));
-            } else if let Some(rest) = body.strip_prefix("convert-encoding:") {
-                if let Some((encoding, content)) = rest.split_once('\n') {
-                    let _ = proxy_for_ipc.send_event(UserEvent::ConvertEncoding {
-                        encoding: encoding.to_string(),
-                        content: content.to_string(),
-                    });
-                }
-            } else if let Some(content) = body.strip_prefix("save-as\n") {
-                let _ = proxy_for_ipc.send_event(UserEvent::SaveAs(content.to_string()));
-            } else if body == "dirty:1" {
-                let _ = proxy_for_ipc.send_event(UserEvent::DirtyChanged(true));
-            } else if body == "dirty:0" {
-                let _ = proxy_for_ipc.send_event(UserEvent::DirtyChanged(false));
-            } else if body == "external-change:dirty" {
-                let _ = proxy_for_ipc.send_event(UserEvent::ExternalChangeResolved(true));
-            } else if body == "external-change:clean" {
-                let _ = proxy_for_ipc.send_event(UserEvent::ExternalChangeResolved(false));
-            } else if body == "print" {
-                let _ = proxy_for_ipc.send_event(UserEvent::Print);
-            } else if body == "ready" {
-                let _ = proxy_for_ipc.send_event(UserEvent::Ready);
-            } else if body == "refresh" {
-                if let Some(path) = session_for_ipc
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|tab| tab.path.clone())
-                {
-                    let _ = proxy_for_ipc.send_event(UserEvent::FileChanged(path));
-                }
-            } else if let Some(content) = body.strip_prefix("save:") {
-                let active_info = session_for_ipc
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|tab| (tab.path.clone(), tab.encoding.clone()));
-                if let Some((path, encoding)) = active_info {
-                    match save_document_text(
-                        &last_self_write_for_ipc,
-                        &path,
-                        content,
-                        encoding.as_deref(),
-                    ) {
-                        Ok(()) => {
-                            let _ = proxy_for_ipc.send_event(UserEvent::FileSaved(path));
-                        }
-                        Err(error) => {
-                            let _ = proxy_for_ipc.send_event(UserEvent::SaveFailed(format!(
-                                "{}: {error}",
-                                path.display()
-                            )));
-                        }
-                    }
-                }
-            } else if let Some(enc) = body.strip_prefix("set-encoding:") {
-                let _ = proxy_for_ipc.send_event(UserEvent::SetEncoding(enc.to_string()));
-            } else if let Some(download_url) = body.strip_prefix("self-update:") {
-                #[cfg(target_os = "windows")]
-                {
-                    if let Err(err) = windows_updater::apply_update(download_url) {
-                        eprintln!("[update error] {err}");
-                    }
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let _ = open::that(download_url);
-                }
-            }
+            let _ = proxy_for_ipc.send_event(UserEvent::Ipc(msg.body().to_string()));
         })
-        .with_drag_drop_handler({
-            let proxy = proxy.clone();
-            move |event| {
-                if let wry::DragDropEvent::Drop { paths, .. } = event {
-                    let paths = paths
-                        .into_iter()
-                        .filter(|path| is_supported_document(path))
-                        .collect::<Vec<_>>();
-                    if !paths.is_empty() {
-                        let _ = proxy.send_event(UserEvent::OpenPaths(paths, false));
-                    }
-                }
-                true
+        .with_drag_drop_handler(move |event| {
+            if let wry::DragDropEvent::Drop { paths, .. } = event {
+                let _ = proxy_for_drop.send_event(UserEvent::OpenPaths(paths, false));
             }
+            true
         });
 
     #[cfg(target_os = "linux")]
@@ -7039,39 +8107,6 @@ fn main() {
     #[cfg(not(target_os = "linux"))]
     let webview = builder.build(&window).expect("failed to build webview");
     bench_log("webview_built");
-    let session_for_event = Arc::clone(&document_session);
-    let settings_for_event = Arc::clone(&settings);
-    update_tabs(&webview, &session_for_event.lock().unwrap());
-    update_settings_ui(&webview, &settings_for_event.lock().unwrap());
-    let initial_is_plain_text = session_for_event
-        .lock()
-        .unwrap()
-        .active()
-        .map(|tab| !is_markdown_document(&tab.path))
-        .unwrap_or(false);
-    if initial_is_plain_text {
-        update_author_doc(&webview, "");
-    } else {
-        update_author_doc(&webview, &initial_raw);
-    }
-    update_sidebar(
-        &webview,
-        &session_for_event.lock().unwrap(),
-        &recent_files.lock().unwrap(),
-    );
-    if session_for_event
-        .lock()
-        .unwrap()
-        .active()
-        .map(|tab| tab.edit_on_open && !tab.missing)
-        .unwrap_or(false)
-    {
-        let _ = webview
-            .evaluate_script("if(window.__mdPreviewerEnterEdit)window.__mdPreviewerEnterEdit();");
-        if let Some(tab) = session_for_event.lock().unwrap().active_mut() {
-            tab.edit_on_open = false;
-        }
-    }
 
     // hljs + extra language packs aren't part of first-paint HTML anymore.
     // We push them in via evaluate_script the moment the webview tells us
@@ -7083,652 +8118,33 @@ fn main() {
         hljs_extra = HLJS_EXTRA_LANGS,
     );
 
-    // File watcher state
-    let watcher_holder: Arc<Mutex<Option<notify::RecommendedWatcher>>> = Arc::new(Mutex::new(None));
-    let watcher_for_event = Arc::clone(&watcher_holder);
-    let initial_watch_path = session_for_event
-        .lock()
-        .unwrap()
-        .active()
-        .map(|tab| tab.path.clone());
-    install_file_watcher(
-        &watcher_holder,
-        &proxy,
-        &last_self_write,
-        initial_watch_path,
-    );
-
-    let mut loaded_enhancers = EnhanceFlags::default();
-    let mut pending_window_close = false;
-    let mut warned_external_change: Option<PathBuf> = None;
-    let mut pending_external_change: Option<PathBuf> = None;
-    let mut sidebar_open_applied = settings_for_event.lock().unwrap().sidebar_open;
+    let sidebar_open_applied = settings.sidebar_open;
+    let mut app = App {
+        webview,
+        window,
+        proxy,
+        strings,
+        settings,
+        session,
+        recent,
+        enhance_flags: initial_flags,
+        loaded_enhancers: EnhanceFlags::default(),
+        watcher: None,
+        last_self_write: Arc::new(Mutex::new(None)),
+        hljs_bootstrap,
+        initial_author,
+        pending_window_close: false,
+        warned_external_change: None,
+        pending_external_change: None,
+        sidebar_open_applied,
+        bench_started: bench.then_some(t0),
+    };
+    app.persist_session();
+    app.push_ui_state();
+    app.install_watcher();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-
-        match event {
-            TaoEvent::UserEvent(UserEvent::NewFile) => {
-                if session_for_event
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|tab| tab.dirty)
-                    .unwrap_or(false)
-                {
-                    let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewerNewFile)window.__mdPreviewerNewFile();",
-                    );
-                    return;
-                }
-                let current_dir = session_for_event
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .and_then(|tab| tab.path.parent().map(Path::to_path_buf));
-                let mut dialog = rfd::FileDialog::new()
-                    .add_filter("Markdown", MARKDOWN_EXTENSIONS)
-                    .set_file_name(strings.new_filename);
-                if let Some(current_dir) = current_dir {
-                    dialog = dialog.set_directory(current_dir);
-                }
-                if let Some(path) = dialog.save_file() {
-                    let path = normalize_new_markdown_path(path);
-                    match fs::write(&path, "") {
-                        Ok(()) => {
-                            let _ = proxy.send_event(UserEvent::OpenPaths(vec![path], true));
-                        }
-                        Err(error) => {
-                            show_warning_dialog("Could Not Create File", &error.to_string());
-                        }
-                    }
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::OpenFile) => {
-                if session_for_event
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|tab| tab.dirty)
-                    .unwrap_or(false)
-                {
-                    let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewerOpenFile)window.__mdPreviewerOpenFile();",
-                    );
-                    return;
-                }
-                let supported = supported_dialog_extensions();
-                if let Some(paths) = rfd::FileDialog::new()
-                    .add_filter("Supported Documents", supported.as_slice())
-                    .add_filter("Markdown", MARKDOWN_EXTENSIONS)
-                    .add_filter("Text", TEXT_EXTENSIONS)
-                    .add_filter("All Files", &["*"])
-                    .pick_files()
-                {
-                    let _ = proxy.send_event(UserEvent::OpenPaths(paths, false));
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::OpenPaths(paths, edit_on_open)) => {
-                window.set_minimized(false);
-                window.set_visible(true);
-                window.set_focus();
-                if paths.is_empty() {
-                    return;
-                }
-                let mut session = session_for_event.lock().unwrap();
-                let previous_active = session.active_id;
-                let preserve_active = session.active().map(|tab| tab.dirty).unwrap_or(false);
-                for path in paths.into_iter().filter(|path| is_supported_document(path)) {
-                    session.open(path, edit_on_open);
-                }
-                if preserve_active {
-                    if let Some(id) = previous_active {
-                        session.activate(id);
-                    }
-                }
-                persist_session(&session);
-                if preserve_active {
-                    update_tabs(&webview, &session);
-                } else {
-                    render_active_document(
-                        &webview,
-                        &window,
-                        &mut session,
-                        &recent_files,
-                        &enhance_flags,
-                        &mut loaded_enhancers,
-                        &strings,
-                    );
-                }
-                let path = session.active().map(|tab| tab.path.clone());
-                drop(session);
-                install_file_watcher(&watcher_for_event, &proxy, &last_self_write, path);
-            }
-            TaoEvent::UserEvent(UserEvent::ActivateTab(id)) => {
-                let mut session = session_for_event.lock().unwrap();
-                if session.activate(id) {
-                    persist_session(&session);
-                    render_active_document(
-                        &webview,
-                        &window,
-                        &mut session,
-                        &recent_files,
-                        &enhance_flags,
-                        &mut loaded_enhancers,
-                        &strings,
-                    );
-                    let path = session.active().map(|tab| tab.path.clone());
-                    drop(session);
-                    install_file_watcher(&watcher_for_event, &proxy, &last_self_write, path);
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::CloseTab(id)) => {
-                let mut session = session_for_event.lock().unwrap();
-                let was_active = session.active_id == Some(id);
-                if session.close(id) {
-                    persist_session(&session);
-                    if was_active {
-                        render_active_document(
-                            &webview,
-                            &window,
-                            &mut session,
-                            &recent_files,
-                            &enhance_flags,
-                            &mut loaded_enhancers,
-                            &strings,
-                        );
-                        let path = session.active().map(|tab| tab.path.clone());
-                        drop(session);
-                        install_file_watcher(&watcher_for_event, &proxy, &last_self_write, path);
-                    } else {
-                        update_tabs(&webview, &session);
-                    }
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::CloseOthers(id)) => {
-                let mut session = session_for_event.lock().unwrap();
-                let was_active = session.active_id == Some(id);
-                if session.close_others(id) {
-                    persist_session(&session);
-                    if !was_active {
-                        render_active_document(
-                            &webview,
-                            &window,
-                            &mut session,
-                            &recent_files,
-                            &enhance_flags,
-                            &mut loaded_enhancers,
-                            &strings,
-                        );
-                        let path = session.active().map(|tab| tab.path.clone());
-                        drop(session);
-                        install_file_watcher(&watcher_for_event, &proxy, &last_self_write, path);
-                    } else {
-                        update_tabs(&webview, &session);
-                    }
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::RevealTab(id)) => {
-                let path = session_for_event
-                    .lock()
-                    .unwrap()
-                    .tabs
-                    .iter()
-                    .find(|t| t.id == id)
-                    .map(|t| t.path.clone());
-                if let Some(path) = path {
-                    reveal_in_file_manager(&path);
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::RenderPreview(content)) => {
-                let path = session_for_event
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|t| t.path.clone());
-                if let Some(path) = path {
-                    let (html, flags, _) = document_to_html(&path, &content);
-                    let _ = webview.evaluate_script(&format!(
-                        "if(window.__setLivePreview)window.__setLivePreview('{}', {}, {});",
-                        escape_js(&html),
-                        flags.math,
-                        flags.mermaid
-                    ));
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::RenderReleaseNotes(markdown)) => {
-                // 发布说明不属于任何标签页，不走 document_to_html，也不解析本地图片路径
-                let _ = webview.evaluate_script(&format!(
-                    "if(window.__setUpdateNotes)window.__setUpdateNotes('{}');",
-                    escape_js(&md_to_html(&markdown))
-                ));
-            }
-            TaoEvent::UserEvent(UserEvent::CloseActiveTab) => {
-                if session_for_event.lock().unwrap().active_id.is_some() {
-                    let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewerCloseActiveTab)window.__mdPreviewerCloseActiveTab();",
-                    );
-                } else {
-                    save_window_geom(&window);
-                    *control_flow = ControlFlow::Exit;
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::LocateTab(id)) => {
-                let supported = supported_dialog_extensions();
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Supported Documents", supported.as_slice())
-                    .add_filter("Markdown", MARKDOWN_EXTENSIONS)
-                    .add_filter("Text", TEXT_EXTENSIONS)
-                    .add_filter("All Files", &["*"])
-                    .pick_file()
-                {
-                    let mut session = session_for_event.lock().unwrap();
-                    if session.relocate(id, path) && session.activate(id) {
-                        persist_session(&session);
-                        render_active_document(
-                            &webview,
-                            &window,
-                            &mut session,
-                            &recent_files,
-                            &enhance_flags,
-                            &mut loaded_enhancers,
-                            &strings,
-                        );
-                        let path = session.active().map(|tab| tab.path.clone());
-                        drop(session);
-                        install_file_watcher(&watcher_for_event, &proxy, &last_self_write, path);
-                    } else {
-                        show_warning_dialog("Already Open", "That file is already open in another tab.");
-                    }
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::FileChanged(path)) => {
-                if session_for_event
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|tab| tab.path.as_path())
-                    == Some(path.as_path())
-                {
-                    pending_external_change = Some(path);
-                    let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewerResolveExternalChange)window.__mdPreviewerResolveExternalChange();",
-                    );
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::ExternalChangeResolved(webview_dirty)) => {
-                let Some(path) = pending_external_change.take() else {
-                    return;
-                };
-                let mut session = session_for_event.lock().unwrap();
-                if session.active().map(|tab| tab.path.as_path()) == Some(path.as_path()) {
-                    let session_dirty = session.active().map(|tab| tab.dirty).unwrap_or(false);
-                    if should_protect_external_change(webview_dirty, session_dirty) {
-                        if let Some(tab) = session.active_mut() {
-                            tab.dirty = true;
-                        }
-                        APP_DIRTY.store(true, Ordering::SeqCst);
-                        let _ = webview.evaluate_script(
-                            "if(window.__mdPreviewerPauseAutosave)window.__mdPreviewerPauseAutosave();",
-                        );
-                        if warned_external_change.as_ref() != Some(&path) {
-                            show_warning_dialog(
-                                "File Changed on Disk",
-                                "Automatic saving is paused and your edits are still in the editor. Press Cmd/Ctrl+S to replace the disk version, or reopen the file to keep the external version.",
-                            );
-                            warned_external_change = Some(path);
-                        }
-                        return;
-                    }
-                    render_active_document(
-                        &webview,
-                        &window,
-                        &mut session,
-                        &recent_files,
-                        &enhance_flags,
-                        &mut loaded_enhancers,
-                        &strings,
-                    );
-                    persist_session(&session);
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::SetEncoding(enc)) => {
-                let mut session = session_for_event.lock().unwrap();
-                if let Some(tab) = session.active_mut() {
-                    tab.encoding = Some(enc);
-                    tab.dirty = false;
-                }
-                render_active_document(
-                    &webview,
-                    &window,
-                    &mut session,
-                    &recent_files,
-                    &enhance_flags,
-                    &mut loaded_enhancers,
-                    &strings,
-                );
-                persist_session(&session);
-            }
-            TaoEvent::UserEvent(UserEvent::ConvertEncoding { encoding, content }) => {
-                let path = session_for_event
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|tab| tab.path.clone());
-                let Some(path) = path else {
-                    return;
-                };
-                let encoded = match encode_document(&content, &encoding) {
-                    Ok(encoded) => encoded,
-                    Err(message) => {
-                        show_warning_dialog(strings.convert_failed_title, &message);
-                        return;
-                    }
-                };
-                if !confirm_lossy_conversion(&strings, &encoding, encoded.lossy_chars) {
-                    return;
-                }
-                if let Err(error) = write_document_bytes(&last_self_write, &path, encoded.bytes) {
-                    show_warning_dialog(
-                        strings.convert_failed_title,
-                        &format!("{}: {error}", path.display()),
-                    );
-                    return;
-                }
-                let mut session = session_for_event.lock().unwrap();
-                if let Some(tab) = session.active_mut() {
-                    tab.encoding = Some(encoding);
-                    tab.dirty = false;
-                    tab.missing = false;
-                }
-                APP_DIRTY.store(false, Ordering::SeqCst);
-                persist_session(&session);
-                // 先清前端脏标记，再按新编码从磁盘重读，编辑器才会显示磁盘实际内容（有损时可见 ?）
-                let _ = webview.evaluate_script("if(window.__markSaved)window.__markSaved();");
-                render_active_document(
-                    &webview,
-                    &window,
-                    &mut session,
-                    &recent_files,
-                    &enhance_flags,
-                    &mut loaded_enhancers,
-                    &strings,
-                );
-            }
-            TaoEvent::UserEvent(UserEvent::SaveAs(content)) => {
-                let active_info = session_for_event
-                    .lock()
-                    .unwrap()
-                    .active()
-                    .map(|tab| (tab.id, tab.path.clone(), tab.encoding.clone()));
-                let Some((id, current_path, encoding)) = active_info else {
-                    return;
-                };
-                let mut dialog = rfd::FileDialog::new()
-                    .set_title(strings.save_as_dialog_title)
-                    .add_filter("Markdown", MARKDOWN_EXTENSIONS)
-                    .add_filter("Text", TEXT_EXTENSIONS)
-                    .add_filter("All Files", &["*"]);
-                if let Some(dir) = current_path
-                    .parent()
-                    .filter(|dir| !dir.as_os_str().is_empty())
-                {
-                    dialog = dialog.set_directory(dir);
-                }
-                if let Some(name) = current_path.file_name().and_then(|name| name.to_str()) {
-                    dialog = dialog.set_file_name(name);
-                }
-                let Some(target) = dialog.save_file() else {
-                    return;
-                };
-                let target = save_as_target_path(target, &current_path);
-                if session_for_event
-                    .lock()
-                    .unwrap()
-                    .is_open_in_other_tab(id, &target)
-                {
-                    show_warning_dialog(strings.save_as_failed_title, strings.save_as_already_open);
-                    return;
-                }
-                let encoding = encoding.unwrap_or_else(|| "UTF-8".to_string());
-                let encoded = match encode_document(&content, &encoding) {
-                    Ok(encoded) => encoded,
-                    Err(message) => {
-                        show_warning_dialog(strings.save_as_failed_title, &message);
-                        return;
-                    }
-                };
-                if !confirm_lossy_conversion(&strings, &encoding, encoded.lossy_chars) {
-                    return;
-                }
-                if let Err(error) = write_document_bytes(&last_self_write, &target, encoded.bytes) {
-                    show_warning_dialog(
-                        strings.save_as_failed_title,
-                        &format!("{}: {error}", target.display()),
-                    );
-                    return;
-                }
-                let mut session = session_for_event.lock().unwrap();
-                // 目标已排除其他标签占用，relocate 只会因标签不存在而失败
-                if session.relocate(id, target) {
-                    if let Some(tab) = session.get_mut(id) {
-                        tab.dirty = false;
-                        tab.missing = false;
-                    }
-                }
-                APP_DIRTY.store(false, Ordering::SeqCst);
-                persist_session(&session);
-                let _ = webview.evaluate_script("if(window.__markSaved)window.__markSaved();");
-                render_active_document(
-                    &webview,
-                    &window,
-                    &mut session,
-                    &recent_files,
-                    &enhance_flags,
-                    &mut loaded_enhancers,
-                    &strings,
-                );
-                let path = session.active().map(|tab| tab.path.clone());
-                drop(session);
-                install_file_watcher(&watcher_for_event, &proxy, &last_self_write, path);
-            }
-            TaoEvent::UserEvent(UserEvent::FileSaved(path)) => {
-                if warned_external_change.as_ref() == Some(&path) {
-                    warned_external_change = None;
-                }
-                let mut session = session_for_event.lock().unwrap();
-                let active_matches = session.active().map(|tab| tab.path.as_path()) == Some(path.as_path());
-                if let Some(tab) = session.tabs.iter_mut().find(|tab| tab.path == path) {
-                    tab.dirty = false;
-                    tab.missing = false;
-                }
-                APP_DIRTY.store(false, Ordering::SeqCst);
-                if active_matches {
-                    let enc = session.active().and_then(|t| t.encoding.clone());
-                    if let Ok((raw, _)) = read_document_with_encoding(&path, enc.as_deref()) {
-                        let is_plain_text = !is_markdown_document(&path);
-                        let (html, flags, _) = document_to_html(&path, &raw);
-                        *enhance_flags.lock().unwrap() = flags;
-                        let _ = webview.evaluate_script(&format!(
-                            "if(window.__setPreview)window.__setPreview('{}', {}, {});if(window.__markSaved)window.__markSaved('{}');",
-                            escape_js(&html),
-                            flags.math,
-                            flags.mermaid,
-                            escape_js(&raw)
-                        ));
-                        if is_plain_text {
-                            update_author_doc(&webview, "");
-                        } else {
-                            update_author_doc(&webview, &raw);
-                        }
-                        for script in build_enhancer_bootstrap(flags, loaded_enhancers) {
-                            let _ = webview.evaluate_script(&script);
-                        }
-                        loaded_enhancers.math |= flags.math;
-                        loaded_enhancers.mermaid |= flags.mermaid;
-                    }
-                }
-                persist_session(&session);
-                update_tabs(&webview, &session);
-                update_window_title(&window, &session);
-                if pending_window_close {
-                    save_window_geom(&window);
-                    *control_flow = ControlFlow::Exit;
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::SaveFailed(error)) => {
-                pending_window_close = false;
-                show_warning_dialog("Could Not Save", &error);
-            }
-            TaoEvent::UserEvent(UserEvent::DirtyChanged(dirty)) => {
-                APP_DIRTY.store(dirty, Ordering::SeqCst);
-                let mut session = session_for_event.lock().unwrap();
-                if let Some(tab) = session.active_mut() {
-                    tab.dirty = dirty;
-                }
-                update_tabs(&webview, &session);
-                update_window_title(&window, &session);
-            }
-            TaoEvent::UserEvent(UserEvent::ToggleEdit) => {
-                let _ = webview.evaluate_script(
-                    "if(window.__mdPreviewerToggleEdit)window.__mdPreviewerToggleEdit();",
-                );
-            }
-            TaoEvent::UserEvent(UserEvent::ShowFind) => {
-                let _ = webview
-                    .evaluate_script("if(window.__mdPreviewerShowFind)window.__mdPreviewerShowFind();");
-            }
-            TaoEvent::UserEvent(UserEvent::RecentChanged) => {
-                let session = session_for_event.lock().unwrap();
-                // 空白启动页上列着最近文件，只有没有活动文档时才需要重画它；
-                // 有文档打开时重画会把正文整个换成空白页
-                if session.active().is_none() {
-                    let html = empty_preview_html(&strings, &recent_files.lock().unwrap());
-                    let js = format!(
-                        "if(window.__setEmptyPreview)window.__setEmptyPreview('{}');",
-                        escape_js(&html)
-                    );
-                    let _ = webview.evaluate_script(&js);
-                }
-                update_sidebar(&webview, &session, &recent_files.lock().unwrap());
-            }
-            TaoEvent::UserEvent(UserEvent::Print) => {
-                let _ = webview.print();
-            }
-            TaoEvent::UserEvent(UserEvent::Quit) => {
-                if APP_DIRTY.load(Ordering::SeqCst) && !pending_window_close {
-                    pending_window_close = true;
-                    let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewerSave)window.__mdPreviewerSave();",
-                    );
-                } else if !pending_window_close {
-                    save_window_geom(&window);
-                    persist_session(&session_for_event.lock().unwrap());
-                    *control_flow = ControlFlow::Exit;
-                }
-            }
-            TaoEvent::UserEvent(UserEvent::SettingsChanged) => {
-                let current = *settings_for_event.lock().unwrap();
-                if current.sidebar_open != sidebar_open_applied {
-                    resize_for_sidebar(&window, current.sidebar_open);
-                    sidebar_open_applied = current.sidebar_open;
-                }
-                SESSION_ENABLED.store(current.keeps_session(), Ordering::SeqCst);
-                if let Err(error) = current.save(&settings_path()) {
-                    eprintln!("Could not save settings: {error}");
-                }
-                let mut session = session_for_event.lock().unwrap();
-                session.single_tab = current.tab_mode == TabMode::Single;
-                if session.single_tab {
-                    session.collapse_to_active();
-                }
-                if current.keeps_session() {
-                    persist_session(&session);
-                } else {
-                    // 留着旧会话文件会在下次启动又把老标签拉回来，正是这个设置要避免的
-                    let _ = fs::remove_file(session_path());
-                }
-                update_tabs(&webview, &session);
-                drop(session);
-                update_settings_ui(&webview, &current);
-            }
-            TaoEvent::UserEvent(UserEvent::SetTheme(choice)) => {
-                save_theme_choice(choice);
-                window.set_theme(choice.tao_theme());
-            }
-            TaoEvent::UserEvent(UserEvent::OpenUrl(url)) => {
-                let _ = open::that(url);
-            }
-            TaoEvent::UserEvent(UserEvent::Ready) => {
-                // First paint is on the screen; now push hljs into the page
-                // (kept out of first-paint HTML to keep it slim). Always do
-                // this, even in bench mode, so subsequent panes would still
-                // highlight — bench just exits right after measuring.
-                let _ = webview.evaluate_script(&hljs_bootstrap);
-                let flags = *enhance_flags.lock().unwrap();
-                for js in build_enhancer_bootstrap(flags, loaded_enhancers) {
-                    let _ = webview.evaluate_script(&js);
-                }
-                loaded_enhancers.math |= flags.math;
-                loaded_enhancers.mermaid |= flags.mermaid;
-                update_tabs(&webview, &session_for_event.lock().unwrap());
-                update_sidebar(
-                    &webview,
-                    &session_for_event.lock().unwrap(),
-                    &recent_files.lock().unwrap(),
-                );
-                if bench {
-                    eprintln!("[bench] +{}ms ready", t0.elapsed().as_millis());
-                    *control_flow = ControlFlow::Exit;
-                }
-            }
-            // macOS: Finder file opens and embedded Finder Sync actions arrive here.
-            TaoEvent::Opened { urls } => {
-                let mut paths = Vec::new();
-                for url in urls {
-                    if let Ok(path) = url.to_file_path() {
-                        if is_supported_document(&path) {
-                            paths.push(path);
-                        }
-                        continue;
-                    }
-                    if let Some(action) = parse_finder_action(url.as_str()) {
-                        match action {
-                            FinderAction::Create { folder, kind } => match create_finder_file(&folder, &kind) {
-                                Ok(path) if kind == "md" => {
-                                    let _ = proxy.send_event(UserEvent::OpenPaths(vec![path], true));
-                                }
-                                Ok(_) => {}
-                                Err(error) => show_warning_dialog("Could Not Create File", &error.to_string()),
-                            },
-                            FinderAction::Terminal { folder } => {
-                                if !open_terminal(&folder) {
-                                    show_warning_dialog("Could Not Open Terminal", &folder.to_string_lossy());
-                                }
-                            }
-                        }
-                    }
-                }
-                if !paths.is_empty() {
-                    let _ = proxy.send_event(UserEvent::OpenPaths(paths, false));
-                }
-            }
-            TaoEvent::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                if APP_DIRTY.load(Ordering::SeqCst) && !pending_window_close {
-                    pending_window_close = true;
-                    let _ = webview.evaluate_script(
-                        "if(window.__mdPreviewerSave)window.__mdPreviewerSave();",
-                    );
-                } else if !pending_window_close {
-                    save_window_geom(&window);
-                    persist_session(&session_for_event.lock().unwrap());
-                    *control_flow = ControlFlow::Exit;
-                }
-            }
-            _ => {}
-        }
+        app.handle(event, control_flow);
     });
 }

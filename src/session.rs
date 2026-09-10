@@ -43,6 +43,11 @@ impl DocumentSession {
 
         let mut session = Self::default();
         for path in saved.tabs {
+            // 手改或损坏的会话文件里可能出现空串、相对路径或目录，
+            // 这些经 normalize_path 会落到当前工作目录上，变成一个永远打不开的标签
+            if !path.is_absolute() || path.is_dir() {
+                continue;
+            }
             session.open(path, false);
         }
         session.active_id = saved
@@ -63,7 +68,9 @@ impl DocumentSession {
         }
 
         if self.single_tab {
-            self.tabs.clear();
+            // 单标签模式只留新打开的这个；活动标签有未保存内容时先留着，
+            // 页面切换过去时会把正文回写磁盘，随后由 collapse_to_active 收敛
+            self.tabs.retain(|tab| tab.dirty);
         }
 
         self.next_id += 1;
@@ -140,10 +147,7 @@ impl DocumentSession {
         let body = serde_json::to_vec_pretty(&saved).map_err(io::Error::other)?;
         let temporary = path.with_extension("json.tmp");
         fs::write(&temporary, body)?;
-        #[cfg(target_os = "windows")]
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
+        // std 的 rename 在各平台都会覆盖已有文件，不需要先删旧文件，否则删和改名之间崩溃会丢会话
         fs::rename(temporary, path)
     }
 
@@ -167,6 +171,8 @@ impl DocumentSession {
         self.tabs.iter().any(|tab| tab.id != id && tab.path == path)
     }
 
+    /// 把标签指向另一个文件。编码是按原文件探测出来的，换了文件必须重新探测，
+    /// 否则 GBK 覆盖会把新文件的 UTF-8 内容解成乱码；另存为需要沿用编码时由调用方再设回
     pub fn relocate(&mut self, id: u64, path: PathBuf) -> bool {
         if self.is_open_in_other_tab(id, &path) {
             return false;
@@ -176,6 +182,30 @@ impl DocumentSession {
         };
         tab.path = normalize_path(path);
         tab.missing = !tab.path.exists();
+        tab.encoding = None;
+        true
+    }
+
+    /// 某个路径已经写回磁盘：清掉对应标签的脏标记和缺失标记
+    pub fn mark_saved(&mut self, path: &Path) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.path == path) else {
+            return false;
+        };
+        tab.dirty = false;
+        tab.missing = false;
+        true
+    }
+
+    pub fn active_is_dirty(&self) -> bool {
+        self.active().map(|tab| tab.dirty).unwrap_or(false)
+    }
+
+    /// 页面上报的脏状态只对活动标签有意义；没有活动标签时丢弃，避免关窗保护卡在“待保存”
+    pub fn set_active_dirty(&mut self, dirty: bool) -> bool {
+        let Some(tab) = self.active_mut() else {
+            return false;
+        };
+        tab.dirty = dirty;
         true
     }
 }
@@ -282,6 +312,80 @@ mod tests {
         assert_eq!(session.tabs[0].path, normalize_path(second));
         assert_eq!(session.active_id, Some(id));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn single_tab_mode_keeps_a_dirty_active_tab_until_it_is_collapsed() {
+        let dir = temp_dir("single-tab-dirty");
+        let first = dir.join("first.md");
+        let second = dir.join("second.md");
+        fs::write(&first, "# first").unwrap();
+        fs::write(&second, "# second").unwrap();
+        let mut session = DocumentSession {
+            single_tab: true,
+            ..DocumentSession::default()
+        };
+        let first_id = session.open(first, false);
+        assert!(session.set_active_dirty(true));
+
+        let second_id = session.open(second, false);
+        // 脏标签不能被顶掉，否则页面里的未保存正文会写进新文件
+        assert_eq!(session.tabs.len(), 2);
+        assert!(session.activate(first_id));
+        assert_eq!(session.active_id, Some(first_id));
+
+        session.mark_saved(&session.tabs[0].path.clone());
+        assert!(session.activate(second_id));
+        session.collapse_to_active();
+        assert_eq!(session.tabs.len(), 1);
+        assert_eq!(session.tabs[0].id, second_id);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn relocate_resets_the_detected_encoding() {
+        let dir = temp_dir("relocate-encoding");
+        let original = dir.join("original.md");
+        let replacement = dir.join("replacement.md");
+        fs::write(&original, "# a").unwrap();
+        fs::write(&replacement, "# b").unwrap();
+        let mut session = DocumentSession::default();
+        let id = session.open(original, false);
+        session.get_mut(id).unwrap().encoding = Some("GBK".to_string());
+
+        assert!(session.relocate(id, replacement.clone()));
+        let tab = session.get_mut(id).unwrap();
+        assert_eq!(tab.path, normalize_path(replacement));
+        assert_eq!(tab.encoding, None);
+        assert!(!tab.missing);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_skips_relative_paths_and_directories() {
+        let dir = temp_dir("load-invalid");
+        let state_path = dir.join("session.json");
+        let valid = dir.join("valid.md");
+        fs::write(&valid, "# valid").unwrap();
+        let body = serde_json::json!({
+            "version": 1,
+            "active": 0,
+            "tabs": ["", "relative.md", dir.to_string_lossy(), valid.to_string_lossy()],
+        });
+        fs::write(&state_path, body.to_string()).unwrap();
+
+        let restored = DocumentSession::load(&state_path);
+        assert_eq!(restored.tabs.len(), 1);
+        assert_eq!(restored.tabs[0].path, normalize_path(valid));
+        assert_eq!(restored.active_id, Some(restored.tabs[0].id));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn set_active_dirty_is_ignored_without_an_active_tab() {
+        let mut session = DocumentSession::default();
+        assert!(!session.set_active_dirty(true));
+        assert!(!session.active_is_dirty());
     }
 
     #[test]

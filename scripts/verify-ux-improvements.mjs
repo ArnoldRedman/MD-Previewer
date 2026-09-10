@@ -33,6 +33,8 @@ const desktopScript = mainRs
   .replaceAll('}}', '}')
   .replaceAll('{btn_edit}', 'Edit')
   .replaceAll('{btn_preview}', 'Preview')
+  .replaceAll('{btn_edit_js}', 'Edit')
+  .replaceAll('{btn_preview_js}', 'Preview')
   .replaceAll('{btn_split}', 'Split View')
   .replaceAll('{code_copy_js}', 'Copy')
   .replaceAll('{code_copied_js}', 'Copied')
@@ -315,7 +317,8 @@ if (dividerStyle.borderRightWidth < 1 || dividerStyle.borderRightStyle !== 'soli
   throw new Error(`Expected solid border-right divider on #editor, got: ${JSON.stringify(dividerStyle)}`);
 }
 
-// Verify Live Preview update
+// Verify Live Preview update: 页面必须先发出 render-preview 请求，迟到或无请求的回包会被丢弃
+await page.waitForFunction(() => window.ipcMessages.some((m) => m.startsWith('render-preview:')), null, { timeout: 2000 });
 await page.evaluate(() => {
   window.__setLivePreview('<h1>Updated Content</h1>', false, false);
 });
@@ -471,5 +474,82 @@ if (!(await recentMenu.evaluate((el) => el.style.display === 'none'))) {
   throw new Error('Recent context menu must not open for folder items');
 }
 
+console.log('Verifying 9: Overlay and document state machine...');
+// 退出编辑并回到预览态
+await page.evaluate(() => { if (document.body.classList.contains('editing')) window.__mdPreviewerToggleEdit(); });
+await page.evaluate(() => { document.body.classList.remove('split-view'); });
+
+// Escape 统一关闭设置弹层
+await page.click('#btn-settings');
+if (!(await page.evaluate(() => document.getElementById('settings-control').classList.contains('open')))) {
+  throw new Error('Settings popover should open on click');
+}
+await page.keyboard.press('Escape');
+if (await page.evaluate(() => document.getElementById('settings-control').classList.contains('open'))) {
+  throw new Error('Escape should close the settings popover');
+}
+
+// 右键菜单打开时点击工具栏按钮也要收起菜单（按钮不再 stopPropagation）
+await page.evaluate(() => {
+  window.__setTabs([{ id: 5, name: 'five.md', path: '/p/five.md', active: true, missing: false, dirty: false }]);
+});
+await page.locator('.tab[data-tab-id="5"]').click({ button: 'right' });
+if (await page.locator('#tab-context-menu').evaluate((el) => el.style.display === 'none')) {
+  throw new Error('Tab context menu did not open');
+}
+await page.click('#btn-zoom');
+if (!(await page.locator('#tab-context-menu').evaluate((el) => el.style.display === 'none'))) {
+  throw new Error('Clicking a toolbar button should close the open context menu');
+}
+await page.keyboard.press('Escape');
+
+// 正文里伪造的 data-tab-id 不能触发标签动作
+await page.evaluate(() => {
+  document.getElementById('preview').insertAdjacentHTML('beforeend', '<div id="forged" data-tab-id="99" data-close-tab="99">forged</div>');
+  window.ipcMessages = [];
+});
+await page.click('#forged');
+const forgedMsgs = await page.evaluate(() => window.ipcMessages.filter((m) => m.startsWith('tab-action:')));
+if (forgedMsgs.length) throw new Error(`Forged preview markup triggered tab actions: ${forgedMsgs}`);
+
+// 搜索状态进入编辑时清掉，Escape 一次即可退出编辑
+await page.evaluate(() => { document.getElementById('find-input').value = 'Section'; window.__mdPreviewerShowFind(); });
+if (!(await page.evaluate(() => document.body.classList.contains('finding')))) throw new Error('showFind should mark body.finding');
+await page.evaluate(() => window.__mdPreviewerEnterEdit());
+if (await page.evaluate(() => document.body.classList.contains('finding'))) throw new Error('enterEdit should clear the find state');
+await page.keyboard.press('Escape');
+if (await page.evaluate(() => document.body.classList.contains('editing'))) throw new Error('A single Escape should leave edit mode');
+
+// __setPreview 后搜索命中重建
+await page.evaluate(() => {
+  window.__setPreview('<h1 id="s1">Alpha</h1><p>Alpha beta</p>', false, false);
+  window.__mdPreviewerShowFind();
+});
+await page.fill('#find-input', 'alpha');
+await page.waitForFunction(() => document.getElementById('find-state').textContent === '1/2', null, { timeout: 2000 });
+await page.evaluate(() => { window.__setPreview('<p>alpha</p>', false, false); });
+const findStateAfter = await page.locator('#find-state').textContent();
+if (findStateAfter !== '1/1') throw new Error(`Find hits should be rebuilt after __setPreview, got '${findStateAfter}'`);
+if ((await page.locator('#preview mark.search-hit').count()) !== 1) throw new Error('Rebuilt find hits should be marked in the new preview');
+await page.keyboard.press('Escape');
+
+// 空白页不能进入编辑；关窗保存请求在无脏内容时回 save-skipped
+await page.evaluate(() => { window.__setEmptyPreview('<div class="empty">empty</div>'); window.ipcMessages = []; });
+await page.evaluate(() => window.__mdPreviewerEnterEdit());
+if (await page.evaluate(() => document.body.classList.contains('editing'))) throw new Error('Empty state must not enter edit mode');
+await page.evaluate(() => window.__mdPreviewerSave());
+const saveMsg = await page.evaluate(() => window.ipcMessages[window.ipcMessages.length - 1]);
+if (saveMsg !== 'save-skipped') throw new Error(`Expected 'save-skipped' when nothing is dirty, got '${saveMsg}'`);
+
+// 没有在途请求时的实时渲染回包被丢弃
+await page.evaluate(() => {
+  window.__setContent('<p>doc</p>', 'doc', '', false, false);
+  window.__mdPreviewerEnterEdit();
+  document.body.classList.add('split-view');
+  window.__setLivePreview('<p>stale</p>', false, false);
+});
+const staleApplied = await page.evaluate(() => document.getElementById('preview').innerHTML.includes('stale'));
+if (staleApplied) throw new Error('Live preview without an in-flight request must be ignored');
+
 await browser.close();
-console.log('[ux-improvements-verify] ALL 8 CHECKS PASSED');
+console.log('[ux-improvements-verify] ALL 9 CHECKS PASSED');

@@ -27,10 +27,10 @@ if (!mainRs.includes('windows_updater::apply_update')) {
   throw new Error('Expected windows_updater::apply_update in main.rs');
 }
 // 发布说明必须经 Rust 侧 Markdown 渲染器回填，而不是当纯文本显示
-if (!mainRs.includes('body.strip_prefix("render-release-notes:")')) {
+if (!mainRs.includes('"render-release-notes" => IpcMessage::RenderReleaseNotes')) {
   throw new Error('Expected render-release-notes IPC handler in main.rs');
 }
-if (!mainRs.includes('UserEvent::RenderReleaseNotes(markdown)) =>')) {
+if (!mainRs.includes('IpcMessage::RenderReleaseNotes(markdown) =>')) {
   throw new Error('Expected RenderReleaseNotes event handler in main.rs');
 }
 if (!mainRs.includes("window.__setUpdateNotes('{}')")) {
@@ -60,6 +60,8 @@ let desktopScript = mainRs
   .replaceAll('{update_downloading_js}', 'Downloading...')
   .replaceAll('{btn_edit}', 'Edit')
   .replaceAll('{btn_preview}', 'Preview')
+  .replaceAll('{btn_edit_js}', 'Edit')
+  .replaceAll('{btn_preview_js}', 'Preview')
   .replaceAll('{btn_split}', 'Split View')
   .replaceAll('{code_copy_js}', 'Copy')
   .replaceAll('{code_copied_js}', 'Copied')

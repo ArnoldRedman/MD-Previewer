@@ -11,7 +11,8 @@ const mainRs = await readFile(resolve(root, 'src/main.rs'), 'utf8');
 
 // 静态检查：转码与另存为的消息必须由 Rust 侧接住
 for (const marker of [
-  'body.strip_prefix("convert-encoding:")',
+  '"convert-encoding" => {',
+  'IpcMessage::ConvertEncoding { encoding, content } =>',
   'body.strip_prefix("save-as\\n")',
   'data-convert-encoding="UTF-8 BOM"',
   'id="btn-save-as"',
@@ -32,6 +33,8 @@ const desktopScript = mainRs
   .replaceAll('}}', '}')
   .replaceAll('{btn_edit}', 'Edit')
   .replaceAll('{btn_preview}', 'Preview')
+  .replaceAll('{btn_edit_js}', 'Edit')
+  .replaceAll('{btn_preview_js}', 'Preview')
   .replaceAll('{btn_split}', 'Split View')
   .replaceAll('{code_copy_js}', 'Copy')
   .replaceAll('{code_copied_js}', 'Copied')

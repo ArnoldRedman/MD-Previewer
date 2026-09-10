@@ -89,11 +89,18 @@ mod platform {
                     return Startup::Primary(Server::disabled(config_dir));
                 }
                 allow_primary_to_focus(&lock_path);
-                if write_request(&request_dir, paths, edit) {
-                    Startup::Forwarded
-                } else {
-                    Startup::Primary(Server::disabled(config_dir))
+                if !write_request(&request_dir, paths, edit) {
+                    return Startup::Primary(Server::disabled(config_dir));
                 }
+                // 主实例可能刚好在这一瞬间退出：请求写完后锁若已经能拿到，说明没人会处理它，
+                // 自己升级为主实例，监听线程启动时会把刚写的请求当作首批任务处理
+                if let Ok(lock) = acquire_lock(&lock_path) {
+                    return Startup::Primary(Server {
+                        lock: Some(lock),
+                        request_dir,
+                    });
+                }
+                Startup::Forwarded
             }
             Err(_) => Startup::Primary(Server::disabled(config_dir)),
         }

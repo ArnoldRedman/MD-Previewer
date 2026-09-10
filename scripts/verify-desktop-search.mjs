@@ -22,6 +22,8 @@ const desktopScript = mainRs
   // 主 IIFE 里的 Rust 字符串占位符，测试页给空值即可
   .replaceAll('{btn_edit}', 'Edit')
   .replaceAll('{btn_preview}', 'Preview')
+  .replaceAll('{btn_edit_js}', 'Edit')
+  .replaceAll('{btn_preview_js}', 'Preview')
   .replaceAll('{sidebar_empty_js}', 'empty')
   .replaceAll('{stat_words_js}', '字')
   .replaceAll('{stat_chars_js}', '字符')
