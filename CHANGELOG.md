@@ -2,6 +2,22 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.4.0
+
+- Support opening any file extension as plain text:
+  - Any non-binary text file (source code, JSON, YAML, configs, logs, arbitrary extensions) can now be opened directly.
+  - Automatic 8 KB binary sniffing prevents accidental opening of binary files (PE executables, libraries, archives, media).
+  - Open File dialog filters updated with "Supported Documents", "Markdown", "Text", and "All Files (*)".
+- In-place document encoding conversion and Save As:
+  - Encoding popover now offers two distinct groups: "重新以指定编码打开" (Reopen With) and "转换为指定编码" (Convert To).
+  - Supports converting between UTF-8, UTF-8 BOM, GBK / ANSI, UTF-16 LE, and UTF-16 BE in-place.
+  - Added character loss safety warning dialog when converting text with characters unrepresentable in GBK.
+  - Added "另存为" (Save As) via `Ctrl+Shift+S` / `Cmd+Shift+S` and encoding popover entry, preserving tab state and resolving conflicting open tabs.
+  - Full UTF-8 BOM detection and preservation on save.
+- In-app update notes Markdown rendering:
+  - Update release notes are now rendered via the native Markdown renderer with full styling (headings, lists, code blocks, blockquotes, links).
+  - Heading IDs are automatically sanitized to prevent anchor conflicts with the main document table of contents.
+
 ## 1.3.1
 
 - Release build for automated update channel deployment:
