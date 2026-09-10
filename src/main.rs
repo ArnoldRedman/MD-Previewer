@@ -9,7 +9,7 @@ mod single_instance;
 
 use notify::{Event, RecursiveMode, Watcher};
 use pulldown_cmark::{html, CowStr, Event as MdEvent, Options, Parser, Tag, TagEnd};
-use session::DocumentSession;
+use session::{strip_verbatim_prefix, DocumentSession};
 use settings::{OpenMode, Settings, TabMode};
 use std::collections::HashMap;
 use std::fs;
@@ -205,6 +205,8 @@ struct Strings {
     tab_menu_close_others: &'static str,
     tab_menu_copy_path: &'static str,
     tab_menu_reveal: &'static str,
+    recent_menu_remove: &'static str,
+    recent_clear_all: &'static str,
     encoding_title: &'static str,
     encoding_reopen_group: &'static str,
     encoding_convert_group: &'static str,
@@ -287,6 +289,8 @@ impl Strings {
                 tab_menu_close_others: "关闭其他标签",
                 tab_menu_copy_path: "复制路径",
                 tab_menu_reveal: "在文件管理器中显示",
+                recent_menu_remove: "从历史中移除",
+                recent_clear_all: "清空打开历史",
                 encoding_title: "编码格式",
                 encoding_reopen_group: "以此编码重新打开",
                 encoding_convert_group: "转换为",
@@ -365,6 +369,8 @@ impl Strings {
                 tab_menu_close_others: "Close Others",
                 tab_menu_copy_path: "Copy Path",
                 tab_menu_reveal: "Reveal in File Manager",
+                recent_menu_remove: "Remove from Recent",
+                recent_clear_all: "Clear Recent Files",
                 encoding_title: "Encoding",
                 encoding_reopen_group: "Reopen with encoding",
                 encoding_convert_group: "Convert to",
@@ -1294,7 +1300,8 @@ fn load_recent_files() -> Vec<PathBuf> {
     };
     let mut files = Vec::new();
     for line in txt.lines() {
-        let path = PathBuf::from(line);
+        // 旧版本写入的是 `\\?\` 前缀路径，读回来时统一还原，否则同一文件会以两种写法各占一条
+        let path = strip_verbatim_prefix(PathBuf::from(line));
         if line.is_empty() || !path.exists() || files.iter().any(|p| p == &path) {
             continue;
         }
@@ -1333,6 +1340,16 @@ fn forget_recent_file(files: &Arc<Mutex<Vec<PathBuf>>>, path: &Path) -> bool {
     if recent.len() == original_len {
         return false;
     }
+    save_recent_files(&recent);
+    true
+}
+
+fn clear_recent_files(files: &Arc<Mutex<Vec<PathBuf>>>) -> bool {
+    let mut recent = files.lock().unwrap();
+    if recent.is_empty() {
+        return false;
+    }
+    recent.clear();
     save_recent_files(&recent);
     true
 }
@@ -2453,6 +2470,18 @@ body.empty .toolbar {{ display: none !important; }}
 	  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 	}}
 	.sidebar-empty {{ padding: 10px 8px; font-size: 12px; color: #999; }}
+	.sidebar-footer {{ padding: 8px; border-top: 1px solid #e6e6e6; }}
+	.sidebar-clear {{
+	  display: block; width: 100%; height: 28px; cursor: pointer;
+	  border: 1px solid #dcdcdc; border-radius: 6px; background: #fff;
+	  font: inherit; font-size: 12px; color: #666;
+	}}
+	.sidebar-clear:hover {{ background: #fff2f2; border-color: #e5a3a3; color: #c0392b; }}
+	.sidebar-tooltip {{
+	  position: fixed; z-index: 1100; max-width: 420px; padding: 6px 8px; pointer-events: none;
+	  border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #333;
+	  box-shadow: 0 6px 18px rgba(140,149,159,.2); font-size: 12px; line-height: 1.4; word-break: break-all;
+	}}
 	.author-actions {{ display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; }}
 	.author-body-actions {{ display: flex; justify-content: flex-end; margin: -2px 0 12px; }}
 	.author-copy {{
@@ -2615,6 +2644,10 @@ body.empty .toolbar {{ display: none !important; }}
 	  .sidebar-item.active .sidebar-name {{ color: #9dc0ff; }}
 	  .sidebar-dir {{ color: #777; }}
 	  .sidebar-empty {{ color: #777; }}
+	  .sidebar-footer {{ border-top-color: #333; }}
+	  .sidebar-clear {{ background: #2c2c2c; border-color: #444; color: #bbb; }}
+	  .sidebar-clear:hover {{ background: #3a2626; border-color: #7a3b3b; color: #ff7b72; }}
+	  .sidebar-tooltip {{ background: #1f1f1f; border-color: #444; color: #ddd; box-shadow: 0 6px 18px rgba(0,0,0,.5); }}
 	  .settings-help {{ border-color: #555; color: #999; }}
 	  .settings-help:hover {{ border-color: #6cb6ff; color: #6cb6ff; }}
 	  .author-copy {{ background: #262626; border-color: #444; color: #bbb; }}
@@ -2745,6 +2778,7 @@ body.editing .findbar {{ display: none !important; }}
 	    <button type="button" data-sidebar-section="outline" aria-pressed="false">{sidebar_outline}</button>
 	  </div>
 	  <div class="sidebar-list" id="sidebar-list"></div>
+	  <div class="sidebar-footer" id="sidebar-footer" style="display:none;"><button type="button" class="sidebar-clear" id="sidebar-clear-recent">{recent_clear_all}</button></div>
 	</aside>
 	<div id="topbar">
 	<div class="toolbar sidebar-toggle">
@@ -2822,6 +2856,13 @@ body.editing .findbar {{ display: none !important; }}
 	  <button type="button" class="context-menu-item" data-tab-action="copy-path">{tab_menu_copy_path}</button>
 	  <button type="button" class="context-menu-item" data-tab-action="reveal">{tab_menu_reveal}</button>
 	</div>
+	<div id="recent-context-menu" class="context-menu" style="display:none;" role="menu">
+	  <button type="button" class="context-menu-item" data-recent-action="reveal">{tab_menu_reveal}</button>
+	  <button type="button" class="context-menu-item" data-recent-action="copy-path">{tab_menu_copy_path}</button>
+	  <div class="context-menu-sep"></div>
+	  <button type="button" class="context-menu-item" data-recent-action="remove">{recent_menu_remove}</button>
+	</div>
+	<div id="sidebar-tooltip" class="sidebar-tooltip" style="display:none;" role="tooltip"></div>
 	<div id="lightbox" class="lightbox" style="display:none;" role="dialog" aria-modal="true">
 	  <div class="lightbox-backdrop"></div>
 	  <div class="lightbox-toolbar">
@@ -2898,6 +2939,12 @@ body.editing .findbar {{ display: none !important; }}
 	  var btnSidebar = document.getElementById('btn-sidebar');
 	  var sidebarEl = document.getElementById('sidebar');
 	  var sidebarList = document.getElementById('sidebar-list');
+	  var sidebarFooter = document.getElementById('sidebar-footer');
+	  var sidebarClearRecent = document.getElementById('sidebar-clear-recent');
+	  var sidebarTooltip = document.getElementById('sidebar-tooltip');
+	  var sidebarTooltipTimer = 0;
+	  var recentContextMenu = document.getElementById('recent-context-menu');
+	  var recentContextPath = '';
 	  var sidebarData = {{ folder: [], recent: [] }};
 	  var sidebarSection = 'folder';
 	  var SIDEBAR_EMPTY = '{sidebar_empty_js}';
@@ -3323,6 +3370,9 @@ body.editing .findbar {{ display: none !important; }}
 	    if (tabContextMenu && tabContextMenu.style.display !== 'none' && !tabContextMenu.contains(e.target)) {{
 	      hideTabContextMenu();
 	    }}
+	    if (recentContextMenu && recentContextMenu.style.display !== 'none' && !recentContextMenu.contains(e.target)) {{
+	      hideRecentContextMenu();
+	    }}
 	    var closeTab = e.target && e.target.closest ? e.target.closest('[data-close-tab]') : null;
 	    if (closeTab) {{
 	      e.preventDefault();
@@ -3423,6 +3473,10 @@ body.editing .findbar {{ display: none !important; }}
 	      sections[s].setAttribute('aria-pressed', sections[s].getAttribute('data-sidebar-section') === sidebarSection ? 'true' : 'false');
 	    }}
 	    sidebarList.textContent = '';
+	    hideSidebarTooltip();
+	    // 清空按钮只在最近打开分区且有记录时出现，空列表没有可清的内容
+	    var hasRecent = sidebarSection === 'recent' && (sidebarData.recent || []).length > 0;
+	    if (sidebarFooter) sidebarFooter.style.display = hasRecent ? 'block' : 'none';
 	    if (sidebarSection === 'outline') {{
 	      var preview = document.getElementById('preview');
 	      var headings = preview ? preview.querySelectorAll('h1, h2, h3, h4, h5, h6') : [];
@@ -3469,7 +3523,6 @@ body.editing .findbar {{ display: none !important; }}
 	      btn.type = 'button';
 	      btn.className = 'sidebar-item' + (item.active ? ' active' : '');
 	      btn.setAttribute('data-sidebar-path', item.path);
-	      btn.title = item.path;
 	      var name = document.createElement('span');
 	      name.className = 'sidebar-name';
 	      name.textContent = item.name;
@@ -3539,6 +3592,90 @@ body.editing .findbar {{ display: none !important; }}
 	    if (item) window.ipc.postMessage('open-doc:' + item.getAttribute('data-sidebar-path'));
 	  }});
 	  renderSidebar();
+	  // 完整路径用自定义悬浮框展示：侧栏条目只放得下文件名和目录名，原生 title 样式不可控且长路径会被截断
+	  function showSidebarTooltip(item) {{
+	    if (!sidebarTooltip) return;
+	    var rect = item.getBoundingClientRect();
+	    sidebarTooltip.textContent = item.getAttribute('data-sidebar-path');
+	    sidebarTooltip.style.display = 'block';
+	    var width = sidebarTooltip.offsetWidth || 200;
+	    var height = sidebarTooltip.offsetHeight || 40;
+	    var left = Math.min(rect.right + 8, window.innerWidth - width - 8);
+	    var top = Math.min(rect.top, window.innerHeight - height - 8);
+	    sidebarTooltip.style.left = Math.max(8, left) + 'px';
+	    sidebarTooltip.style.top = Math.max(8, top) + 'px';
+	  }}
+	  function hideSidebarTooltip() {{
+	    if (sidebarTooltipTimer) {{
+	      clearTimeout(sidebarTooltipTimer);
+	      sidebarTooltipTimer = 0;
+	    }}
+	    if (sidebarTooltip) sidebarTooltip.style.display = 'none';
+	  }}
+	  sidebarList.addEventListener('mouseover', function(e) {{
+	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
+	    if (!item) return;
+	    // 在同一条目内部的子元素之间移动不算重新进入
+	    if (e.relatedTarget && item.contains(e.relatedTarget)) return;
+	    hideSidebarTooltip();
+	    sidebarTooltipTimer = setTimeout(function() {{
+	      sidebarTooltipTimer = 0;
+	      showSidebarTooltip(item);
+	    }}, 300);
+	  }});
+	  sidebarList.addEventListener('mouseout', function(e) {{
+	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
+	    if (!item) return;
+	    if (e.relatedTarget && item.contains(e.relatedTarget)) return;
+	    hideSidebarTooltip();
+	  }});
+	  sidebarList.addEventListener('scroll', hideSidebarTooltip, {{ passive: true }});
+	  function showRecentContextMenu(path, x, y) {{
+	    if (!recentContextMenu) return;
+	    hideSidebarTooltip();
+	    hideTabContextMenu();
+	    recentContextPath = path;
+	    recentContextMenu.style.display = 'block';
+	    var menuWidth = recentContextMenu.offsetWidth || 160;
+	    var menuHeight = recentContextMenu.offsetHeight || 110;
+	    recentContextMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8)) + 'px';
+	    recentContextMenu.style.top = Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8)) + 'px';
+	  }}
+	  function hideRecentContextMenu() {{
+	    if (recentContextMenu) recentContextMenu.style.display = 'none';
+	    recentContextPath = '';
+	  }}
+	  sidebarList.addEventListener('contextmenu', function(e) {{
+	    // 右键菜单只针对最近打开的历史条目，当前文件夹列表没有移除语义
+	    if (sidebarSection !== 'recent') return;
+	    var item = e.target && e.target.closest ? e.target.closest('[data-sidebar-path]') : null;
+	    if (!item) return;
+	    e.preventDefault();
+	    e.stopPropagation();
+	    showRecentContextMenu(item.getAttribute('data-sidebar-path'), e.clientX, e.clientY);
+	  }});
+	  if (recentContextMenu) {{
+	    recentContextMenu.addEventListener('click', function(e) {{
+	      var item = e.target && e.target.closest ? e.target.closest('[data-recent-action]') : null;
+	      if (!item) return;
+	      var action = item.getAttribute('data-recent-action');
+	      var path = recentContextPath;
+	      hideRecentContextMenu();
+	      if (!path) return;
+	      if (action === 'reveal') {{
+	        window.ipc.postMessage('reveal-path:' + path);
+	      }} else if (action === 'copy-path') {{
+	        copyText(path);
+	      }} else if (action === 'remove') {{
+	        window.ipc.postMessage('forget-recent:' + path);
+	      }}
+	    }});
+	  }}
+	  if (sidebarClearRecent) {{
+	    sidebarClearRecent.addEventListener('click', function() {{
+	      window.ipc.postMessage('clear-recent');
+	    }});
+	  }}
 	  var authorDoc = {{ titleLine: '', title: '' }};
 	  var authorMode = false;
 	  var AUTHOR_LABELS = {{
@@ -3915,6 +4052,7 @@ body.editing .findbar {{ display: none !important; }}
 	    if (e.key === 'Escape' && encodingPopover && encodingPopover.style.display !== 'none') {{ encodingPopover.style.display = 'none'; return; }}
 	    if (e.key === 'Escape' && lightbox && lightbox.style.display !== 'none') {{ closeLightbox(); return; }}
 	    if (e.key === 'Escape' && tabContextMenu && tabContextMenu.style.display !== 'none') {{ hideTabContextMenu(); return; }}
+	    if (e.key === 'Escape' && recentContextMenu && recentContextMenu.style.display !== 'none') {{ hideRecentContextMenu(); return; }}
 	    if (e.key === 'Escape' && document.body.classList.contains('finding')) {{ hideFind(); return; }}
 	    if (e.key === 'Escape' && inEdit()) {{ leaveEdit(); }}
   }});
@@ -4374,6 +4512,8 @@ if(window.__enhancePreview)window.__enhancePreview();
         tab_menu_close_others = s.tab_menu_close_others,
         tab_menu_copy_path = s.tab_menu_copy_path,
         tab_menu_reveal = s.tab_menu_reveal,
+        recent_menu_remove = s.recent_menu_remove,
+        recent_clear_all = s.recent_clear_all,
         set_author_mode = s.set_author_mode,
         set_author_off = s.set_author_off,
         set_author_on = s.set_author_on,
@@ -4841,7 +4981,7 @@ mod tests {
 
         assert_eq!(
             local_document_path_from_url(&format!("{linked_url}#section")),
-            Some(fs::canonicalize(&linked).unwrap())
+            Some(strip_verbatim_prefix(fs::canonicalize(&linked).unwrap()))
         );
         assert_eq!(local_document_path_from_url(&binary_url), None);
         assert_eq!(local_document_path_from_url(&missing_url), None);
@@ -5247,6 +5387,15 @@ mod tests {
         assert!(page.contains("data-tab-action=\"close-others\""));
         assert!(page.contains("data-tab-action=\"copy-path\""));
         assert!(page.contains("data-tab-action=\"reveal\""));
+        assert!(page.contains("id=\"recent-context-menu\""));
+        assert!(page.contains("data-recent-action=\"reveal\""));
+        assert!(page.contains("data-recent-action=\"copy-path\""));
+        assert!(page.contains("data-recent-action=\"remove\""));
+        assert!(page.contains("id=\"sidebar-clear-recent\""));
+        assert!(page.contains("id=\"sidebar-tooltip\""));
+        assert!(page.contains("'forget-recent:' + path"));
+        assert!(page.contains("'reveal-path:' + path"));
+        assert!(page.contains("postMessage('clear-recent')"));
         assert!(page.contains("id=\"lightbox\""));
         assert!(page.contains("data-setting=\"word-wrap\""));
         assert!(page.contains("id=\"encoding-control\""));
@@ -6066,7 +6215,7 @@ fn local_document_path_from_url(value: &str) -> Option<PathBuf> {
     if !path.is_file() || !is_supported_document(&path) {
         return None;
     }
-    fs::canonicalize(path).ok()
+    fs::canonicalize(path).ok().map(strip_verbatim_prefix)
 }
 
 fn install_file_watcher(
@@ -6699,6 +6848,22 @@ fn main() {
                     let _ = proxy_for_ipc.send_event(UserEvent::OpenPaths(vec![path], false));
                 } else if forget_recent_file(&recent_files_for_ipc, &path) {
                     // 侧栏里点到已经不存在的历史条目，顺手把它从最近列表剔掉
+                    let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
+                }
+            } else if let Some(raw) = body.strip_prefix("forget-recent:") {
+                if forget_recent_file(&recent_files_for_ipc, &PathBuf::from(raw)) {
+                    let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
+                }
+            } else if body == "clear-recent" {
+                if clear_recent_files(&recent_files_for_ipc) {
+                    let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
+                }
+            } else if let Some(raw) = body.strip_prefix("reveal-path:") {
+                let path = PathBuf::from(raw);
+                if path.exists() {
+                    reveal_in_file_manager(&path);
+                } else if forget_recent_file(&recent_files_for_ipc, &path) {
+                    // 历史条目对应的文件已经不在了，定位不到就直接从列表剔掉
                     let _ = proxy_for_ipc.send_event(UserEvent::RecentChanged);
                 }
             } else if let Some(url) = body.strip_prefix("open-local-link:") {
@@ -7434,17 +7599,18 @@ fn main() {
                     .evaluate_script("if(window.__mdPreviewerShowFind)window.__mdPreviewerShowFind();");
             }
             TaoEvent::UserEvent(UserEvent::RecentChanged) => {
-                let html = empty_preview_html(&strings, &recent_files.lock().unwrap());
-                let js = format!(
-                    "if(window.__setEmptyPreview)window.__setEmptyPreview('{}');",
-                    escape_js(&html)
-                );
-                let _ = webview.evaluate_script(&js);
-                update_sidebar(
-                    &webview,
-                    &session_for_event.lock().unwrap(),
-                    &recent_files.lock().unwrap(),
-                );
+                let session = session_for_event.lock().unwrap();
+                // 空白启动页上列着最近文件，只有没有活动文档时才需要重画它；
+                // 有文档打开时重画会把正文整个换成空白页
+                if session.active().is_none() {
+                    let html = empty_preview_html(&strings, &recent_files.lock().unwrap());
+                    let js = format!(
+                        "if(window.__setEmptyPreview)window.__setEmptyPreview('{}');",
+                        escape_js(&html)
+                    );
+                    let _ = webview.evaluate_script(&js);
+                }
+                update_sidebar(&webview, &session, &recent_files.lock().unwrap());
             }
             TaoEvent::UserEvent(UserEvent::Print) => {
                 let _ = webview.print();

@@ -180,19 +180,53 @@ impl DocumentSession {
     }
 }
 
-fn normalize_path(path: PathBuf) -> PathBuf {
+pub fn normalize_path(path: PathBuf) -> PathBuf {
     let absolute = if path.is_absolute() {
         path
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    fs::canonicalize(&absolute).unwrap_or_else(|_| {
+    let resolved = fs::canonicalize(&absolute).unwrap_or_else(|_| {
         absolute
             .parent()
             .and_then(|parent| fs::canonicalize(parent).ok())
             .and_then(|parent| absolute.file_name().map(|name| parent.join(name)))
             .unwrap_or(absolute)
-    })
+    });
+    strip_verbatim_prefix(resolved)
+}
+
+/// Windows 上 `canonicalize` 会返回 `\\?\D:\...` 这种 verbatim 路径，
+/// 直接展示、复制或写进历史文件都很别扭，这里统一还原成普通写法
+pub fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        use std::path::{Component, Prefix};
+        let mut components = path.components();
+        let Some(Component::Prefix(prefix)) = components.next() else {
+            return path;
+        };
+        let head = match prefix.kind() {
+            Prefix::VerbatimDisk(disk) => format!("{}:\\", disk as char),
+            Prefix::VerbatimUNC(server, share) => format!(
+                "\\\\{}\\{}\\",
+                server.to_string_lossy(),
+                share.to_string_lossy()
+            ),
+            _ => return path,
+        };
+        let mut rebuilt = PathBuf::from(head);
+        for component in components {
+            if let Component::Normal(part) = component {
+                rebuilt.push(part);
+            }
+        }
+        rebuilt
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        path
+    }
 }
 
 #[cfg(test)]
@@ -248,6 +282,34 @@ mod tests {
         assert_eq!(session.tabs[0].path, normalize_path(second));
         assert_eq!(session.active_id, Some(id));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn normalized_paths_never_carry_verbatim_prefix() {
+        let dir = temp_dir("verbatim");
+        let file = dir.join("doc.md");
+        fs::write(&file, "# doc").unwrap();
+        let normalized = normalize_path(file.clone());
+        assert!(!normalized.to_string_lossy().starts_with(r"\\?\"));
+        assert!(normalized.is_absolute());
+        assert!(normalized.exists());
+        assert_eq!(normalized.file_name(), file.file_name());
+        // 已经是普通写法的路径原样返回
+        assert_eq!(strip_verbatim_prefix(normalized.clone()), normalized);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn strip_verbatim_prefix_handles_disk_and_unc() {
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\D:\docs\a.md")),
+            PathBuf::from(r"D:\docs\a.md")
+        );
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share\a.md")),
+            PathBuf::from(r"\\server\share\a.md")
+        );
     }
 
     #[test]
@@ -334,12 +396,10 @@ mod tests {
         let restored = DocumentSession::load(&state_path);
 
         assert_eq!(restored.tabs.len(), 2);
-        assert_eq!(restored.tabs[0].path, fs::canonicalize(existing).unwrap());
+        assert_eq!(restored.tabs[0].path, normalize_path(existing));
         assert_eq!(
             restored.tabs[1].path,
-            fs::canonicalize(&dir)
-                .unwrap()
-                .join(missing.file_name().unwrap())
+            normalize_path(dir.clone()).join(missing.file_name().unwrap())
         );
         assert!(!restored.tabs[0].missing);
         assert!(restored.tabs[1].missing);

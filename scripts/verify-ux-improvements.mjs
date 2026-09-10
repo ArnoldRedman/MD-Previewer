@@ -62,6 +62,11 @@ await page.setContent(`<!doctype html>
       body.editing.split-view #app { display: flex; flex-direction: row; }
       body.editing.split-view #editor { order: 1; flex: 1 1 50%; border-right: 2px solid #d0d7de; }
       body.editing.split-view #preview { order: 2; flex: 1 1 50%; }
+      body { padding-left: 240px; }
+      .sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 240px; display: flex; flex-direction: column; }
+      .sidebar-list { flex: 1; overflow-y: auto; }
+      .sidebar-tooltip { position: fixed; max-width: 420px; }
+      .context-menu { position: fixed; }
     </style>
   </head>
   <body class="has-tabs">
@@ -87,6 +92,7 @@ await page.setContent(`<!doctype html>
         <button type="button" data-sidebar-section="outline">Outline</button>
       </div>
       <div class="sidebar-list" id="sidebar-list"></div>
+      <div class="sidebar-footer" id="sidebar-footer" style="display:none;"><button type="button" class="sidebar-clear" id="sidebar-clear-recent">Clear Recent Files</button></div>
     </aside>
     <div id="topbar">
       <div class="toolbar sidebar-toggle">
@@ -134,6 +140,13 @@ await page.setContent(`<!doctype html>
       <button type="button" class="context-menu-item" data-tab-action="copy-path">Copy Path</button>
       <button type="button" class="context-menu-item" data-tab-action="reveal">Reveal in File Manager</button>
     </div>
+    <div id="recent-context-menu" class="context-menu" style="display:none;">
+      <button type="button" class="context-menu-item" data-recent-action="reveal">Reveal in File Manager</button>
+      <button type="button" class="context-menu-item" data-recent-action="copy-path">Copy Path</button>
+      <div class="context-menu-sep"></div>
+      <button type="button" class="context-menu-item" data-recent-action="remove">Remove from Recent</button>
+    </div>
+    <div id="sidebar-tooltip" class="sidebar-tooltip" style="display:none;"></div>
     <div id="lightbox" class="lightbox" style="display:none;">
       <div class="lightbox-backdrop"></div>
       <div class="lightbox-toolbar">
@@ -370,5 +383,93 @@ await page.keyboard.press('Escape');
 const isClosedOnEsc = await popover.evaluate((el) => el.style.display === 'none');
 if (!isClosedOnEsc) throw new Error('Expected encoding popover to close on Escape key');
 
+console.log('Verifying 8: Sidebar recent history tools...');
+const recentPath = 'D:\\notes\\deep\\folder\\history.md';
+await page.evaluate((path) => {
+  window.__setSidebar({
+    folder: [{ name: 'local.md', path: '/docs/local.md', dir: 'docs', active: true }],
+    recent: [{ name: 'history.md', path, dir: 'folder', active: false }]
+  });
+}, recentPath);
+await page.click('button[data-sidebar-section="recent"]');
+const recentItem = page.locator('#sidebar-list [data-sidebar-path]');
+if ((await recentItem.count()) !== 1) throw new Error('Expected exactly one recent item');
+const footer = page.locator('#sidebar-footer');
+if (await footer.evaluate((el) => el.style.display === 'none')) {
+  throw new Error('Clear-recent footer should be visible when recent list is non-empty');
+}
+
+// 悬浮显示完整路径
+await recentItem.hover();
+await page.waitForFunction(() => {
+  const tip = document.getElementById('sidebar-tooltip');
+  return tip && tip.style.display !== 'none' && tip.textContent.length > 0;
+}, null, { timeout: 2000 });
+const tooltipText = await page.locator('#sidebar-tooltip').textContent();
+if (tooltipText !== recentPath) throw new Error(`Tooltip should show full path, got '${tooltipText}'`);
+const tooltipBox = await page.locator('#sidebar-tooltip').boundingBox();
+const itemBox = await recentItem.boundingBox();
+if (!tooltipBox || tooltipBox.x < itemBox.x + itemBox.width) {
+  throw new Error('Tooltip should sit to the right of the sidebar item');
+}
+await page.mouse.move(600, 600);
+if (!(await page.locator('#sidebar-tooltip').evaluate((el) => el.style.display === 'none'))) {
+  throw new Error('Tooltip should hide when the pointer leaves the item');
+}
+
+// 右键：从历史中移除
+await recentItem.click({ button: 'right' });
+const recentMenu = page.locator('#recent-context-menu');
+if (await recentMenu.evaluate((el) => el.style.display === 'none')) {
+  throw new Error('Recent context menu did not open on right click');
+}
+await page.click('[data-recent-action="remove"]');
+const removeMsg = await page.evaluate(() => window.ipcMessages[window.ipcMessages.length - 1]);
+if (removeMsg !== 'forget-recent:' + recentPath) {
+  throw new Error(`Expected 'forget-recent:${recentPath}', got '${removeMsg}'`);
+}
+if (!(await recentMenu.evaluate((el) => el.style.display === 'none'))) {
+  throw new Error('Recent context menu did not close after remove');
+}
+
+// 右键：在文件管理器中显示
+await recentItem.click({ button: 'right' });
+await page.click('[data-recent-action="reveal"]');
+const revealMsg = await page.evaluate(() => window.ipcMessages[window.ipcMessages.length - 1]);
+if (revealMsg !== 'reveal-path:' + recentPath) {
+  throw new Error(`Expected 'reveal-path:${recentPath}', got '${revealMsg}'`);
+}
+
+// Escape 关闭菜单，点击空白处也关闭
+await recentItem.click({ button: 'right' });
+await page.keyboard.press('Escape');
+if (!(await recentMenu.evaluate((el) => el.style.display === 'none'))) {
+  throw new Error('Recent context menu should close on Escape');
+}
+await recentItem.click({ button: 'right' });
+await page.mouse.click(700, 500);
+if (!(await recentMenu.evaluate((el) => el.style.display === 'none'))) {
+  throw new Error('Recent context menu should close when clicking elsewhere');
+}
+
+// 底部一键清空
+await page.click('#sidebar-clear-recent');
+const clearMsg = await page.evaluate(() => window.ipcMessages[window.ipcMessages.length - 1]);
+if (clearMsg !== 'clear-recent') throw new Error(`Expected 'clear-recent', got '${clearMsg}'`);
+await page.evaluate(() => { window.__setSidebar({ folder: [], recent: [] }); });
+if (!(await footer.evaluate((el) => el.style.display === 'none'))) {
+  throw new Error('Clear-recent footer should hide when recent list is empty');
+}
+
+// 当前文件夹分区右键不弹历史菜单
+await page.evaluate(() => {
+  window.__setSidebar({ folder: [{ name: 'local.md', path: '/docs/local.md', dir: 'docs', active: true }], recent: [] });
+});
+await page.click('button[data-sidebar-section="folder"]');
+await page.locator('#sidebar-list [data-sidebar-path]').click({ button: 'right' });
+if (!(await recentMenu.evaluate((el) => el.style.display === 'none'))) {
+  throw new Error('Recent context menu must not open for folder items');
+}
+
 await browser.close();
-console.log('[ux-improvements-verify] ALL 7 CHECKS PASSED');
+console.log('[ux-improvements-verify] ALL 8 CHECKS PASSED');
