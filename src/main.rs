@@ -215,7 +215,6 @@ struct Strings {
     convert_failed_title: &'static str,
     save_as_failed_title: &'static str,
     save_as_already_open: &'static str,
-    save_as_unsupported: &'static str,
     btn_update_title: &'static str,
     btn_update_text: &'static str,
     set_version_label: &'static str,
@@ -298,7 +297,6 @@ impl Strings {
                 convert_failed_title: "无法转换编码",
                 save_as_failed_title: "无法另存为",
                 save_as_already_open: "该文件已在另一个标签页中打开，请先关闭那个标签页",
-                save_as_unsupported: "另存为只支持 Markdown 或 .txt 文件",
                 btn_update_title: "发现新版本，点击查看与更新",
                 btn_update_text: "新版本可用",
                 set_version_label: "当前版本",
@@ -377,7 +375,6 @@ impl Strings {
                 convert_failed_title: "Could Not Convert Encoding",
                 save_as_failed_title: "Could Not Save As",
                 save_as_already_open: "That file is already open in another tab. Close it first.",
-                save_as_unsupported: "Save As only supports Markdown or .txt files",
                 btn_update_title: "New version available, click to view and update",
                 btn_update_text: "Update Available",
                 set_version_label: "Version",
@@ -1204,7 +1201,7 @@ fn folder_documents(active: Option<&Path>) -> Vec<PathBuf> {
     let mut files = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.is_file() && is_supported_document(path))
+        .filter(|path| path.is_file() && is_listed_document(path))
         .collect::<Vec<_>>();
     files.sort_by_key(|path| {
         path.file_name()
@@ -1369,10 +1366,43 @@ fn file_url_for_path_dir(dir: &Path) -> String {
     format!("file://{}", percent_encode_file_path(&path))
 }
 
-fn is_txt_document(path: &Path) -> bool {
+const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd"];
+
+/// 侧栏同目录列表与文件选择器过滤用的常见文本扩展名；打开文件不看这份列表，只看内容是否为文本
+#[rustfmt::skip]
+const TEXT_EXTENSIONS: &[&str] = &[
+    "txt", "text", "log", "json", "jsonc", "toml", "yaml", "yml", "xml", "ini", "cfg", "conf",
+    "properties", "env", "csv", "tsv", "sql", "sh", "bash", "bat", "cmd", "ps1", "py", "rb", "php",
+    "lua", "pl", "js", "mjs", "cjs", "jsx", "ts", "tsx", "rs", "go", "java", "kt", "c", "h", "cc",
+    "cpp", "hpp", "cs", "swift", "dart", "css", "scss", "less", "html", "htm", "vue", "gradle",
+    "cmake", "diff", "patch", "rst", "adoc", "tex", "srt", "vtt", "lock",
+];
+
+fn has_extension_in(path: &Path, extensions: &[&str]) -> bool {
     path.extension()
-        .map(|extension| extension.to_string_lossy().eq_ignore_ascii_case("txt"))
+        .map(|extension| {
+            let extension = extension.to_string_lossy().to_ascii_lowercase();
+            extensions.contains(&extension.as_str())
+        })
         .unwrap_or(false)
+}
+
+fn is_markdown_document(path: &Path) -> bool {
+    has_extension_in(path, MARKDOWN_EXTENSIONS)
+}
+
+/// 列目录时不读文件内容，只按扩展名判断
+fn is_listed_document(path: &Path) -> bool {
+    is_markdown_document(path) || has_extension_in(path, TEXT_EXTENSIONS)
+}
+
+/// 文件选择器默认过滤项：Markdown 加常见文本扩展名
+fn supported_dialog_extensions() -> Vec<&'static str> {
+    MARKDOWN_EXTENSIONS
+        .iter()
+        .chain(TEXT_EXTENSIONS.iter())
+        .copied()
+        .collect()
 }
 
 /// 读取文档文本内容，支持 UTF-8、带 BOM 的 UTF-8（回报为 UTF-8 BOM）、带 BOM 的 UTF-16 以及 Windows ANSI (GBK/CP936 等) 编码
@@ -1741,15 +1771,16 @@ fn txt_to_html(raw: &str) -> String {
 }
 
 /// 根据文档扩展名分发渲染：txt 走纯文本保留换行，md 走标准 Markdown 解析与增强
+/// Markdown 按扩展名识别；其余任何文本文件都按纯文本渲染，不做 Markdown 解析
 fn document_to_html(path: &Path, raw: &str) -> (String, EnhanceFlags, Option<String>) {
-    if is_txt_document(path) {
-        (txt_to_html(raw), EnhanceFlags::default(), None)
-    } else {
+    if is_markdown_document(path) {
         (
             md_to_html_with_base(raw, path.parent()),
             enhance_flags_for(raw),
             base_href_for_file(path),
         )
+    } else {
+        (txt_to_html(raw), EnhanceFlags::default(), None)
     }
 }
 
@@ -4518,13 +4549,60 @@ mod tests {
     }
 
     #[test]
-    fn is_txt_document_matches_txt_extension_case_insensitively() {
-        assert!(is_txt_document(Path::new("note.txt")));
-        assert!(is_txt_document(Path::new("NOTE.TXT")));
-        assert!(is_txt_document(Path::new("/path/to/archive.Txt")));
-        assert!(!is_txt_document(Path::new("readme.md")));
-        assert!(!is_txt_document(Path::new("spec.markdown")));
-        assert!(!is_txt_document(Path::new("no_extension")));
+    fn is_markdown_document_matches_markdown_extensions_case_insensitively() {
+        assert!(is_markdown_document(Path::new("readme.md")));
+        assert!(is_markdown_document(Path::new("SPEC.MARKDOWN")));
+        assert!(is_markdown_document(Path::new("/path/to/notes.Mkd")));
+        assert!(!is_markdown_document(Path::new("note.txt")));
+        assert!(!is_markdown_document(Path::new("config.toml")));
+        assert!(!is_markdown_document(Path::new("no_extension")));
+    }
+
+    #[test]
+    fn any_text_file_opens_as_plain_text_but_binaries_are_rejected() {
+        let dir = temp_test_dir("open-any-text");
+        let toml = dir.join("Cargo.toml");
+        let no_extension = dir.join("Dockerfile");
+        let utf16 = dir.join("notes.dat");
+        let binary = dir.join("image.png");
+        let empty = dir.join("empty.log");
+        fs::write(&toml, "[package]\nname = \"x\"\n").unwrap();
+        fs::write(&no_extension, "FROM scratch\n").unwrap();
+        fs::write(
+            &utf16,
+            encode_document("宽字符", "UTF-16 LE").unwrap().bytes,
+        )
+        .unwrap();
+        fs::write(&binary, [0x89, b'P', b'N', b'G', 0, 0, 0, 13]).unwrap();
+        fs::write(&empty, b"").unwrap();
+
+        assert!(is_supported_document(&toml));
+        assert!(is_supported_document(&no_extension));
+        assert!(is_supported_document(&utf16));
+        assert!(is_supported_document(&empty));
+        assert!(!is_supported_document(&binary));
+        assert!(!is_supported_document(&dir));
+
+        let (html, flags, base_href) = document_to_html(&toml, "[package]\nname = \"x\"\n");
+        assert!(html.starts_with(r#"<div class="mdp-plain-text">"#));
+        assert!(!flags.math && !flags.mermaid);
+        assert!(base_href.is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn listed_documents_and_dialog_filters_use_the_text_extension_list() {
+        assert!(is_listed_document(Path::new("a.json")));
+        assert!(is_listed_document(Path::new("b.TOML")));
+        assert!(is_listed_document(Path::new("c.md")));
+        assert!(!is_listed_document(Path::new("d.png")));
+        assert!(!is_listed_document(Path::new("Dockerfile")));
+
+        let supported = supported_dialog_extensions();
+        assert_eq!(supported[0], "md");
+        assert!(supported.contains(&"txt"));
+        assert!(supported.contains(&"json"));
+        assert!(supported.contains(&"toml"));
     }
 
     #[test]
@@ -4585,6 +4663,8 @@ mod tests {
             "beta.md",
             "Alpha.markdown",
             "gamma.txt",
+            "config.json",
+            "settings.toml",
             "notes.pdf",
             "readme",
         ] {
@@ -4598,7 +4678,16 @@ mod tests {
             .iter()
             .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["Alpha.markdown", "beta.md", "gamma.txt"]);
+        assert_eq!(
+            names,
+            vec![
+                "Alpha.markdown",
+                "beta.md",
+                "config.json",
+                "gamma.txt",
+                "settings.toml"
+            ]
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -4740,12 +4829,12 @@ mod tests {
     fn file_urls_only_open_existing_supported_documents() {
         let dir = temp_test_dir("document-links");
         let linked = dir.join("含 空格.md");
-        let unsupported = dir.join("page.html");
+        let binary = dir.join("page.bin");
         fs::write(&linked, "# Linked").unwrap();
-        fs::write(&unsupported, "<h1>Page</h1>").unwrap();
+        fs::write(&binary, [0u8, 1, 2]).unwrap();
 
         let linked_url = url::Url::from_file_path(&linked).unwrap().to_string();
-        let unsupported_url = url::Url::from_file_path(&unsupported).unwrap().to_string();
+        let binary_url = url::Url::from_file_path(&binary).unwrap().to_string();
         let missing_url = url::Url::from_file_path(dir.join("missing.md"))
             .unwrap()
             .to_string();
@@ -4754,7 +4843,7 @@ mod tests {
             local_document_path_from_url(&format!("{linked_url}#section")),
             Some(fs::canonicalize(&linked).unwrap())
         );
-        assert_eq!(local_document_path_from_url(&unsupported_url), None);
+        assert_eq!(local_document_path_from_url(&binary_url), None);
         assert_eq!(local_document_path_from_url(&missing_url), None);
         assert_eq!(
             local_document_path_from_url("https://example.com/readme.md"),
@@ -5205,10 +5294,10 @@ mod tests {
             save_as_target_path(PathBuf::from("D:/docs/copy.txt"), current),
             PathBuf::from("D:/docs/copy.txt")
         );
-        assert!(!is_supported_document(&save_as_target_path(
-            PathBuf::from("D:/docs/copy.html"),
-            current
-        )));
+        assert_eq!(
+            save_as_target_path(PathBuf::from("D:/docs/copy.html"), current),
+            PathBuf::from("D:/docs/copy.html")
+        );
     }
 
     #[test]
@@ -5949,15 +6038,23 @@ fn apply_linux_webkit_compat_env() {
 #[cfg(not(target_os = "linux"))]
 fn apply_linux_webkit_compat_env() {}
 
+/// 显式打开的文件只做一次二进制嗅探：前 8 KB 含 NUL 且不是 UTF-16 BOM 开头就当作二进制拒绝
+fn looks_like_text_file(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut head = [0u8; 8192];
+    let Ok(read) = file.read(&mut head) else {
+        return false;
+    };
+    let head = &head[..read];
+    head.starts_with(&[0xFF, 0xFE]) || head.starts_with(&[0xFE, 0xFF]) || !head.contains(&0)
+}
+
+/// 能作为标签页打开的文件：Markdown 按扩展名识别，其余任何文本文件都按纯文本打开
 fn is_supported_document(path: &Path) -> bool {
-    path.extension()
-        .map(|extension| {
-            matches!(
-                extension.to_string_lossy().to_ascii_lowercase().as_str(),
-                "md" | "markdown" | "mdown" | "mkd" | "txt"
-            )
-        })
-        .unwrap_or(false)
+    is_markdown_document(path) || looks_like_text_file(path)
 }
 
 fn local_document_path_from_url(value: &str) -> Option<PathBuf> {
@@ -6304,7 +6401,7 @@ fn render_active_document(
                 }
             }
             remember_recent_file(recent_files, &active.path);
-            let is_txt = is_txt_document(&active.path);
+            let is_plain_text = !is_markdown_document(&active.path);
             let (html, flags, base_href) = document_to_html(&active.path, &raw);
             let base_href = base_href.unwrap_or_default();
             *enhance_flags.lock().unwrap() = flags;
@@ -6317,7 +6414,7 @@ fn render_active_document(
                 flags.mermaid,
                 escape_js(resolved_encoding)
             ));
-            if is_txt {
+            if is_plain_text {
                 update_author_doc(webview, "");
             } else {
                 update_author_doc(webview, &raw);
@@ -6781,13 +6878,13 @@ fn main() {
     let settings_for_event = Arc::clone(&settings);
     update_tabs(&webview, &session_for_event.lock().unwrap());
     update_settings_ui(&webview, &settings_for_event.lock().unwrap());
-    let initial_is_txt = session_for_event
+    let initial_is_plain_text = session_for_event
         .lock()
         .unwrap()
         .active()
-        .map(|tab| is_txt_document(&tab.path))
+        .map(|tab| !is_markdown_document(&tab.path))
         .unwrap_or(false);
-    if initial_is_txt {
+    if initial_is_plain_text {
         update_author_doc(&webview, "");
     } else {
         update_author_doc(&webview, &initial_raw);
@@ -6865,7 +6962,7 @@ fn main() {
                     .active()
                     .and_then(|tab| tab.path.parent().map(Path::to_path_buf));
                 let mut dialog = rfd::FileDialog::new()
-                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"])
+                    .add_filter("Markdown", MARKDOWN_EXTENSIONS)
                     .set_file_name(strings.new_filename);
                 if let Some(current_dir) = current_dir {
                     dialog = dialog.set_directory(current_dir);
@@ -6895,10 +6992,12 @@ fn main() {
                     );
                     return;
                 }
+                let supported = supported_dialog_extensions();
                 if let Some(paths) = rfd::FileDialog::new()
-                    .add_filter("Supported Documents", &["md", "markdown", "mdown", "mkd", "txt"])
-                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"])
-                    .add_filter("Text", &["txt"])
+                    .add_filter("Supported Documents", supported.as_slice())
+                    .add_filter("Markdown", MARKDOWN_EXTENSIONS)
+                    .add_filter("Text", TEXT_EXTENSIONS)
+                    .add_filter("All Files", &["*"])
                     .pick_files()
                 {
                     let _ = proxy.send_event(UserEvent::OpenPaths(paths, false));
@@ -7050,10 +7149,12 @@ fn main() {
                 }
             }
             TaoEvent::UserEvent(UserEvent::LocateTab(id)) => {
+                let supported = supported_dialog_extensions();
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Supported Documents", &["md", "markdown", "mdown", "mkd", "txt"])
-                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"])
-                    .add_filter("Text", &["txt"])
+                    .add_filter("Supported Documents", supported.as_slice())
+                    .add_filter("Markdown", MARKDOWN_EXTENSIONS)
+                    .add_filter("Text", TEXT_EXTENSIONS)
+                    .add_filter("All Files", &["*"])
                     .pick_file()
                 {
                     let mut session = session_for_event.lock().unwrap();
@@ -7200,8 +7301,9 @@ fn main() {
                 };
                 let mut dialog = rfd::FileDialog::new()
                     .set_title(strings.save_as_dialog_title)
-                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"])
-                    .add_filter("Text", &["txt"]);
+                    .add_filter("Markdown", MARKDOWN_EXTENSIONS)
+                    .add_filter("Text", TEXT_EXTENSIONS)
+                    .add_filter("All Files", &["*"]);
                 if let Some(dir) = current_path
                     .parent()
                     .filter(|dir| !dir.as_os_str().is_empty())
@@ -7215,10 +7317,6 @@ fn main() {
                     return;
                 };
                 let target = save_as_target_path(target, &current_path);
-                if !is_supported_document(&target) {
-                    show_warning_dialog(strings.save_as_failed_title, strings.save_as_unsupported);
-                    return;
-                }
                 if session_for_event
                     .lock()
                     .unwrap()
@@ -7283,7 +7381,7 @@ fn main() {
                 if active_matches {
                     let enc = session.active().and_then(|t| t.encoding.clone());
                     if let Ok((raw, _)) = read_document_with_encoding(&path, enc.as_deref()) {
-                        let is_txt = is_txt_document(&path);
+                        let is_plain_text = !is_markdown_document(&path);
                         let (html, flags, _) = document_to_html(&path, &raw);
                         *enhance_flags.lock().unwrap() = flags;
                         let _ = webview.evaluate_script(&format!(
@@ -7293,7 +7391,7 @@ fn main() {
                             flags.mermaid,
                             escape_js(&raw)
                         ));
-                        if is_txt {
+                        if is_plain_text {
                             update_author_doc(&webview, "");
                         } else {
                             update_author_doc(&webview, &raw);

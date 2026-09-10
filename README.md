@@ -19,8 +19,8 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 
 ## What it does
 
-- Opens Markdown and `.txt` plain text files from the command line, file picker, drag and drop, or OS file associations.
-- Dedicated plain text rendering for `.txt` files: preserves line breaks, indentation, and safe escaping without Markdown syntax collisions.
+- Opens Markdown files and any text file (`.txt`, `.json`, `.toml`, `.yaml`, `.log`, source code, files without an extension) from the command line, file picker, drag and drop, or OS file associations; binary files are refused.
+- Dedicated plain text rendering for non-Markdown files: monospace, preserves line breaks and indentation, safe escaping without Markdown syntax collisions.
 - Document encoding detection, conversion, and Save As: displays the active encoding in the top-right, reopens the file as UTF-8, UTF-8 BOM, GBK / ANSI, UTF-16 LE, or UTF-16 BE to fix mojibake, converts the file to any of them in place (with a confirmation when characters would be lost), and saves a copy elsewhere with Ctrl/Cmd+Shift+S.
 - Side-by-side split view: source editor on the left, live preview on the right, with a clean Rider-style divider line and centered split button.
 - Keeps multiple documents in tabs and restores the previous session; opening another file from Windows Explorer reuses the running window.
