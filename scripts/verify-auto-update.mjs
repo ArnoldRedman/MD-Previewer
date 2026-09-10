@@ -26,6 +26,16 @@ if (!mainRs.includes('UPDATE_CHECK_INTERVAL_MS')) {
 if (!mainRs.includes('windows_updater::apply_update')) {
   throw new Error('Expected windows_updater::apply_update in main.rs');
 }
+// 发布说明必须经 Rust 侧 Markdown 渲染器回填，而不是当纯文本显示
+if (!mainRs.includes('body.strip_prefix("render-release-notes:")')) {
+  throw new Error('Expected render-release-notes IPC handler in main.rs');
+}
+if (!mainRs.includes('UserEvent::RenderReleaseNotes(markdown)) =>')) {
+  throw new Error('Expected RenderReleaseNotes event handler in main.rs');
+}
+if (!mainRs.includes("window.__setUpdateNotes('{}')")) {
+  throw new Error('Expected Rust to hand rendered release notes to window.__setUpdateNotes');
+}
 
 // 2. Playwright headless browser checks
 console.log('Verifying 2: In-browser update UI and logic...');
@@ -242,7 +252,7 @@ await page.evaluate(() => {
   const fakeRelease = {
     tag_name: 'v1.3.2',
     name: 'v1.3.2 — Test Update',
-    body: '## 1.3.2 Notes\n- Fixed something',
+    body: '## 1.3.2 Notes\n- Fixed **something**',
     html_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/tag/v1.3.2',
     assets: [
       { name: 'MD-Previewer-Setup.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.3.2/MD-Previewer-Setup.exe' },
@@ -263,6 +273,46 @@ if (badgeText !== 'v1.3.2') throw new Error(`Expected badge text 'v1.3.2', got '
 
 const releaseName = await page.$eval('#update-release-name', el => el.textContent.trim());
 if (releaseName !== 'v1.3.2 — Test Update') throw new Error(`Expected release name 'v1.3.2 — Test Update', got '${releaseName}'`);
+
+// 发布说明是 Markdown：打开弹窗时应交给 Rust 渲染，而不是把原文当纯文本塞进弹窗
+const notesRequest = await page.evaluate(() => window.__messages.find(m => m.startsWith('render-release-notes:')));
+if (notesRequest !== 'render-release-notes:## 1.3.2 Notes\n- Fixed **something**') {
+  throw new Error('Expected render-release-notes IPC message carrying the release body, got: ' + JSON.stringify(notesRequest));
+}
+const pendingNotesText = await page.$eval('#update-notes-box', el => el.textContent);
+if (pendingNotesText !== '') {
+  throw new Error('Release notes box must stay empty until Rust returns rendered HTML, got: ' + JSON.stringify(pendingNotesText));
+}
+
+// 模拟 Rust 渲染完成回填：显示解析后的 HTML，并去掉标题 id 以免与正文锚点重名
+await page.evaluate(() => {
+  window.__setUpdateNotes('<h2 id="132-notes">1.3.2 Notes</h2>\n<ul>\n<li>Fixed <strong>something</strong></li>\n</ul>\n');
+});
+const renderedNotes = await page.$eval('#update-notes-box', el => ({
+  heading: el.querySelector('h2') ? el.querySelector('h2').textContent : null,
+  strong: el.querySelector('li strong') ? el.querySelector('li strong').textContent : null,
+  idCount: el.querySelectorAll('[id]').length,
+  text: el.textContent,
+  whiteSpace: getComputedStyle(el).whiteSpace,
+  height: el.getBoundingClientRect().height,
+  overflowsX: el.scrollWidth > el.clientWidth + 1
+}));
+if (renderedNotes.heading !== '1.3.2 Notes' || renderedNotes.strong !== 'something') {
+  throw new Error('Expected rendered release notes with <h2> and <strong>, got: ' + JSON.stringify(renderedNotes));
+}
+if (renderedNotes.text.includes('**') || renderedNotes.text.includes('#')) {
+  throw new Error('Rendered release notes still contain markdown markers: ' + JSON.stringify(renderedNotes));
+}
+if (renderedNotes.idCount !== 0) {
+  throw new Error('Release notes must not keep element ids (they would shadow document anchors), got: ' + JSON.stringify(renderedNotes));
+}
+if (renderedNotes.whiteSpace === 'pre-wrap') {
+  throw new Error('Release notes box must not use pre-wrap for rendered HTML (block gaps would double)');
+}
+if (renderedNotes.height > 220 || renderedNotes.overflowsX) {
+  throw new Error('Rendered release notes overflow the notes box: ' + JSON.stringify(renderedNotes));
+}
+console.log('  Release notes markdown rendering verified successfully.');
 
 // Test clicking "Update Now"
 await page.click('#btn-do-update');
@@ -315,13 +365,6 @@ if (!isModalReopened) {
   throw new Error('Expected clicking #btn-check-update (when update available) to open #update-modal');
 }
 console.log('  Settings update button opened modal successfully.');
-
-const popoverEl = await page.$('.settings-popover');
-if (popoverEl) {
-  const artifactDir = 'C:/Users/zhuzi/.gemini/antigravity-cli/brain/54fa365e-c608-4dbc-89d8-20e4db89a888';
-  await popoverEl.screenshot({ path: `${artifactDir}/settings_popover_update.png` });
-  console.log('  Saved settings popover screenshot.');
-}
 
 await browser.close();
 console.log('[auto-update-verify] ALL CHECKS PASSED');

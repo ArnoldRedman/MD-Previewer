@@ -52,6 +52,8 @@ enum UserEvent {
     LocateTab(u64),
     RevealTab(u64),
     RenderPreview(String),
+    // 更新弹窗的发布说明是 GitHub Markdown，交给桌面渲染器转 HTML
+    RenderReleaseNotes(String),
     FileChanged(PathBuf), // external change: refresh preview AND textarea
     ExternalChangeResolved(bool),
     FileSaved(PathBuf), // our own save: refresh preview only, leave textarea cursor alone
@@ -679,7 +681,6 @@ fn centered_geom(event_loop: &EventLoop<UserEvent>) -> WindowGeom {
     }
 }
 
-#[cfg(test)]
 fn md_to_html(md: &str) -> String {
     md_to_html_with_base(md, None)
 }
@@ -2259,8 +2260,24 @@ body.empty .toolbar {{ display: none !important; }}
 	.update-notes-box {{
 	  max-height: 220px; overflow-y: auto; padding: 12px 14px;
 	  background: rgba(0,0,0,.03); border: 1px solid rgba(0,0,0,.07); border-radius: 8px;
-	  font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;
+	  font-size: 12px; line-height: 1.6; word-break: break-word; color: #333;
 	}}
+	/* 发布说明由 Markdown 渲染成 HTML，在弹窗里用紧凑排版 */
+	.update-notes-box > :first-child {{ margin-top: 0; }}
+	.update-notes-box > :last-child {{ margin-bottom: 0; }}
+	.update-notes-box h1, .update-notes-box h2, .update-notes-box h3, .update-notes-box h4 {{
+	  margin: 12px 0 6px; font-size: 13px; line-height: 1.4;
+	}}
+	.update-notes-box p, .update-notes-box ul, .update-notes-box ol, .update-notes-box pre, .update-notes-box blockquote {{ margin: 6px 0; }}
+	.update-notes-box ul, .update-notes-box ol {{ padding-left: 20px; }}
+	.update-notes-box code {{ background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 3px; font-size: 11px; }}
+	.update-notes-box pre {{ padding: 8px 10px; background: rgba(0,0,0,.05); border-radius: 6px; overflow-x: auto; }}
+	.update-notes-box pre code {{ background: none; padding: 0; }}
+	.update-notes-box blockquote {{ padding: 0 10px; border-left: 3px solid rgba(0,0,0,.15); color: #666; }}
+	.update-notes-box hr {{ border: 0; border-top: 1px solid rgba(0,0,0,.1); margin: 10px 0; }}
+	.update-notes-box a {{ color: #0969da; text-decoration: none; }}
+	.update-notes-box a:hover {{ text-decoration: underline; }}
+	.update-notes-box img {{ max-width: 100%; }}
 	.update-progress-tip {{
 	  font-size: 12px; color: #1a73e8; display: flex; align-items: center; gap: 6px; font-weight: 500;
 	}}
@@ -2464,6 +2481,11 @@ body.empty .toolbar {{ display: none !important; }}
 	  .update-title {{ color: #e0e0e0; }}
 	  .update-release-name {{ color: #bbb; }}
 	  .update-notes-box {{ background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); color: #ccc; }}
+	  .update-notes-box code:not(pre code) {{ background: rgba(255,255,255,.1); }}
+	  .update-notes-box pre {{ background: rgba(255,255,255,.06); }}
+	  .update-notes-box blockquote {{ border-color: rgba(255,255,255,.2); color: #aaa; }}
+	  .update-notes-box hr {{ border-top-color: rgba(255,255,255,.12); }}
+	  .update-notes-box a {{ color: #6cb6ff; }}
 	  .update-btn-secondary {{ border-color: rgba(255,255,255,.2); color: #ddd; }}
 	  .update-btn-secondary:hover {{ background: rgba(255,255,255,.08); }}
 	  .update-btn-text {{ color: #888; }}
@@ -3944,12 +3966,31 @@ body.editing .findbar {{ display: none !important; }}
     return false;
   }}
 
+  var requestedNotesTag = null;
+
+  // 发布说明是 GitHub Markdown，交给 Rust 侧与正文相同的渲染器转成 HTML 后回填；
+  // 换了版本才清空旧内容，同一版本重新打开弹窗时不闪烁
+  function renderUpdateNotes(release) {{
+    var tag = release.tag_name || '';
+    if (requestedNotesTag !== tag) updateNotesBox.textContent = '';
+    requestedNotesTag = tag;
+    if (window.ipc) window.ipc.postMessage('render-release-notes:' + (release.body || ''));
+  }}
+
+  // 去掉渲染结果里的 id：弹窗位于 #preview 之前，重名 id 会让大纲跳转落到弹窗里
+  function setUpdateNotes(html) {{
+    if (!updateNotesBox) return;
+    updateNotesBox.innerHTML = html;
+    var withIds = updateNotesBox.querySelectorAll('[id]');
+    for (var i = 0; i < withIds.length; i++) withIds[i].removeAttribute('id');
+  }}
+
   function showUpdateModal(release) {{
     if (!release) return;
     activeReleaseData = release;
     if (updateBadge) updateBadge.textContent = release.tag_name || ('v' + CURRENT_VERSION);
     if (updateReleaseName) updateReleaseName.textContent = release.name || '';
-    if (updateNotesBox) updateNotesBox.textContent = release.body || '';
+    if (updateNotesBox) renderUpdateNotes(release);
     if (updateProgressTip) updateProgressTip.style.display = 'none';
     if (btnDoUpdate) btnDoUpdate.disabled = false;
     if (updateModal) updateModal.style.display = 'flex';
@@ -3982,6 +4023,7 @@ body.editing .findbar {{ display: none !important; }}
   }}
 
   window.__showUpdateModal = showUpdateModal;
+  window.__setUpdateNotes = setUpdateNotes;
   window.__applyDetectedRelease = applyDetectedRelease;
   window.__isNewerVersion = isNewerVersion;
   window.__queryLatestRelease = queryLatestRelease;
@@ -4392,6 +4434,18 @@ mod tests {
         assert!(!html.contains("<svg"));
         assert!(html.contains("$$E=mc^2$$"));
         assert!(html.contains("```mermaid"));
+    }
+
+    #[test]
+    fn release_notes_render_with_document_renderer() {
+        // 更新弹窗的发布说明走 md_to_html：加粗、行内代码要变成标签；
+        // 标题会带 id，前端负责去掉，避免与正文锚点重名
+        let html = md_to_html("## 1.3.2 Notes\n- Fixed **something** in `main.rs`\n");
+
+        assert!(html.contains("<h2 id=\""));
+        assert!(html.contains("1.3.2 Notes</h2>"));
+        assert!(html.contains("<li>Fixed <strong>something</strong> in <code>main.rs</code></li>"));
+        assert!(!html.contains("**"));
     }
 
     #[test]
@@ -6279,6 +6333,9 @@ fn main() {
                 }
             } else if let Some(content) = body.strip_prefix("render-preview:") {
                 let _ = proxy_for_ipc.send_event(UserEvent::RenderPreview(content.to_string()));
+            } else if let Some(markdown) = body.strip_prefix("render-release-notes:") {
+                let _ =
+                    proxy_for_ipc.send_event(UserEvent::RenderReleaseNotes(markdown.to_string()));
             } else if body == "dirty:1" {
                 let _ = proxy_for_ipc.send_event(UserEvent::DirtyChanged(true));
             } else if body == "dirty:0" {
@@ -6622,6 +6679,13 @@ fn main() {
                         flags.mermaid
                     ));
                 }
+            }
+            TaoEvent::UserEvent(UserEvent::RenderReleaseNotes(markdown)) => {
+                // 发布说明不属于任何标签页，不走 document_to_html，也不解析本地图片路径
+                let _ = webview.evaluate_script(&format!(
+                    "if(window.__setUpdateNotes)window.__setUpdateNotes('{}');",
+                    escape_js(&md_to_html(&markdown))
+                ));
             }
             TaoEvent::UserEvent(UserEvent::CloseActiveTab) => {
                 if session_for_event.lock().unwrap().active_id.is_some() {
