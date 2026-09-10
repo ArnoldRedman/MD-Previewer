@@ -2,6 +2,22 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.4.1
+
+- Enhanced recent files management in sidebar:
+  - Hovering over a recent file now displays a tooltip with the complete physical directory path.
+  - Right-click context menu added for recent entries: "从历史中删除" (Remove from History), "打开所在目录" (Reveal in File Manager), and "复制路径" (Copy Path).
+  - Added "清空历史" (Clear History) one-click action button at the bottom of the recent list with confirmation.
+- Security and raw HTML sanitization hardening:
+  - Comprehensive filtering of embedded raw HTML within Markdown: strips `<script>` tags, inline event attributes (`onclick`, `onload`, etc.), `<style>`, `<svg>`, and custom `data-*` attributes.
+  - Hardened link and navigation interceptors against `javascript:`, `data:`, `blob:`, and obfuscated entity URL schemes.
+- State synchronization & edge-case crash prevention:
+  - Single-tab mode dirty document protection: active unsaved documents can no longer be silently superseded by opening a new file.
+  - Window close protection now consults session-level dirty tracking; returns `save-skipped` when clean to eliminate deadlock.
+  - Encoding switches automatically save dirty content before transcoding; relocating missing files resets detected encoding.
+  - Unified modal and popover overlay hierarchy: pressing `Escape` closes one layer at a time.
+  - Architectural consolidation: introduced `App` structure to unify event loop state and deduplicate file persistence, repaint, and directory watching logic.
+
 ## 1.4.0
 
 - Support opening any file extension as plain text:
