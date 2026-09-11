@@ -12,7 +12,7 @@ use notify::{Event, RecursiveMode, Watcher};
 use pulldown_cmark::{html, CowStr, Event as MdEvent, Options, Parser, Tag, TagEnd};
 use recent::{RecentFiles, MAX_RECENT_FILES};
 use session::{strip_verbatim_prefix, DocumentSession};
-use settings::{OpenMode, Settings, TabMode};
+use settings::{OpenMode, Settings, TabMode, ThemeChoice};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Component;
@@ -56,31 +56,7 @@ enum UserEvent {
     Quit,
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-enum ThemeChoice {
-    #[default]
-    System,
-    Light,
-    Dark,
-}
-
 impl ThemeChoice {
-    fn as_str(self) -> &'static str {
-        match self {
-            ThemeChoice::System => "system",
-            ThemeChoice::Light => "light",
-            ThemeChoice::Dark => "dark",
-        }
-    }
-
-    fn from_str(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "light" => ThemeChoice::Light,
-            "dark" => ThemeChoice::Dark,
-            _ => ThemeChoice::System,
-        }
-    }
-
     fn tao_theme(self) -> Option<Theme> {
         match self {
             ThemeChoice::System => None,
@@ -88,6 +64,32 @@ impl ThemeChoice {
             ThemeChoice::Dark => Some(Theme::Dark),
         }
     }
+
+    /// WebView2 的 prefers-color-scheme 只跟系统走，不跟窗口标题栏走，
+    /// 手动指定主题必须单独压到 WebView 上，页面里的深色样式才会切换
+    #[cfg(target_os = "windows")]
+    fn wry_theme(self) -> wry::Theme {
+        match self {
+            ThemeChoice::System => wry::Theme::Auto,
+            ThemeChoice::Light => wry::Theme::Light,
+            ThemeChoice::Dark => wry::Theme::Dark,
+        }
+    }
+}
+
+/// 同时把主题压到窗口和 WebView 上。macOS 与 Linux 的 WebView 跟随窗口外观，
+/// 只有 Windows 需要额外设置 WebView2 的首选配色
+fn apply_theme(window: &Window, webview: &WebView, theme: ThemeChoice) {
+    window.set_theme(theme.tao_theme());
+    #[cfg(target_os = "windows")]
+    {
+        use wry::WebViewExtWindows;
+        if let Err(error) = webview.set_theme(theme.wry_theme()) {
+            eprintln!("Could not apply webview theme: {error}");
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = webview;
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
@@ -179,6 +181,10 @@ struct Strings {
     set_word_wrap: &'static str,
     set_wrap_on: &'static str,
     set_wrap_off: &'static str,
+    set_theme: &'static str,
+    set_theme_system: &'static str,
+    set_theme_light: &'static str,
+    set_theme_dark: &'static str,
     code_copy: &'static str,
     code_copied: &'static str,
     tab_menu_close: &'static str,
@@ -265,6 +271,10 @@ impl Strings {
                 set_word_wrap: "自动换行",
                 set_wrap_on: "开",
                 set_wrap_off: "关",
+                set_theme: "外观",
+                set_theme_system: "跟随系统",
+                set_theme_light: "浅色",
+                set_theme_dark: "深色",
                 code_copy: "复制",
                 code_copied: "已复制",
                 tab_menu_close: "关闭标签",
@@ -347,6 +357,10 @@ impl Strings {
                 set_word_wrap: "Word wrap",
                 set_wrap_on: "On",
                 set_wrap_off: "Off",
+                set_theme: "Appearance",
+                set_theme_system: "System",
+                set_theme_light: "Light",
+                set_theme_dark: "Dark",
                 code_copy: "Copy",
                 code_copied: "Copied",
                 tab_menu_close: "Close Tab",
@@ -556,20 +570,19 @@ fn settings_path() -> PathBuf {
     config_dir().join("settings.json")
 }
 
-fn theme_path() -> PathBuf {
-    config_dir().join("theme.txt")
-}
-
-fn load_theme_choice() -> ThemeChoice {
-    fs::read_to_string(theme_path())
-        .map(|raw| ThemeChoice::from_str(&raw))
-        .unwrap_or_default()
-}
-
-fn save_theme_choice(choice: ThemeChoice) {
-    let dir = config_dir();
-    let _ = fs::create_dir_all(&dir);
-    let _ = fs::write(dir.join("theme.txt"), choice.as_str());
+/// 旧版本把 macOS 菜单选的主题单独存在 theme.txt，现在并入 settings.json；
+/// 首次启动把旧值搬过去并删掉旧文件，之后只剩一个来源
+fn migrate_theme_file(settings: &mut Settings) {
+    let legacy = config_dir().join("theme.txt");
+    let Ok(raw) = fs::read_to_string(&legacy) else {
+        return;
+    };
+    settings.theme = ThemeChoice::from_str(&raw);
+    if let Err(error) = settings.save(&settings_path()) {
+        eprintln!("Could not migrate theme setting: {error}");
+        return;
+    }
+    let _ = fs::remove_file(legacy);
 }
 
 #[cfg(target_os = "macos")]
@@ -3020,6 +3033,14 @@ body.editing .findbar {{ display: none !important; }}
 	          <button type="button" data-setting="word-wrap" data-value="off" aria-pressed="false">{set_wrap_off}</button>
 	        </div>
 	      </div>
+	      <div class="settings-row">
+	        <span class="settings-label">{set_theme}</span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="theme" data-value="system" aria-pressed="true">{set_theme_system}</button>
+	          <button type="button" data-setting="theme" data-value="light" aria-pressed="false">{set_theme_light}</button>
+	          <button type="button" data-setting="theme" data-value="dark" aria-pressed="false">{set_theme_dark}</button>
+	        </div>
+	      </div>
 	      <div class="settings-sep"></div>
 	      <div class="settings-row">
 	        <div class="settings-label" style="justify-content: space-between;">
@@ -4162,7 +4183,8 @@ body.editing .findbar {{ display: none !important; }}
 	      'open-mode': settings.openMode,
 	      'tab-mode': settings.tabMode,
 	      'word-wrap': settings.wordWrap === false ? 'off' : 'on',
-	      'author-mode': settings.authorMode ? 'on' : 'off'
+	      'author-mode': settings.authorMode ? 'on' : 'off',
+	      'theme': settings.theme
 	    }};
 	    var buttons = settingsControl.querySelectorAll('[data-setting]');
 	    for (var i = 0; i < buttons.length; i++) {{
@@ -4739,6 +4761,10 @@ if(window.__enhancePreview)window.__enhancePreview();
         set_word_wrap = s.set_word_wrap,
         set_wrap_on = s.set_wrap_on,
         set_wrap_off = s.set_wrap_off,
+        set_theme = s.set_theme,
+        set_theme_system = s.set_theme_system,
+        set_theme_light = s.set_theme_light,
+        set_theme_dark = s.set_theme_dark,
         code_copy_js = escape_js(s.code_copy),
         code_copied_js = escape_js(s.code_copied),
         tab_menu_close = s.tab_menu_close,
@@ -5461,15 +5487,6 @@ mod tests {
     }
 
     #[test]
-    fn theme_choice_parses_menu_values() {
-        assert_eq!(ThemeChoice::from_str("system"), ThemeChoice::System);
-        assert_eq!(ThemeChoice::from_str("light"), ThemeChoice::Light);
-        assert_eq!(ThemeChoice::from_str("dark"), ThemeChoice::Dark);
-        assert_eq!(ThemeChoice::from_str("unexpected"), ThemeChoice::System);
-        assert_eq!(ThemeChoice::Dark.as_str(), "dark");
-    }
-
-    #[test]
     fn page_blocks_native_preview_reload_paths() {
         let strings = Strings::for_lang(Lang::En);
         let page = build_page(
@@ -5574,6 +5591,9 @@ mod tests {
         assert!(page.contains("data-setting=\"open-mode\" data-value=\"new-window\""));
         assert!(page.contains("data-setting=\"tab-mode\" data-value=\"single\""));
         assert!(page.contains("window.__setSettings"));
+        assert!(page.contains(r#"data-setting="theme" data-value="system""#));
+        assert!(page.contains(r#"data-setting="theme" data-value="dark""#));
+        assert!(page.contains("'theme': settings.theme"));
         assert!(page.contains("id=\"btn-zoom-in\""));
         assert!(page.contains("id=\"btn-zoom-out\""));
         assert!(page.contains("id=\"btn-zoom-reset\""));
@@ -7151,6 +7171,8 @@ struct App {
     warned_external_change: Option<PathBuf>,
     pending_external_change: Option<PathBuf>,
     sidebar_open_applied: bool,
+    /// 已压到窗口和 WebView 上的主题，设置变化时只在真的不同才重新应用
+    theme_applied: ThemeChoice,
     /// MD_PREVIEWER_BENCH=1 时记录启动时刻，首屏就绪即打印耗时并退出
     bench_started: Option<Instant>,
 }
@@ -7699,6 +7721,10 @@ impl App {
             resize_for_sidebar(&self.window, current.sidebar_open);
             self.sidebar_open_applied = current.sidebar_open;
         }
+        if current.theme != self.theme_applied {
+            apply_theme(&self.window, &self.webview, current.theme);
+            self.theme_applied = current.theme;
+        }
         if let Err(error) = current.save(&settings_path()) {
             eprintln!("Could not save settings: {error}");
         }
@@ -7900,8 +7926,10 @@ impl App {
                 }
             }
             UserEvent::SetTheme(choice) => {
-                save_theme_choice(choice);
-                self.window.set_theme(choice.tao_theme());
+                // macOS 菜单和设置面板走同一条落盘与应用路径
+                if self.settings.apply("theme", choice.as_str()) {
+                    self.on_settings_changed();
+                }
             }
             UserEvent::OpenUrl(url) => {
                 if let Err(error) = open::that(url) {
@@ -8001,7 +8029,8 @@ fn main() {
 
     let lang = detect_lang();
     let strings = Strings::for_lang(lang);
-    let settings = Settings::load(&settings_path());
+    let mut settings = Settings::load(&settings_path());
+    migrate_theme_file(&mut settings);
     let instance = match single_instance::prepare(
         &config_dir(),
         &cli_paths,
@@ -8028,7 +8057,7 @@ fn main() {
     let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build();
     let proxy = event_loop.create_proxy();
     instance.start(proxy.clone());
-    let initial_theme = load_theme_choice();
+    let initial_theme = settings.theme;
     install_macos_menu(proxy.clone(), initial_theme);
 
     let title = session
@@ -8174,6 +8203,11 @@ fn main() {
             }
             true
         });
+    #[cfg(target_os = "windows")]
+    let builder = {
+        use wry::WebViewBuilderExtWindows;
+        builder.with_theme(initial_theme.wry_theme())
+    };
 
     #[cfg(target_os = "linux")]
     let webview = {
@@ -8200,6 +8234,7 @@ fn main() {
     );
 
     let sidebar_open_applied = settings.sidebar_open;
+    let theme_applied = settings.theme;
     let mut app = App {
         webview,
         window,
@@ -8218,6 +8253,7 @@ fn main() {
         warned_external_change: None,
         pending_external_change: None,
         sidebar_open_applied,
+        theme_applied,
         bench_started: bench.then_some(t0),
     };
     app.persist_session();

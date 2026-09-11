@@ -26,6 +26,36 @@ pub enum TabMode {
     Single,
 }
 
+/// 界面外观。跟随系统时由 WebView 和窗口各自读取系统偏好，
+/// 手动指定时同时压到窗口标题栏和 WebView 的首选配色上
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeChoice {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl ThemeChoice {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ThemeChoice::System => "system",
+            ThemeChoice::Light => "light",
+            ThemeChoice::Dark => "dark",
+        }
+    }
+
+    /// 未知取值退回跟随系统，配置文件被手改坏也不至于没有主题
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "light" => ThemeChoice::Light,
+            "dark" => ThemeChoice::Dark,
+            _ => ThemeChoice::System,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -44,6 +74,8 @@ pub struct Settings {
     /// 自动换行：代码块和编辑器正文是否自动软换行
     #[serde(default = "default_true")]
     pub word_wrap: bool,
+    /// 外观：跟随系统 / 浅色 / 深色。macOS 菜单和设置面板共用这一个字段
+    pub theme: ThemeChoice,
 }
 
 impl Default for Settings {
@@ -54,6 +86,7 @@ impl Default for Settings {
             sidebar_open: false,
             author_mode: false,
             word_wrap: true,
+            theme: ThemeChoice::System,
         }
     }
 }
@@ -125,6 +158,10 @@ impl Settings {
                 word_wrap: false,
                 ..*self
             },
+            ("theme", "system" | "light" | "dark") => Self {
+                theme: ThemeChoice::from_str(value),
+                ..*self
+            },
             _ => return false,
         };
         if updated == *self {
@@ -154,6 +191,16 @@ mod tests {
         assert!(!settings.sidebar_open);
         assert!(!settings.author_mode);
         assert!(settings.word_wrap);
+        assert_eq!(settings.theme, ThemeChoice::System);
+    }
+
+    #[test]
+    fn theme_choice_parses_menu_and_panel_values() {
+        assert_eq!(ThemeChoice::from_str("system"), ThemeChoice::System);
+        assert_eq!(ThemeChoice::from_str("light"), ThemeChoice::Light);
+        assert_eq!(ThemeChoice::from_str(" Dark\n"), ThemeChoice::Dark);
+        assert_eq!(ThemeChoice::from_str("unexpected"), ThemeChoice::System);
+        assert_eq!(ThemeChoice::Dark.as_str(), "dark");
     }
 
     #[test]
@@ -192,6 +239,13 @@ mod tests {
         assert!(!settings.apply("word-wrap", "off"));
         assert!(settings.apply("word-wrap", "on"));
         assert!(settings.word_wrap);
+        assert!(settings.apply("theme", "dark"));
+        assert_eq!(settings.theme, ThemeChoice::Dark);
+        assert!(!settings.apply("theme", "dark"));
+        assert!(!settings.apply("theme", "blue"));
+        assert_eq!(settings.theme, ThemeChoice::Dark);
+        assert!(settings.apply("theme", "system"));
+        assert_eq!(settings.theme, ThemeChoice::System);
         assert_eq!(settings.tab_mode, TabMode::Single);
         assert_eq!(settings.open_mode, OpenMode::NewTab);
     }
@@ -214,6 +268,7 @@ mod tests {
             sidebar_open: true,
             author_mode: true,
             word_wrap: false,
+            theme: ThemeChoice::Dark,
         };
 
         saved.save(&path).unwrap();
@@ -222,6 +277,7 @@ mod tests {
         assert!(raw.contains("\"openMode\": \"new-window\""), "{raw}");
         assert!(raw.contains("\"tabMode\": \"single\""), "{raw}");
         assert!(raw.contains("\"wordWrap\": false"), "{raw}");
+        assert!(raw.contains("\"theme\": \"dark\""), "{raw}");
         assert_eq!(Settings::load(&path), saved);
 
         fs::write(&path, "{ not json").unwrap();
@@ -248,6 +304,7 @@ mod tests {
         assert_eq!(loaded.tab_mode, TabMode::Single);
         assert_eq!(loaded.open_mode, OpenMode::NewTab);
         assert!(loaded.word_wrap);
+        assert_eq!(loaded.theme, ThemeChoice::System);
         let _ = fs::remove_dir_all(dir);
     }
 }

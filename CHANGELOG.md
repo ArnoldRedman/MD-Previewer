@@ -2,6 +2,10 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## Unreleased
+
+- Appearance setting: choose System / Light / Dark in the settings panel. The choice is stored in `settings.json` (the old macOS `theme.txt` is migrated on first launch) and applied to both the window and the WebView, so Windows users can force dark mode regardless of the system theme.
+
 ## 1.4.1
 
 - Enhanced recent files management in sidebar:
