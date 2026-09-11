@@ -54,6 +54,17 @@ enum UserEvent {
     SetTheme(ThemeChoice),
     OpenUrl(&'static str),
     Quit,
+    /// 更新下载线程的进度回报；total 在服务端不给 Content-Length 时为 None
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    UpdateProgress {
+        downloaded: u64,
+        total: Option<u64>,
+    },
+    /// 更新包已完整落盘，事件循环里接着写安装脚本并退出
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    UpdateDownloaded(PathBuf),
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    UpdateFailed(String),
 }
 
 impl ThemeChoice {
@@ -215,6 +226,8 @@ struct Strings {
     btn_view_release: &'static str,
     btn_dismiss: &'static str,
     update_downloading: &'static str,
+    update_installing: &'static str,
+    update_failed: &'static str,
     update_close: &'static str,
     overwrite_title: &'static str,
     overwrite_body: &'static str,
@@ -304,7 +317,9 @@ impl Strings {
                 btn_do_update: "立即更新",
                 btn_view_release: "前往 GitHub 下载",
                 btn_dismiss: "稍后提醒",
-                update_downloading: "正在下载更新并准备重启...",
+                update_downloading: "正在下载更新...",
+                update_installing: "下载完成，正在安装并重启...",
+                update_failed: "更新失败：",
                 update_close: "关闭",
                 overwrite_title: "文件已存在",
                 overwrite_body: "{name} 已经存在，新建会清空它的内容。要继续吗？",
@@ -390,7 +405,9 @@ impl Strings {
                 btn_do_update: "Update Now",
                 btn_view_release: "View on GitHub",
                 btn_dismiss: "Later",
-                update_downloading: "Downloading update and restarting...",
+                update_downloading: "Downloading update...",
+                update_installing: "Downloaded, installing and restarting...",
+                update_failed: "Update failed: ",
                 update_close: "Close",
                 overwrite_title: "File Exists",
                 overwrite_body: "{name} already exists and will be emptied. Continue?",
@@ -422,64 +439,168 @@ fn config_dir() -> PathBuf {
 
 #[cfg(target_os = "windows")]
 mod windows_updater {
+    use std::fs::File;
+    use std::io::{Read, Write};
+    use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    /// 不给 powershell.exe 分配控制台，否则即使 -WindowStyle Hidden 也会闪一下黑窗
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    /// 进度回报的最小间隔，避免把事件循环刷满
+    const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+    /// 更新包上限，防止异常响应把磁盘写爆
+    const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
 
     pub fn is_allowed_update_url(url: &str) -> bool {
         url.starts_with("https://github.com/ArnoldRedman/MD-Previewer/releases/")
             || url.starts_with("https://github.com/ArnoldRedman/md-preview/releases/")
     }
 
-    pub fn apply_update(download_url: &str) -> Result<(), String> {
+    /// 安装包走 Start-Process 交给安装器；便携版直接覆盖当前 exe
+    fn is_installer(download_url: &str) -> bool {
+        download_url.to_lowercase().contains("setup")
+    }
+
+    fn staging_path(download_url: &str) -> PathBuf {
+        let pid = std::process::id();
+        let name = if is_installer(download_url) {
+            format!("md-preview-setup-{pid}.exe")
+        } else {
+            format!("md-preview-update-{pid}.exe")
+        };
+        std::env::temp_dir().join(name)
+    }
+
+    /// 清理 temp 目录中历史更新残留：上次失败或被杀的脚本不会自己收尾
+    fn remove_stale_files() {
+        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let s = name.to_string_lossy();
+            if s.starts_with("md-preview-update-") || s.starts_with("md-preview-setup-") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    /// 在调用线程里同步下载更新包到 temp，边写边通过 on_progress 回报字节数。
+    /// 返回落盘路径；任何失败都会把半截文件删掉
+    pub fn download_update(
+        download_url: &str,
+        mut on_progress: impl FnMut(u64, Option<u64>),
+    ) -> Result<PathBuf, String> {
         if !is_allowed_update_url(download_url) {
             return Err("Disallowed update URL".to_string());
         }
+        remove_stale_files();
+        let dest = staging_path(download_url);
+        let result = download_to(download_url, &dest, &mut on_progress);
+        if result.is_err() {
+            let _ = std::fs::remove_file(&dest);
+        }
+        result.map(|_| dest)
+    }
 
-        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let pid = std::process::id();
-        let temp_dir = std::env::temp_dir();
-        let is_installer = download_url.to_lowercase().contains("setup");
-
-        // 清理 temp 目录中历史更新残留
-        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let s = name.to_string_lossy();
-                if s.starts_with("md-preview-update-") || s.starts_with("md-preview-setup-") {
-                    let _ = std::fs::remove_file(entry.path());
-                }
+    fn download_to(
+        download_url: &str,
+        dest: &Path,
+        on_progress: &mut impl FnMut(u64, Option<u64>),
+    ) -> Result<(), String> {
+        // 用系统证书库校验，公司代理注入的根证书才认得出来
+        let tls = ureq::tls::TlsConfig::builder()
+            .provider(ureq::tls::TlsProvider::NativeTls)
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build();
+        let config = ureq::Agent::config_builder()
+            .tls_config(tls)
+            .timeout_connect(Some(Duration::from_secs(15)))
+            .timeout_recv_response(Some(Duration::from_secs(30)))
+            .user_agent(concat!("md-previewer/", env!("CARGO_PKG_VERSION")))
+            .build();
+        let agent = ureq::Agent::new_with_config(config);
+        let mut response = agent
+            .get(download_url)
+            .call()
+            .map_err(|error| error.to_string())?;
+        let total = response.body().content_length();
+        let mut reader = response
+            .body_mut()
+            .with_config()
+            .limit(MAX_DOWNLOAD_BYTES)
+            .reader();
+        let mut file = File::create(dest).map_err(|error| error.to_string())?;
+        let mut buffer = [0u8; 64 * 1024];
+        let mut downloaded = 0u64;
+        let mut last_report = Instant::now();
+        on_progress(0, total);
+        loop {
+            let read = reader
+                .read(&mut buffer)
+                .map_err(|error| error.to_string())?;
+            if read == 0 {
+                break;
+            }
+            file.write_all(&buffer[..read])
+                .map_err(|error| error.to_string())?;
+            downloaded += read as u64;
+            if last_report.elapsed() >= PROGRESS_INTERVAL {
+                on_progress(downloaded, total);
+                last_report = Instant::now();
             }
         }
-
-        let update_script = temp_dir.join(format!("md-preview-update-{pid}.ps1"));
-        let downloaded_file = if is_installer {
-            temp_dir.join(format!("md-preview-setup-{pid}.exe"))
+        file.flush().map_err(|error| error.to_string())?;
+        drop(file);
+        if let Some(total) = total {
+            if downloaded != total {
+                return Err(format!(
+                    "Incomplete download: {downloaded} of {total} bytes"
+                ));
+            }
+        }
+        let min_size = if is_installer(download_url) {
+            100_000
         } else {
-            temp_dir.join(format!("md-preview-update-{pid}.exe"))
+            1_000_000
         };
+        if downloaded < min_size {
+            return Err(format!("Downloaded file too small: {downloaded} bytes"));
+        }
+        on_progress(downloaded, Some(downloaded));
+        Ok(())
+    }
+
+    /// 写出并启动接手脚本：等本进程退出后用下载好的文件覆盖当前 exe 并重启，
+    /// 或直接拉起安装器。脚本完全无窗口运行；调用方随后负责退出本进程
+    pub fn launch_installer(downloaded: &Path) -> Result<(), String> {
+        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let pid = std::process::id();
+        let update_script = std::env::temp_dir().join(format!("md-preview-update-{pid}.ps1"));
+        let downloaded_name = downloaded
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let installer = downloaded_name.starts_with("md-preview-setup-");
 
         let target_s = current_exe.to_string_lossy().replace('\'', "''");
         let script_s = update_script.to_string_lossy().replace('\'', "''");
-        let download_s = downloaded_file.to_string_lossy().replace('\'', "''");
-        let url_s = download_url.replace('\'', "''");
+        let download_s = downloaded.to_string_lossy().replace('\'', "''");
 
-        let ps_content = if is_installer {
+        let ps_content = if installer {
             format!(
                 r#"$ErrorActionPreference = 'Stop'
-$url = '{url_s}'
 $downloaded = '{download_s}'
 $script = '{script_s}'
 $pidToWait = {pid}
 
 try {{
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $url -OutFile $downloaded -UseBasicParsing
-    if ((Get-Item $downloaded).Length -lt 100000) {{ throw 'Download size too small' }}
     Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue
     Start-Process -FilePath $downloaded
 }} catch {{
     Start-Process -FilePath '{target_s}'
 }} finally {{
-    Remove-Item -LiteralPath $downloaded -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue
 }}
 "#
@@ -488,15 +609,11 @@ try {{
             format!(
                 r#"$ErrorActionPreference = 'Stop'
 $target = '{target_s}'
-$url = '{url_s}'
 $downloaded = '{download_s}'
 $script = '{script_s}'
 $pidToWait = {pid}
 
 try {{
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $url -OutFile $downloaded -UseBasicParsing
-    if ((Get-Item $downloaded).Length -lt 1000000) {{ throw 'Download size too small' }}
     Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue
     $copied = $false
     $started = $false
@@ -511,7 +628,7 @@ try {{
     }}
     if (-not $copied) {{
         try {{
-            Start-Process -FilePath powershell.exe -ArgumentList "-NoProfile -Command Copy-Item -LiteralPath '$downloaded' -Destination '$target' -Force; Start-Process -FilePath '$target'" -Verb RunAs -Wait
+            Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -WindowStyle Hidden -Command Copy-Item -LiteralPath '$downloaded' -Destination '$target' -Force; Start-Process -FilePath '$target'" -Verb RunAs -Wait
             $copied = $true
             $started = $true
         }} catch {{}}
@@ -531,6 +648,7 @@ try {{
 
         std::fs::write(&update_script, ps_content).map_err(|e| e.to_string())?;
 
+        use std::os::windows::process::CommandExt;
         Command::new("powershell.exe")
             .arg("-NoProfile")
             .arg("-ExecutionPolicy")
@@ -539,10 +657,41 @@ try {{
             .arg("Hidden")
             .arg("-File")
             .arg(&update_script)
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 
-        std::process::exit(0);
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn rejects_urls_outside_the_release_pages() {
+            let mut calls = 0;
+            let error =
+                download_update("https://example.com/x.exe", |_, _| calls += 1).unwrap_err();
+            assert_eq!(error, "Disallowed update URL");
+            assert_eq!(calls, 0);
+        }
+
+        /// 真实走一遍 GitHub 下载：需要网络，默认忽略，手动 `cargo test -- --ignored` 验证
+        #[test]
+        #[ignore]
+        fn downloads_the_installer_with_monotonic_progress() {
+            let url = "https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.4.1/MD-Previewer-Setup.exe";
+            let mut reports: Vec<(u64, Option<u64>)> = Vec::new();
+            let path = download_update(url, |downloaded, total| reports.push((downloaded, total)))
+                .unwrap();
+            let size = std::fs::metadata(&path).unwrap().len();
+            let _ = std::fs::remove_file(&path);
+            assert_eq!(size, 1_986_560);
+            assert!(reports.len() >= 2, "{reports:?}");
+            assert_eq!(reports[0], (0, Some(size)));
+            assert_eq!(*reports.last().unwrap(), (size, Some(size)));
+            assert!(reports.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        }
     }
 }
 
@@ -2616,6 +2765,21 @@ body.empty .toolbar {{ display: none !important; }}
 	.update-progress-tip {{
 	  font-size: 12px; color: #1a73e8; display: flex; align-items: center; gap: 6px; font-weight: 500;
 	}}
+	.update-progress-tip.failed {{ color: #c62828; }}
+	.update-progress {{ display: flex; flex-direction: column; gap: 6px; }}
+	.update-progress-track {{
+	  height: 6px; border-radius: 3px; background: rgba(0,0,0,.08); overflow: hidden;
+	}}
+	.update-progress-fill {{
+	  height: 100%; width: 0; border-radius: 3px; background: #1a73e8; transition: width .12s linear;
+	}}
+	.update-progress-fill.indeterminate {{
+	  width: 35%; animation: update-progress-slide 1.2s ease-in-out infinite;
+	}}
+	@keyframes update-progress-slide {{
+	  0% {{ margin-left: 0; }} 50% {{ margin-left: 65%; }} 100% {{ margin-left: 0; }}
+	}}
+	.update-progress-meta {{ font-size: 11px; color: #666; text-align: right; }}
 	.update-footer {{
 	  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
 	  padding: 12px 20px 16px; border-top: 1px solid rgba(0,0,0,.08); background: rgba(0,0,0,.015);
@@ -2836,6 +3000,8 @@ body.empty .toolbar {{ display: none !important; }}
 	  .update-btn-secondary {{ border-color: rgba(255,255,255,.2); color: #ddd; }}
 	  .update-btn-secondary:hover {{ background: rgba(255,255,255,.08); }}
 	  .update-btn-text {{ color: #888; }}
+	  .update-progress-track {{ background: rgba(255,255,255,.1); }}
+	  .update-progress-meta {{ color: #999; }}
 	  .update-btn-text:hover {{ color: #ccc; }}
 	  .sidebar {{ background: rgba(24,24,24,.98); border-right-color: #333; }}
 	  .sidebar-sections button {{ color: #999; }}
@@ -3103,6 +3269,10 @@ body.editing .findbar {{ display: none !important; }}
 	        <span class="update-release-name" id="update-release-name"></span>
 	      </div>
 	      <div class="update-notes-box" id="update-notes-box"></div>
+	      <div id="update-progress" class="update-progress" style="display:none;">
+	        <div class="update-progress-track"><div id="update-progress-fill" class="update-progress-fill"></div></div>
+	        <div id="update-progress-meta" class="update-progress-meta"></div>
+	      </div>
 	      <div id="update-progress-tip" class="update-progress-tip" style="display:none;"></div>
 	    </div>
 	    <div class="update-footer">
@@ -4458,6 +4628,8 @@ body.editing .findbar {{ display: none !important; }}
   var L_LATEST_UPDATE = '{update_status_latest_js}';
   var L_FAILED_UPDATE = '{update_status_failed_js}';
   var L_DOWNLOADING_UPDATE = '{update_downloading_js}';
+  var L_INSTALLING_UPDATE = '{update_installing_js}';
+  var L_UPDATE_FAILED = '{update_failed_js}';
   var L_UPDATE_TEXT = '{btn_update_text_js}';
   var L_CHECK_UPDATE = '{btn_check_update_js}';
 
@@ -4471,6 +4643,11 @@ body.editing .findbar {{ display: none !important; }}
   var updateReleaseName = document.getElementById('update-release-name');
   var updateNotesBox = document.getElementById('update-notes-box');
   var updateProgressTip = document.getElementById('update-progress-tip');
+  var updateProgress = document.getElementById('update-progress');
+  var updateProgressFill = document.getElementById('update-progress-fill');
+  var updateProgressMeta = document.getElementById('update-progress-meta');
+  // 下载由 Rust 在后台线程进行；弹窗关掉再打开也要继续显示进度，所以状态放在这里
+  var updateDownloading = false;
   var btnDoUpdate = document.getElementById('btn-do-update');
   var btnViewRelease = document.getElementById('btn-view-release');
   var btnDismissUpdate = document.getElementById('btn-dismiss-update');
@@ -4522,14 +4699,67 @@ body.editing .findbar {{ display: none !important; }}
     for (var i = 0; i < withIds.length; i++) withIds[i].removeAttribute('id');
   }}
 
+  function formatBytes(n) {{
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+    if (n >= 1024) return Math.round(n / 1024) + ' KB';
+    return n + ' B';
+  }}
+
+  function setUpdateTip(text, failed) {{
+    if (!updateProgressTip) return;
+    updateProgressTip.style.display = 'flex';
+    updateProgressTip.textContent = text;
+    updateProgressTip.classList.toggle('failed', !!failed);
+  }}
+
+  function resetUpdateProgress() {{
+    updateDownloading = false;
+    if (updateProgress) updateProgress.style.display = 'none';
+    if (updateProgressTip) {{ updateProgressTip.style.display = 'none'; updateProgressTip.classList.remove('failed'); }}
+    if (btnDoUpdate) btnDoUpdate.disabled = false;
+  }}
+
+  function setUpdateProgress(downloaded, total) {{
+    updateDownloading = true;
+    if (btnDoUpdate) btnDoUpdate.disabled = true;
+    if (updateProgress) updateProgress.style.display = 'flex';
+    var known = typeof total === 'number' && total > 0;
+    var pct = known ? Math.min(100, Math.floor(downloaded * 100 / total)) : 0;
+    if (updateProgressFill) {{
+      updateProgressFill.classList.toggle('indeterminate', !known);
+      updateProgressFill.style.width = known ? pct + '%' : '';
+    }}
+    if (updateProgressMeta) {{
+      updateProgressMeta.textContent = known
+        ? formatBytes(downloaded) + ' / ' + formatBytes(total) + ' (' + pct + '%)'
+        : formatBytes(downloaded);
+    }}
+    setUpdateTip(L_DOWNLOADING_UPDATE, false);
+  }}
+
+  function setUpdateInstalling() {{
+    updateDownloading = true;
+    if (updateProgressFill) {{ updateProgressFill.classList.remove('indeterminate'); updateProgressFill.style.width = '100%'; }}
+    setUpdateTip(L_INSTALLING_UPDATE, false);
+  }}
+
+  function setUpdateFailed(message) {{
+    resetUpdateProgress();
+    setUpdateTip(L_UPDATE_FAILED + (message || ''), true);
+  }}
+
+  window.__setUpdateProgress = setUpdateProgress;
+  window.__setUpdateInstalling = setUpdateInstalling;
+  window.__setUpdateFailed = setUpdateFailed;
+
   function showUpdateModal(release) {{
     if (!release) return;
     activeReleaseData = release;
     if (updateBadge) updateBadge.textContent = release.tag_name || ('v' + CURRENT_VERSION);
     if (updateReleaseName) updateReleaseName.textContent = release.name || '';
     if (updateNotesBox) renderUpdateNotes(release);
-    if (updateProgressTip) updateProgressTip.style.display = 'none';
-    if (btnDoUpdate) btnDoUpdate.disabled = false;
+    // 下载进行中重新打开弹窗时保留进度条，只有空闲状态才清掉上次的提示
+    if (!updateDownloading) resetUpdateProgress();
     if (updateModal) updateModal.style.display = 'flex';
   }}
 
@@ -4677,11 +4907,9 @@ body.editing .findbar {{ display: none !important; }}
       }}
       var downloadUrl = chosenAsset ? chosenAsset.browser_download_url : activeReleaseData.html_url;
       if (downloadUrl && downloadUrl.indexOf('.exe') !== -1 && window.ipc) {{
-        btnDoUpdate.disabled = true;
-        if (updateProgressTip) {{
-          updateProgressTip.style.display = 'block';
-          updateProgressTip.textContent = L_DOWNLOADING_UPDATE;
-        }}
+        if (updateDownloading) return;
+        // 先按未知总量显示动画，Rust 拿到 Content-Length 后会推真实进度
+        setUpdateProgress(0, null);
         window.ipc.postMessage('self-update:' + downloadUrl);
       }} else {{
         var fallbackUrl = (activeReleaseData && activeReleaseData.html_url) || 'https://github.com/ArnoldRedman/MD-Previewer/releases';
@@ -4809,6 +5037,8 @@ if(window.__enhancePreview)window.__enhancePreview();
         btn_view_release = s.btn_view_release,
         btn_dismiss = s.btn_dismiss,
         update_downloading_js = escape_js(s.update_downloading),
+        update_installing_js = escape_js(s.update_installing),
+        update_failed_js = escape_js(s.update_failed),
         update_close = s.update_close,
         initial_encoding = initial_encoding,
         opt_utf8 = if initial_encoding == "UTF-8" {
@@ -6123,6 +6353,9 @@ mod tests {
         assert!(page.contains("UPDATE_CHECK_INTERVAL_MS"));
         assert!(page.contains("self-update:"));
         assert!(page.contains("isNewerVersion"));
+        assert!(page.contains("id=\"update-progress-fill\""));
+        assert!(page.contains("window.__setUpdateProgress = setUpdateProgress"));
+        assert!(page.contains("window.__setUpdateFailed = setUpdateFailed"));
     }
 
     #[test]
@@ -7173,6 +7406,8 @@ struct App {
     sidebar_open_applied: bool,
     /// 已压到窗口和 WebView 上的主题，设置变化时只在真的不同才重新应用
     theme_applied: ThemeChoice,
+    /// 更新包下载线程是否在跑；重复点「立即更新」不再起第二个下载
+    update_downloading: bool,
     /// MD_PREVIEWER_BENCH=1 时记录启动时刻，首屏就绪即打印耗时并退出
     bench_started: Option<Instant>,
 }
@@ -7877,25 +8112,75 @@ impl App {
             IpcMessage::Ready => self.on_ready(control_flow),
             IpcMessage::Refresh => self.refresh_active(),
             IpcMessage::SetEncoding(encoding) => self.set_encoding(encoding),
-            IpcMessage::SelfUpdate(download_url) => {
-                #[cfg(target_os = "windows")]
-                {
-                    if let Err(err) = windows_updater::apply_update(&download_url) {
-                        eprintln!("[update error] {err}");
-                    }
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    if let Err(error) = open::that(&download_url) {
-                        eprintln!("Could not open {download_url}: {error}");
-                    }
-                }
-            }
+            IpcMessage::SelfUpdate(download_url) => self.start_self_update(download_url),
+        }
+    }
+
+    /// Windows 上在后台线程下载更新包并把进度推给页面；其他平台只打开下载页
+    #[cfg(target_os = "windows")]
+    fn start_self_update(&mut self, download_url: String) {
+        if self.update_downloading {
+            return;
+        }
+        self.update_downloading = true;
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let result = windows_updater::download_update(&download_url, |downloaded, total| {
+                let _ = proxy.send_event(UserEvent::UpdateProgress { downloaded, total });
+            });
+            let event = match result {
+                Ok(path) => UserEvent::UpdateDownloaded(path),
+                Err(error) => UserEvent::UpdateFailed(error),
+            };
+            let _ = proxy.send_event(event);
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn start_self_update(&mut self, download_url: String) {
+        if let Err(error) = open::that(&download_url) {
+            eprintln!("Could not open {download_url}: {error}");
         }
     }
 
     fn handle_user_event(&mut self, event: UserEvent, control_flow: &mut ControlFlow) {
         match event {
+            UserEvent::UpdateProgress { downloaded, total } => {
+                let total = total.map_or("null".to_string(), |total| total.to_string());
+                self.eval(&format!(
+                    "if(window.__setUpdateProgress)window.__setUpdateProgress({downloaded},{total});"
+                ));
+            }
+            UserEvent::UpdateDownloaded(path) => {
+                self.update_downloading = false;
+                #[cfg(target_os = "windows")]
+                match windows_updater::launch_installer(&path) {
+                    Ok(()) => {
+                        // 接手脚本已在等本进程退出；走正常关窗流程，未保存的编辑会先写回
+                        self.eval(
+                            "if(window.__setUpdateInstalling)window.__setUpdateInstalling();",
+                        );
+                        self.request_close(control_flow);
+                    }
+                    Err(error) => {
+                        let _ = fs::remove_file(&path);
+                        self.eval(&format!(
+                            "if(window.__setUpdateFailed)window.__setUpdateFailed('{}');",
+                            escape_js(&error)
+                        ));
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = path;
+            }
+            UserEvent::UpdateFailed(error) => {
+                self.update_downloading = false;
+                eprintln!("[update error] {error}");
+                self.eval(&format!(
+                    "if(window.__setUpdateFailed)window.__setUpdateFailed('{}');",
+                    escape_js(&error)
+                ));
+            }
             UserEvent::Ipc(body) => {
                 if let Some(message) = parse_ipc_message(&body) {
                     self.handle_ipc(message, control_flow);
@@ -8254,6 +8539,7 @@ fn main() {
         pending_external_change: None,
         sidebar_open_applied,
         theme_applied,
+        update_downloading: false,
         bench_started: bench.then_some(t0),
     };
     app.persist_session();

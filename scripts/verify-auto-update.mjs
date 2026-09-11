@@ -23,8 +23,21 @@ if (!mainRs.includes('id="update-modal"')) {
 if (!mainRs.includes('UPDATE_CHECK_INTERVAL_MS')) {
   throw new Error('Expected UPDATE_CHECK_INTERVAL_MS in main.rs');
 }
-if (!mainRs.includes('windows_updater::apply_update')) {
-  throw new Error('Expected windows_updater::apply_update in main.rs');
+// Windows 更新包由 Rust 后台线程下载并回报进度，接手脚本必须无控制台窗口
+if (!mainRs.includes('windows_updater::download_update(')) {
+  throw new Error('Expected windows_updater::download_update in main.rs');
+}
+if (!mainRs.includes('windows_updater::launch_installer(')) {
+  throw new Error('Expected windows_updater::launch_installer in main.rs');
+}
+if (!mainRs.includes('.creation_flags(CREATE_NO_WINDOW)')) {
+  throw new Error('Expected the updater script to be spawned with CREATE_NO_WINDOW');
+}
+if (mainRs.includes('Invoke-WebRequest')) {
+  throw new Error('Downloading must happen in Rust, not inside the PowerShell script');
+}
+if (!mainRs.includes('UserEvent::UpdateProgress { downloaded, total }')) {
+  throw new Error('Expected download progress to be forwarded through UserEvent::UpdateProgress');
 }
 // 发布说明必须经 Rust 侧 Markdown 渲染器回填，而不是当纯文本显示
 if (!mainRs.includes('"render-release-notes" => IpcMessage::RenderReleaseNotes')) {
@@ -58,6 +71,8 @@ let desktopScript = mainRs
   .replaceAll('{update_status_latest_js}', 'Up to date')
   .replaceAll('{update_status_failed_js}', 'Check failed')
   .replaceAll('{update_downloading_js}', 'Downloading...')
+  .replaceAll('{update_installing_js}', 'Installing...')
+  .replaceAll('{update_failed_js}', 'Update failed: ')
   .replaceAll('{btn_edit}', 'Edit')
   .replaceAll('{btn_preview}', 'Preview')
   .replaceAll('{btn_edit_js}', 'Edit')
@@ -186,6 +201,10 @@ const htmlContent = `
           <span class="update-release-name" id="update-release-name"></span>
         </div>
         <div class="update-notes-box" id="update-notes-box"></div>
+        <div id="update-progress" class="update-progress" style="display:none;">
+          <div class="update-progress-track"><div id="update-progress-fill" class="update-progress-fill"></div></div>
+          <div id="update-progress-meta" class="update-progress-meta"></div>
+        </div>
         <div id="update-progress-tip" class="update-progress-tip" style="display:none;"></div>
       </div>
       <div class="update-footer">
@@ -324,6 +343,83 @@ if (!hasSelfUpdateMsg) {
   throw new Error('Expected self-update IPC message with portable exe download url, got: ' + JSON.stringify(messages));
 }
 console.log('  Self-update IPC message verified successfully: ' + messages.find(m => m.startsWith('self-update:')));
+
+// 点击后立刻进入下载态：按钮禁用、进度条以未知总量动画显示，等 Rust 推真实进度
+const startState = await page.evaluate(() => ({
+  disabled: document.getElementById('btn-do-update').disabled,
+  progressShown: document.getElementById('update-progress').style.display,
+  indeterminate: document.getElementById('update-progress-fill').classList.contains('indeterminate'),
+  tip: document.getElementById('update-progress-tip').textContent,
+  ipcCount: window.__messages.filter(m => m.startsWith('self-update:')).length
+}));
+if (!startState.disabled || startState.progressShown !== 'flex' || !startState.indeterminate || startState.tip !== 'Downloading...') {
+  throw new Error('Expected download-in-progress state right after clicking Update Now, got: ' + JSON.stringify(startState));
+}
+// 下载中再点一次不能再发一条 self-update
+await page.click('#btn-do-update', { force: true });
+const ipcAfterSecondClick = await page.evaluate(() => window.__messages.filter(m => m.startsWith('self-update:')).length);
+if (ipcAfterSecondClick !== startState.ipcCount) {
+  throw new Error('A second click while downloading must not start another download');
+}
+
+// Rust 推进度：宽度、百分比和字节数都要体现在弹窗里
+const progressState = await page.evaluate(() => {
+  window.__setUpdateProgress(3 * 1048576, 12 * 1048576);
+  return {
+    width: document.getElementById('update-progress-fill').style.width,
+    indeterminate: document.getElementById('update-progress-fill').classList.contains('indeterminate'),
+    meta: document.getElementById('update-progress-meta').textContent
+  };
+});
+if (progressState.width !== '25%' || progressState.indeterminate || progressState.meta !== '3.0 MB / 12.0 MB (25%)') {
+  throw new Error('Unexpected progress rendering: ' + JSON.stringify(progressState));
+}
+
+// 弹窗关掉再打开，下载中的进度条必须还在
+await page.click('#update-close');
+await page.evaluate(() => document.getElementById('btn-update-available').click());
+const reopened = await page.evaluate(() => ({
+  progressShown: document.getElementById('update-progress').style.display,
+  width: document.getElementById('update-progress-fill').style.width,
+  disabled: document.getElementById('btn-do-update').disabled
+}));
+if (reopened.progressShown !== 'flex' || reopened.width !== '25%' || !reopened.disabled) {
+  throw new Error('Reopening the modal mid-download must keep the progress state: ' + JSON.stringify(reopened));
+}
+
+// 下载完成进入安装态：进度满格、提示切换
+const installing = await page.evaluate(() => {
+  window.__setUpdateInstalling();
+  return {
+    width: document.getElementById('update-progress-fill').style.width,
+    tip: document.getElementById('update-progress-tip').textContent
+  };
+});
+if (installing.width !== '100%' || installing.tip !== 'Installing...') {
+  throw new Error('Unexpected installing state: ' + JSON.stringify(installing));
+}
+
+// 失败：提示变红、按钮恢复可点，进度条收起
+const failed = await page.evaluate(() => {
+  window.__setUpdateFailed('HTTP 503');
+  return {
+    tip: document.getElementById('update-progress-tip').textContent,
+    failedClass: document.getElementById('update-progress-tip').classList.contains('failed'),
+    progressShown: document.getElementById('update-progress').style.display,
+    disabled: document.getElementById('btn-do-update').disabled
+  };
+});
+if (failed.tip !== 'Update failed: HTTP 503' || !failed.failedClass || failed.progressShown !== 'none' || failed.disabled) {
+  throw new Error('Unexpected failed state: ' + JSON.stringify(failed));
+}
+// 失败后重新点击可以再次发起下载
+await page.click('#btn-do-update');
+const retryCount = await page.evaluate(() => window.__messages.filter(m => m.startsWith('self-update:')).length);
+if (retryCount !== startState.ipcCount + 1) {
+  throw new Error('Retry after failure must send a new self-update message');
+}
+await page.evaluate(() => window.__setUpdateFailed('reset for the remaining checks'));
+console.log('  Download progress / installing / failure states verified successfully.');
 
 // Test dismiss button closes modal
 await page.click('#btn-dismiss-update');
