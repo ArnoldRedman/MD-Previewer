@@ -66,7 +66,7 @@ let desktopScript = mainRs
   .slice(scriptStart + '<script>'.length, scriptEnd)
   .replaceAll('{{', '{')
   .replaceAll('}}', '}')
-  .replaceAll('{cargo_version}', '1.5.0')
+  .replaceAll('{cargo_version}', '1.4.2')
   .replaceAll('{update_status_checking_js}', 'Checking...')
   .replaceAll('{update_status_latest_js}', 'Up to date')
   .replaceAll('{update_status_failed_js}', 'Check failed')
@@ -158,7 +158,7 @@ const htmlContent = `
           <div class="settings-sep"></div>
           <div class="settings-row">
             <div class="settings-label">
-              <span>Version: v1.5.0</span>
+              <span>Version: v1.4.2</span>
               <span id="update-status-msg" class="update-status-msg"></span>
             </div>
             <button type="button" id="btn-check-update" class="settings-action-btn">Check</button>
@@ -252,12 +252,12 @@ const versionComparisonResult = await page.evaluate(() => {
   };
 
   return {
-    test1: isNewer('v1.5.1', '1.5.0'),     // true
-    test2: isNewer('v1.6.0', '1.5.0'),     // true
-    test3: isNewer('v1.5.0', '1.5.0'),     // false
-    test4: isNewer('v1.4.1', '1.5.0'),     // false
-    test5: isNewer('v1.10.0', '1.5.0'),    // true
-    test6: isNewer('1.5.1', '1.5.0'),      // true
+    test1: isNewer('v1.4.3', '1.4.2'),     // true
+    test2: isNewer('v1.5.0', '1.4.2'),     // true
+    test3: isNewer('v1.4.2', '1.4.2'),     // false
+    test4: isNewer('v1.4.1', '1.4.2'),     // false
+    test5: isNewer('v1.10.0', '1.4.2'),    // true
+    test6: isNewer('1.4.3', '1.4.2'),      // true
   };
 });
 
@@ -271,13 +271,13 @@ console.log('Verifying 3: Modal show, hide, and IPC trigger...');
 await page.evaluate(() => {
   // Simulate detecting a release
   const fakeRelease = {
-    tag_name: 'v1.5.1',
-    name: 'v1.5.1 — Test Update',
-    body: '## 1.5.1 Notes\n- Fixed **something**',
-    html_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/tag/v1.5.1',
+    tag_name: 'v1.4.3',
+    name: 'v1.4.3 — Test Update',
+    body: '## 1.4.3 Notes\n- Fixed **something**',
+    html_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/tag/v1.4.3',
     assets: [
-      { name: 'MD-Previewer-Setup.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.5.1/MD-Previewer-Setup.exe' },
-      { name: 'MD-Previewer-windows-x64.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.5.1/MD-Previewer-windows-x64.exe' }
+      { name: 'MD-Previewer-Setup.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.4.3/MD-Previewer-Setup.exe' },
+      { name: 'MD-Previewer-windows-x64.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.4.3/MD-Previewer-windows-x64.exe' }
     ]
   };
 
@@ -290,14 +290,14 @@ const isModalVisible = await page.$eval('#update-modal', el => el.style.display 
 if (!isModalVisible) throw new Error('Expected #update-modal to be displayed on update button click');
 
 const badgeText = await page.$eval('#update-badge', el => el.textContent.trim());
-if (badgeText !== 'v1.5.1') throw new Error(`Expected badge text 'v1.5.1', got '${badgeText}'`);
+if (badgeText !== 'v1.4.3') throw new Error(`Expected badge text 'v1.4.3', got '${badgeText}'`);
 
 const releaseName = await page.$eval('#update-release-name', el => el.textContent.trim());
-if (releaseName !== 'v1.5.1 — Test Update') throw new Error(`Expected release name 'v1.5.1 — Test Update', got '${releaseName}'`);
+if (releaseName !== 'v1.4.3 — Test Update') throw new Error(`Expected release name 'v1.4.3 — Test Update', got '${releaseName}'`);
 
 // 发布说明是 Markdown：打开弹窗时应交给 Rust 渲染，而不是把原文当纯文本塞进弹窗
 const notesRequest = await page.evaluate(() => window.__messages.find(m => m.startsWith('render-release-notes:')));
-if (notesRequest !== 'render-release-notes:## 1.5.1 Notes\n- Fixed **something**') {
+if (notesRequest !== 'render-release-notes:## 1.4.3 Notes\n- Fixed **something**') {
   throw new Error('Expected render-release-notes IPC message carrying the release body, got: ' + JSON.stringify(notesRequest));
 }
 const pendingNotesText = await page.$eval('#update-notes-box', el => el.textContent);
@@ -307,7 +307,7 @@ if (pendingNotesText !== '') {
 
 // 模拟 Rust 渲染完成回填：显示解析后的 HTML，并去掉标题 id 以免与正文锚点重名
 await page.evaluate(() => {
-  window.__setUpdateNotes('<h2 id="151-notes">1.5.1 Notes</h2>\n<ul>\n<li>Fixed <strong>something</strong></li>\n</ul>\n');
+  window.__setUpdateNotes('<h2 id="143-notes">1.4.3 Notes</h2>\n<ul>\n<li>Fixed <strong>something</strong></li>\n</ul>\n');
 });
 const renderedNotes = await page.$eval('#update-notes-box', el => ({
   heading: el.querySelector('h2') ? el.querySelector('h2').textContent : null,
@@ -318,7 +318,7 @@ const renderedNotes = await page.$eval('#update-notes-box', el => ({
   height: el.getBoundingClientRect().height,
   overflowsX: el.scrollWidth > el.clientWidth + 1
 }));
-if (renderedNotes.heading !== '1.5.1 Notes' || renderedNotes.strong !== 'something') {
+if (renderedNotes.heading !== '1.4.3 Notes' || renderedNotes.strong !== 'something') {
   throw new Error('Expected rendered release notes with <h2> and <strong>, got: ' + JSON.stringify(renderedNotes));
 }
 if (renderedNotes.text.includes('**') || renderedNotes.text.includes('#')) {
@@ -338,7 +338,7 @@ console.log('  Release notes markdown rendering verified successfully.');
 // Test clicking "Update Now"
 await page.click('#btn-do-update');
 const messages = await page.evaluate(() => window.__messages);
-const hasSelfUpdateMsg = messages.some(m => m.startsWith('self-update:https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.5.1/MD-Previewer-windows-x64.exe'));
+const hasSelfUpdateMsg = messages.some(m => m.startsWith('self-update:https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.4.3/MD-Previewer-windows-x64.exe'));
 if (!hasSelfUpdateMsg) {
   throw new Error('Expected self-update IPC message with portable exe download url, got: ' + JSON.stringify(messages));
 }
@@ -452,7 +452,7 @@ if (checkBtnBox.width < 100) {
 if (checkBtnBox.scrollWidth > checkBtnBox.offsetWidth + 2) {
   throw new Error(`Text in #btn-check-update overflows container! scrollWidth=${checkBtnBox.scrollWidth}, offsetWidth=${checkBtnBox.offsetWidth}`);
 }
-if (!checkBtnBox.hasUpdate || !checkBtnBox.text.includes('v1.5.1')) {
+if (!checkBtnBox.hasUpdate || !checkBtnBox.text.includes('v1.4.3')) {
   throw new Error(`Expected #btn-check-update to display detected version and have 'has-update' class, got: ${JSON.stringify(checkBtnBox)}`);
 }
 
