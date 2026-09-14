@@ -73,3 +73,11 @@ jobs:
         run: |
           ./scripts/verify.sh
           cargo build --release
+      - name: Package tar.gz and .deb
+        run: ./scripts/build-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: md-previewer-linux-x64
+          path: |
+            dist/*.tar.gz
+            dist/*.deb

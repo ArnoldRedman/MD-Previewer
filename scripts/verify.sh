@@ -96,7 +96,7 @@ for filename in removed:
 PY
 
 echo "[verify] shell syntax"
-bash -n bundle.sh install.sh mobile/scripts/*.sh
+bash -n bundle.sh install.sh scripts/build-linux.sh mobile/scripts/*.sh
 
 echo "[verify] Rust format/check/test"
 cargo fmt --check

@@ -41,7 +41,7 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 
 All rendering assets are bundled locally. Automatic update checks are routed through GitHub Releases.
 
-Released packages are currently **Windows only**. The macOS and mobile shells build from source but are not published yet, because this fork has no signing identity.
+Published downloads are the **Windows installer / portable build** and the **Android APK**. macOS and iOS still build from source, because this fork has no Apple signing identity. Linux packages (`tar.gz` and `.deb`) are built by CI and attached as workflow artifacts rather than release assets.
 
 ## Windows one-click build
 
@@ -78,11 +78,18 @@ macOS universal app:
 ./install.sh
 ```
 
+Linux packages (must run on Linux; produces `dist/md-previewer-<version>-linux-x64.tar.gz` and `dist/md-previewer_<version>_amd64.deb`):
+
+```bash
+cargo build --release
+./scripts/build-linux.sh
+```
+
 Mobile builds:
 
 ```bash
 cd mobile/ios && xcodegen generate
-cd mobile/android && gradle :app:assembleDebug
+cd mobile/android && ./gradlew :app:assembleDebug
 ```
 
 Run the repository verification entry point with:

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=@APP_NAME@
+GenericName=Markdown Reader
+Comment=Read and edit Markdown with the system WebView
+Exec=@BIN_NAME@ %F
+Icon=@ICON_NAME@
+Terminal=false
+Categories=Office;TextEditor;Viewer;
+MimeType=text/markdown;text/x-markdown;
+StartupNotify=true
+StartupWMClass=@BIN_NAME@

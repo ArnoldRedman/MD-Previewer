@@ -41,7 +41,7 @@ MD Previewer 是一个体积小、本地优先的 Markdown 阅读器和快速编
 
 渲染资源全部离线内置。自动更新检查通过 GitHub Releases API 安全校验与更新。
 
-目前发布的安装包**仅有 Windows**。macOS 与移动端外壳可以从源码构建，但因为本 fork 还没有签名身份，暂不发包。
+对外发布的是 **Windows 安装包 / 免安装版** 和 **Android APK**。macOS 与 iOS 仍需从源码构建，因为本 fork 没有 Apple 签名身份。Linux 包（`tar.gz` 与 `.deb`）由 CI 构建，作为工作流产物提供，暂未挂到 release。
 
 ## Windows 一键构建
 
@@ -78,11 +78,18 @@ macOS 通用应用：
 ./install.sh
 ```
 
+Linux 包（必须在 Linux 上跑；产出 `dist/md-previewer-<version>-linux-x64.tar.gz` 与 `dist/md-previewer_<version>_amd64.deb`）：
+
+```bash
+cargo build --release
+./scripts/build-linux.sh
+```
+
 移动端：
 
 ```bash
 cd mobile/ios && xcodegen generate
-cd mobile/android && gradle :app:assembleDebug
+cd mobile/android && ./gradlew :app:assembleDebug
 ```
 
 仓库统一验证入口：
