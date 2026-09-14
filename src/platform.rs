@@ -1,9 +1,13 @@
 // 系统集成：默认应用注册、文件管理器定位、Linux WebKit 兼容
 /// 在系统文件管理器中定位并选中文件
 use crate::i18n::Lang;
-use crate::paths::config_dir;
-use std::fs;
 use std::path::Path;
+
+// 默认应用注册只在 macOS / Windows 上实现，其他平台走不到这两个依赖
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::paths::config_dir;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::fs;
 
 pub(crate) fn reveal_in_file_manager(path: &Path) {
     #[cfg(target_os = "windows")]

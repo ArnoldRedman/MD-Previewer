@@ -1,11 +1,14 @@
 // 单元测试：覆盖编码、Markdown 渲染、侧栏与 IPC 解析
 use super::*;
 use crate::document::{
-    decode_utf16, decode_windows_codepage, document_to_html, encode_document,
-    read_document_to_string, read_document_with_encoding, save_as_target_path, save_document_text,
+    decode_utf16, document_to_html, encode_document, read_document_to_string,
+    read_document_with_encoding, save_as_target_path, save_document_text,
     self_write_still_matches_disk, should_protect_external_change, write_document_bytes,
     SelfWriteRecord,
 };
+// Windows 专用：代码页转换只在 Windows 上有实现
+#[cfg(target_os = "windows")]
+use crate::document::decode_windows_codepage;
 use crate::finder::{create_finder_file, normalize_new_markdown_path};
 use crate::i18n::{Lang, Strings};
 use crate::ipc::{parse_finder_action, parse_ipc_message, FinderAction, IpcMessage, TabAction};

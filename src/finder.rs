@@ -2,6 +2,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// 只在注册 Finder 扩展的 macOS 分支里用到
+#[cfg(target_os = "macos")]
+use crate::paths::config_dir;
+#[cfg(target_os = "macos")]
+use crate::window::show_info_dialog;
+
 pub(crate) fn create_finder_file(folder: &Path, kind: &str) -> std::io::Result<PathBuf> {
     if !folder.is_dir() {
         return Err(std::io::Error::new(

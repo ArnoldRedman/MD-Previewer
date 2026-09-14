@@ -21,6 +21,8 @@ use crate::session::DocumentSession;
 use crate::settings::{Settings, TabMode, ThemeChoice};
 use crate::sidebar::{author_doc, missing_preview_html, sidebar_json, tabs_json};
 use crate::theme::apply_theme;
+// 只有 Windows 分支会调用更新下载
+#[cfg(target_os = "windows")]
 use crate::updater::windows_updater;
 use crate::watch::{event_should_reload_file, watch_scope_for_file};
 use crate::window::{resize_for_sidebar, save_window_geom, settings_path, show_warning_dialog};

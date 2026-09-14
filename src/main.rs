@@ -50,10 +50,13 @@ use crate::window::{
     centered_geom, geom_visible, load_window_geom, load_window_icon, migrate_theme_file,
     settings_path,
 };
+use std::env;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::{env, fs};
+// 只有 Windows 分支会去建 WebView2 数据目录
+#[cfg(target_os = "windows")]
+use std::fs;
 use tao::dpi::{LogicalPosition, LogicalSize};
 use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
 use tao::window::WindowBuilder;
