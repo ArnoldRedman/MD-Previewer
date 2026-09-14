@@ -17,6 +17,9 @@ MD Previewer 是一个体积小、本地优先的 Markdown 阅读器和快速编
 ### 编辑模式与设置面板
 ![MD Previewer 编辑模式与设置面板](docs/editor.png)
 
+### 深色模式
+![MD Previewer 深色模式](docs/preview-dark.png)
+
 ## 当前功能
 
 - 从命令行、文件选择器、拖放或系统文件关联打开 Markdown 与任意文本文件（`.txt`、`.json`、`.toml`、`.yaml`、`.log`、源码、无扩展名文件等），二进制文件会被拒绝

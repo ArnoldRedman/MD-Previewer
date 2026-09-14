@@ -17,6 +17,9 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 ### Editor & Settings Mode
 ![MD Previewer Editor](docs/editor.png)
 
+### Dark Mode
+![MD Previewer Dark Mode](docs/preview-dark.png)
+
 ## What it does
 
 - Opens Markdown files and any text file (`.txt`, `.json`, `.toml`, `.yaml`, `.log`, source code, files without an extension) from the command line, file picker, drag and drop, or OS file associations; binary files are refused.

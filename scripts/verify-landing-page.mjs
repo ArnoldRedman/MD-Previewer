@@ -39,7 +39,7 @@ for (const [name, html] of Object.entries(pages)) {
   if (!html.includes('hreflang="zh-CN"') || !html.includes('hreflang="en"')) {
     throw new Error(`${name} 缺少 hreflang 交叉声明`);
   }
-  for (const shot of ['icon.png', 'preview.png', 'editor.png']) {
+  for (const shot of ['icon.png', 'preview.png', 'preview-dark.png', 'editor.png']) {
     if (!html.includes(shot)) throw new Error(`${name} 没有引用截图 ${shot}`);
   }
   if (!html.includes('"@type": "SoftwareApplication"')) {
