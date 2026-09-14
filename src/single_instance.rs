@@ -5,7 +5,7 @@ use tao::event_loop::EventLoopProxy;
 #[cfg(target_os = "windows")]
 mod platform {
     use super::*;
-    use crate::is_supported_document;
+    use crate::paths::is_supported_document;
     use notify::{RecursiveMode, Watcher};
     use serde::{Deserialize, Serialize};
     use std::fs::{self, File, OpenOptions};

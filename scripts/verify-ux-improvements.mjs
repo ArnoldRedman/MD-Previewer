@@ -1,55 +1,20 @@
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const root = fileURLToPath(new URL('..', import.meta.url));
-const mainRs = await readFile(resolve(root, 'src/main.rs'), 'utf8');
+import { configJson, desktopCss, desktopScript } from './desktop-page.mjs';
 
-// Validate CSS styling directly from main.rs source
-if (!mainRs.includes('body.editing #btn-split {{ display: grid; place-items: center; }}')) {
+// 分栏样式在 frontend/page.css 里，直接查静态样式表
+if (!desktopCss.includes('body.editing #btn-split { display: grid; place-items: center; }')) {
   throw new Error('Expected #btn-split to be styled with display: grid; place-items: center;');
 }
-if (!mainRs.includes('order: 1;') || !mainRs.includes('order: 2;')) {
+if (!desktopCss.includes('order: 1;') || !desktopCss.includes('order: 2;')) {
   throw new Error('Expected split-view to order editor (1) and preview (2)');
 }
-if (!mainRs.includes('border-right: 2px solid #d0d7de;')) {
+if (!desktopCss.includes('border-right: 2px solid #d0d7de;')) {
   throw new Error('Expected split-view editor to have 2px solid right border divider');
 }
-
-const marker = 'var ICON_EDIT';
-const markerIndex = mainRs.indexOf(marker);
-if (markerIndex < 0) throw new Error('desktop script marker not found');
-const scriptStart = mainRs.lastIndexOf('<script>', markerIndex);
-const scriptEnd = mainRs.indexOf('</script>', markerIndex);
-if (scriptStart < 0 || scriptEnd < 0) throw new Error('desktop script block not found');
-
-const desktopScript = mainRs
-  .slice(scriptStart + '<script>'.length, scriptEnd)
-  .replaceAll('{{', '{')
-  .replaceAll('}}', '}')
-  .replaceAll('{btn_edit}', 'Edit')
-  .replaceAll('{btn_preview}', 'Preview')
-  .replaceAll('{btn_edit_js}', 'Edit')
-  .replaceAll('{btn_preview_js}', 'Preview')
-  .replaceAll('{btn_split}', 'Split View')
-  .replaceAll('{code_copy_js}', 'Copy')
-  .replaceAll('{code_copied_js}', 'Copied')
-  .replaceAll('{sidebar_empty_js}', 'Nothing to show')
-  .replaceAll('{sidebar_outline_empty_js}', 'No headings')
-  .replaceAll('{stat_words_js}', 'words')
-  .replaceAll('{stat_chars_js}', 'chars')
-  .replaceAll('{copy_title_line_js}', 'Copy heading')
-  .replaceAll('{copy_title_js}', 'Copy title')
-  .replaceAll('{copy_body_js}', 'Copy body')
-  .replaceAll('{copied_js}', 'Copied')
-  .replaceAll('{tab_menu_close}', 'Close Tab')
-  .replaceAll('{tab_menu_close_others}', 'Close Others')
-  .replaceAll('{tab_menu_copy_path}', 'Copy Path')
-  .replaceAll('{tab_menu_reveal}', 'Reveal in File Manager');
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1000, height: 750 } });
@@ -176,13 +141,13 @@ await page.setContent(`<!doctype html>
 </html>`);
 
 // Mock IPC
-await page.evaluate(() => {
+await page.evaluate((json) => {
+  window.__mdPreviewerConfig = JSON.parse(json);
   window.ipcMessages = [];
   window.ipc = {
     postMessage: (msg) => { window.ipcMessages.push(msg); }
   };
-});
-
+}, configJson());
 // Inject script
 await page.evaluate((code) => {
   const script = document.createElement('script');

@@ -1,0 +1,173 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+{{base_tag}}
+<style id="hljs-light">{{css_light}}</style>
+<style id="hljs-dark" media="not all">{{css_dark}}</style>
+<script>
+(function(){
+  var mq = window.matchMedia('(prefers-color-scheme: dark)');
+  function apply(e) {
+    document.getElementById('hljs-light').media = e.matches ? 'not all' : '';
+    document.getElementById('hljs-dark').media = e.matches ? '' : 'not all';
+  }
+  apply(mq); mq.addEventListener('change', apply);
+})();
+</script>
+<style>
+:root { --sidebar-width: {{sidebar_width}}px; --sidebar-toggle-left: {{sidebar_toggle_left}}px; }
+{{css}}
+	</style></head><body class="{{body_class}}">
+	<div class="tabbar" id="tabbar"><div class="tabs" id="tabs"></div><div class="doc-stats" id="doc-stats" aria-live="polite"></div><div class="encoding-control" id="encoding-control"><button class="encoding-btn" id="btn-encoding" type="button" title="{{encoding_title}}">{{initial_encoding}}</button><div class="encoding-popover" id="encoding-popover" style="display:none;" role="menu"><div class="encoding-popover-title">{{encoding_title}}</div><div class="encoding-group-title">{{encoding_reopen_group}}</div><button type="button" class="encoding-option{{opt_utf8}}" data-encoding="UTF-8">UTF-8</button><button type="button" class="encoding-option{{opt_utf8bom}}" data-encoding="UTF-8 BOM">UTF-8 BOM</button><button type="button" class="encoding-option{{opt_gbk}}" data-encoding="GBK">GBK / ANSI</button><button type="button" class="encoding-option{{opt_u16le}}" data-encoding="UTF-16 LE">UTF-16 LE</button><button type="button" class="encoding-option{{opt_u16be}}" data-encoding="UTF-16 BE">UTF-16 BE</button><div class="encoding-group-title">{{encoding_convert_group}}</div><button type="button" class="encoding-option" data-convert-encoding="UTF-8">UTF-8</button><button type="button" class="encoding-option" data-convert-encoding="UTF-8 BOM">UTF-8 BOM</button><button type="button" class="encoding-option" data-convert-encoding="GBK">GBK / ANSI</button><button type="button" class="encoding-option" data-convert-encoding="UTF-16 LE">UTF-16 LE</button><button type="button" class="encoding-option" data-convert-encoding="UTF-16 BE">UTF-16 BE</button><div class="encoding-sep"></div><button type="button" class="encoding-option" id="btn-save-as">{{btn_save_as}}</button></div></div><button class="tab-open" id="tab-open" type="button" title="{{btn_new}}" aria-label="{{btn_new}}">+</button></div>
+	<aside class="sidebar" id="sidebar" aria-label="{{btn_sidebar}}">
+	  <div class="sidebar-sections">
+	    <button type="button" data-sidebar-section="folder" aria-pressed="true">{{sidebar_folder}}</button>
+	    <button type="button" data-sidebar-section="recent" aria-pressed="false">{{sidebar_recent}}</button>
+	    <button type="button" data-sidebar-section="outline" aria-pressed="false">{{sidebar_outline}}</button>
+	  </div>
+	  <div class="sidebar-list" id="sidebar-list"></div>
+	  <div class="sidebar-footer" id="sidebar-footer" style="display:none;"><button type="button" class="sidebar-clear" id="sidebar-clear-recent">{{recent_clear_all}}</button></div>
+	</aside>
+	<div id="topbar">
+	<div class="toolbar sidebar-toggle">
+	  <button id="btn-sidebar" title="{{btn_sidebar}}" aria-label="{{btn_sidebar}}"></button>
+	</div>
+	<div class="toolbar">
+	  <button id="btn-open" title="{{btn_open}}" aria-label="{{btn_open}}"></button>
+	  <button id="btn-search" title="{{btn_search}}" aria-label="{{btn_search}}"></button>
+	  <button id="btn-toggle" title="{{btn_edit}}" aria-label="{{btn_edit}}"></button>
+	  <button id="btn-split" title="{{btn_split}}" aria-label="{{btn_split}}"></button>
+	  <button id="btn-print" title="{{btn_print}}" aria-label="{{btn_print}}"></button>
+	  <div class="zoom-control" id="zoom-control">
+	    <button id="btn-zoom" title="{{btn_zoom}}" aria-label="{{btn_zoom}}"></button>
+	    <div class="zoom-popover">
+	      <button id="btn-zoom-out" title="{{btn_zoom_out}}" aria-label="{{btn_zoom_out}}">−</button>
+	      <button id="btn-zoom-reset" class="zoom-reset" title="{{btn_zoom_reset}}" aria-label="{{btn_zoom_reset}}">100%</button>
+	      <button id="btn-zoom-in" title="{{btn_zoom_in}}" aria-label="{{btn_zoom_in}}">+</button>
+	    </div>
+	  </div>
+	  <button id="btn-update-available" class="btn-update-available" style="display:none;" title="{{btn_update_title}}" aria-label="{{btn_update_title}}"><span class="update-icon">🚀</span><span class="update-text">{{btn_update_text}}</span></button>
+	  <div class="settings-control" id="settings-control">
+	    <button id="btn-settings" title="{{btn_settings}}" aria-label="{{btn_settings}}"></button>
+	    <div class="settings-popover" role="group" aria-label="{{btn_settings}}">
+	      <div class="settings-row">
+	        <span class="settings-label">{{set_open_mode}}</span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="open-mode" data-value="new-tab" aria-pressed="false">{{set_open_tab}}</button>
+	          <button type="button" data-setting="open-mode" data-value="new-window" aria-pressed="false">{{set_open_window}}</button>
+	        </div>
+	      </div>
+	      <div class="settings-row">
+	        <span class="settings-label">{{set_author_mode}}<span class="settings-help" title="{{author_help}}" aria-label="{{author_help}}" role="img">?</span></span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="author-mode" data-value="off" aria-pressed="false">{{set_author_off}}</button>
+	          <button type="button" data-setting="author-mode" data-value="on" aria-pressed="false">{{set_author_on}}</button>
+	        </div>
+	      </div>
+	      <div class="settings-row">
+	        <span class="settings-label">{{set_tab_mode}}</span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="tab-mode" data-value="accumulate" aria-pressed="false">{{set_tab_keep}}</button>
+	          <button type="button" data-setting="tab-mode" data-value="single" aria-pressed="false">{{set_tab_single}}</button>
+	        </div>
+	      </div>
+	      <div class="settings-row">
+	        <span class="settings-label">{{set_word_wrap}}</span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="word-wrap" data-value="on" aria-pressed="true">{{set_wrap_on}}</button>
+	          <button type="button" data-setting="word-wrap" data-value="off" aria-pressed="false">{{set_wrap_off}}</button>
+	        </div>
+	      </div>
+	      <div class="settings-row">
+	        <span class="settings-label">{{set_theme}}</span>
+	        <div class="settings-seg">
+	          <button type="button" data-setting="theme" data-value="system" aria-pressed="true">{{set_theme_system}}</button>
+	          <button type="button" data-setting="theme" data-value="light" aria-pressed="false">{{set_theme_light}}</button>
+	          <button type="button" data-setting="theme" data-value="dark" aria-pressed="false">{{set_theme_dark}}</button>
+	        </div>
+	      </div>
+	      <div class="settings-sep"></div>
+	      <div class="settings-row">
+	        <div class="settings-label" style="justify-content: space-between;">
+	          <span>{{set_version_label}}: v{{cargo_version}}</span>
+	          <span id="update-status-msg" class="update-status-msg"></span>
+	        </div>
+	        <button type="button" id="btn-check-update" class="settings-action-btn">{{btn_check_update}}</button>
+	      </div>
+	    </div>
+	  </div>
+	</div>
+	</div>
+	<div class="findbar" role="search">
+	  <input id="find-input" type="search" placeholder="{{search_placeholder}}" aria-label="{{search_placeholder}}">
+	  <span id="find-state"></span>
+	  <button id="find-prev" title="Previous" aria-label="Previous"></button>
+	  <button id="find-next" title="Next" aria-label="Next"></button>
+	  <button id="find-close" title="Close" aria-label="Close"></button>
+	</div>
+	<div id="tab-context-menu" class="context-menu" style="display:none;" role="menu">
+	  <button type="button" class="context-menu-item" data-tab-action="close">{{tab_menu_close}}</button>
+	  <button type="button" class="context-menu-item" data-tab-action="close-others">{{tab_menu_close_others}}</button>
+	  <div class="context-menu-sep"></div>
+	  <button type="button" class="context-menu-item" data-tab-action="copy-path">{{tab_menu_copy_path}}</button>
+	  <button type="button" class="context-menu-item" data-tab-action="reveal">{{tab_menu_reveal}}</button>
+	</div>
+	<div id="recent-context-menu" class="context-menu" style="display:none;" role="menu">
+	  <button type="button" class="context-menu-item" data-recent-action="reveal">{{tab_menu_reveal}}</button>
+	  <button type="button" class="context-menu-item" data-recent-action="copy-path">{{tab_menu_copy_path}}</button>
+	  <div class="context-menu-sep"></div>
+	  <button type="button" class="context-menu-item" data-recent-action="remove">{{recent_menu_remove}}</button>
+	</div>
+	<div id="sidebar-tooltip" class="sidebar-tooltip" style="display:none;" role="tooltip"></div>
+	<div id="lightbox" class="lightbox" style="display:none;" role="dialog" aria-modal="true">
+	  <div class="lightbox-backdrop"></div>
+	  <div class="lightbox-toolbar">
+	    <button type="button" id="lb-zoom-out" class="lightbox-btn" title="Zoom Out">−</button>
+	    <button type="button" id="lb-zoom-reset" class="lightbox-btn" title="Reset">100%</button>
+	    <button type="button" id="lb-zoom-in" class="lightbox-btn" title="Zoom In">+</button>
+	    <button type="button" id="lb-close" class="lightbox-btn lb-close" title="Close">×</button>
+	  </div>
+	  <div class="lightbox-stage">
+	    <img id="lb-img" class="lightbox-img" alt="">
+	  </div>
+	  <div id="lb-caption" class="lightbox-caption"></div>
+	</div>
+	<div id="update-modal" class="update-modal" style="display:none;" role="dialog" aria-modal="true">
+	  <div class="update-backdrop" id="update-backdrop"></div>
+	  <div class="update-dialog">
+	    <div class="update-header">
+	      <div class="update-title">
+	        <span class="update-icon">🚀</span>
+	        <span id="update-title-text">{{update_dialog_title}}</span>
+	      </div>
+	      <button type="button" id="update-close" class="update-close-btn" title="{{update_close}}">×</button>
+	    </div>
+	    <div class="update-body">
+	      <div class="update-badge-row">
+	        <span class="update-badge" id="update-badge">v1.2.x</span>
+	        <span class="update-release-name" id="update-release-name"></span>
+	      </div>
+	      <div class="update-notes-box" id="update-notes-box"></div>
+	      <div id="update-progress" class="update-progress" style="display:none;">
+	        <div class="update-progress-track"><div id="update-progress-fill" class="update-progress-fill"></div></div>
+	        <div id="update-progress-meta" class="update-progress-meta"></div>
+	      </div>
+	      <div id="update-progress-tip" class="update-progress-tip" style="display:none;"></div>
+	    </div>
+	    <div class="update-footer">
+	      <button type="button" id="btn-do-update" class="update-btn-primary">{{btn_do_update}}</button>
+	      <button type="button" id="btn-view-release" class="update-btn-secondary">{{btn_view_release}}</button>
+	      <button type="button" id="btn-dismiss-update" class="update-btn-text">{{btn_dismiss}}</button>
+	    </div>
+	  </div>
+	</div>
+	<div id="app">
+  <div id="preview">{{preview_html}}</div>
+  <textarea id="editor" spellcheck="false">{{raw_md_escaped}}</textarea>
+</div>
+<script>window.__mdPreviewerConfig = {{config_json}};</script>
+<script>
+{{js}}
+window.__mdPreviewerFeatureFlags = { math: {{needs_math}}, mermaid: {{needs_mermaid}} };
+{{preview_enhance_js}}
+if(window.__enhancePreview)window.__enhancePreview();
+</script>
+</body></html>

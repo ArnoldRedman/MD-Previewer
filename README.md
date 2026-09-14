@@ -88,6 +88,15 @@ Run the repository verification entry point with:
 ./scripts/verify.sh
 ```
 
+Frontend assets (the WebView page under `frontend/` and the mobile renderer) are plain files, checked separately:
+
+```bash
+npm ci          # installs ESLint and Playwright (cache the directory in CI)
+npm run lint    # static checks for the WebView and mobile scripts
+```
+
+`./scripts/verify.sh` runs that lint step when `node_modules/.bin/eslint` exists, and runs the Playwright checks when Playwright is importable.
+
 ## Privacy and security
 
 MD Previewer has no accounts, telemetry, analytics, or background update requests. Web links open only after user interaction; Markdown, diagrams, formulas, and code highlighting render locally. Documents can still reference remote images or other web resources, which the system WebView may request when rendering them.

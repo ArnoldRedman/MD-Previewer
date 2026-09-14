@@ -1,41 +1,14 @@
 // 编辑模式顶栏验证：进入编辑模式后，工具栏不再悬浮遮挡正文，
 // 而是独占一条 sticky 顶栏，正文文本与顶栏不重叠。
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
-import { join as resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const root = fileURLToPath(new URL('..', import.meta.url));
-const mainRs = await readFile(resolve(root, 'src/main.rs'), 'utf8');
-const marker = 'var ICON_EDIT';
-const markerIndex = mainRs.indexOf(marker);
-if (markerIndex < 0) throw new Error('desktop script marker not found');
-const scriptStart = mainRs.lastIndexOf('<script>', markerIndex);
-const scriptEnd = mainRs.indexOf('</script>', markerIndex);
-if (scriptStart < 0 || scriptEnd < 0) throw new Error('desktop script block not found');
+import { configScript, desktopScript, desktopStyle } from './desktop-page.mjs';
 
-const desktopScript = mainRs
-  .slice(scriptStart + '<script>'.length, scriptEnd)
-  .replaceAll('{{', '{')
-  .replaceAll('}}', '}')
-  .replaceAll('{stat_words_js}', '字')
-  .replaceAll('{stat_chars_js}', '字符');
-
-// 样式块：从 <style> 提取，替换 Rust 占位符后注入真实页面
-const styleStart = mainRs.indexOf('\n<style>\n');
-const styleEnd = mainRs.indexOf('</style>', styleStart);
-if (styleStart < 0 || styleEnd < 0) throw new Error('style block not found');
-const realCss = mainRs
-  .slice(styleStart + '<style>\n'.length, styleEnd)
-  .replaceAll('{{', '{')
-  .replaceAll('}}', '}')
-  .replaceAll('{sidebar_width}', '260')
-  .replaceAll('{sidebar_toggle_left}', '272')
-  .replaceAll('{css_light}', '')
-  .replaceAll('{css_dark}', '');
+// 字号统计文案由 Rust 注入，测试页给中文刻度
+const pageConfig = configScript({ statWordsJs: '字', statCharsJs: '字符' });
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
@@ -53,7 +26,7 @@ await page.setContent(`<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
-    <style>${realCss}</style>
+    ${desktopStyle}
     <style>
       /* 测试页精简：hljs/KaTeX 等无关样式不存在，补齐脚本依赖的最小布局 */
       #preview { font-size: 15px; }
@@ -121,6 +94,7 @@ await page.setContent(`<!doctype html>
       window.__messages = [];
       window.ipc = { postMessage(message) { window.__messages.push(message); } };
     </script>
+    ${pageConfig}
     <script>${desktopScript}</script>
   </body>
 </html>`);

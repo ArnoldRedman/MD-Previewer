@@ -1,36 +1,17 @@
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const root = fileURLToPath(new URL('..', import.meta.url));
-const mainRs = await readFile(resolve(root, 'src/main.rs'), 'utf8');
-const marker = "var ICON_EDIT";
-const markerIndex = mainRs.indexOf(marker);
-if (markerIndex < 0) throw new Error('desktop script marker not found');
-const scriptStart = mainRs.lastIndexOf('<script>', markerIndex);
-const scriptEnd = mainRs.indexOf('</script>', markerIndex);
-if (scriptStart < 0 || scriptEnd < 0) throw new Error('desktop script block not found');
+import { configScript, desktopScript } from './desktop-page.mjs';
 
-const desktopScript = mainRs
-  .slice(scriptStart + '<script>'.length, scriptEnd)
-  .replaceAll('{{', '{')
-  .replaceAll('}}', '}')
-  // 主 IIFE 里的 Rust 字符串占位符，测试页给空值即可
-  .replaceAll('{btn_edit}', 'Edit')
-  .replaceAll('{btn_preview}', 'Preview')
-  .replaceAll('{btn_edit_js}', 'Edit')
-  .replaceAll('{btn_preview_js}', 'Preview')
-  .replaceAll('{sidebar_empty_js}', 'empty')
-  .replaceAll('{stat_words_js}', '字')
-  .replaceAll('{stat_chars_js}', '字符')
-  .replaceAll('{copy_title_line_js}', 'Copy heading')
-  .replaceAll('{copy_title_js}', 'Copy title')
-  .replaceAll('{copy_body_js}', 'Copy body')
-  .replaceAll('{copied_js}', 'Copied');
+const pageConfig = configScript({
+  btnEditJs: 'Edit',
+  btnPreviewJs: 'Preview',
+  sidebarEmptyJs: 'empty',
+  statWordsJs: '字',
+  statCharsJs: '字符',
+});
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
@@ -92,6 +73,7 @@ await page.setContent(`<!doctype html>
       window.ipc = { postMessage(message) { window.__messages.push(message); } };
       window.__mdPreviewerFeatureFlags = { math: false, mermaid: false };
     </script>
+    ${pageConfig}
     <script>${desktopScript}</script>
   </body>
 </html>`);

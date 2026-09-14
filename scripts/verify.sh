@@ -40,19 +40,24 @@ for filename, marker in version_markers.items():
         raise SystemExit(f'{filename} version must match Cargo.toml: {version}')
 
 required = {
-    'src/main.rs': ['MD Previewer', 'md-previewer', 'MD_PREVIEWER_CONFIG_DIR', 'io.github.arnoldredman.mdpreviewer'],
+    # src 已按职责拆成多个模块，身份标记只要落在 src 里就算数
+    'src': ['MD Previewer', 'md-previewer', 'MD_PREVIEWER_CONFIG_DIR', 'io.github.arnoldredman.mdpreviewer'],
     'build.rs': ['ArnoldRedman', 'MD Previewer'],
     'bundle.sh': ['MD Previewer', 'io.github.arnoldredman.mdpreviewer', 'mdpreviewer'],
     'mobile/ios/project.yml': ['MDPreviewerMobile', 'io.github.arnoldredman.mdpreviewer.mobile'],
     'mobile/android/app/build.gradle': ['io.github.arnoldredman.mdpreviewer.mobile'],
 }
 for filename, markers in required.items():
-    text = Path(filename).read_text(encoding='utf-8')
+    path = Path(filename)
+    if path.is_dir():
+        text = '\n'.join(p.read_text(encoding='utf-8') for p in sorted(path.rglob('*.rs')))
+    else:
+        text = path.read_text(encoding='utf-8')
     for marker in markers:
         if marker not in text:
             raise SystemExit(f'{filename} is missing identity marker: {marker}')
 
-scan = [Path('src'), Path('assets/enhance'), Path('macos'), Path('mobile'), Path('.github')]
+scan = [Path('src'), Path('frontend'), Path('macos'), Path('mobile'), Path('.github')]
 files = [Path('build.rs'), Path('bundle.sh'), Path('install.sh')]
 for base in scan:
     files.extend(path for path in base.rglob('*') if path.is_file())
@@ -98,6 +103,13 @@ cargo fmt --check
 cargo check
 cargo test
 
+if [ -x node_modules/.bin/eslint ]; then
+  echo "[verify] frontend lint"
+  node_modules/.bin/eslint .
+else
+  echo "[verify] frontend lint skipped: run npm ci first"
+fi
+
 if command -v node >/dev/null 2>&1 && node -e "import('playwright')" >/dev/null 2>&1; then
   echo "[verify] browser checks"
   node scripts/verify-anchor-navigation.mjs
@@ -112,7 +124,8 @@ else
   echo "[verify] browser checks skipped: Playwright unavailable"
 fi
 
-if command -v gradle >/dev/null 2>&1; then
+# 有些环境的 gradle 只是坏掉的 shim，光看 PATH 不够，真的跑一次再决定
+if command -v gradle >/dev/null 2>&1 && gradle --version >/dev/null 2>&1; then
   GRADLE_VERSION="$(gradle --version | awk '/^Gradle / { print $2; exit }')"
   if [ -z "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ] && [ ! -f mobile/android/local.properties ]; then
     echo "[verify] Android build skipped: Android SDK location is not configured"

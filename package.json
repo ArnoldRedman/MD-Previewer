@@ -1,0 +1,15 @@
+{
+  "name": "md-previewer-frontend",
+  "private": true,
+  "description": "前端资源（WebView 页面、手机渲染层）的静态检查与浏览器验证工具链",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
+    "playwright": "^1.63.0"
+  }
+}

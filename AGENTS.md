@@ -8,16 +8,19 @@
 ## 技术栈与入口
 
 - 主要语言/框架：Rust (`wry`/`tao`)、iOS UIKit + `WKWebView`、Android Java + `WebView`。
-- 桌面入口：`src/main.rs`。
+- 桌面入口：`src/main.rs` 只做启动接线，其余按职责拆在 `src/` 各模块（`app` 事件循环与 IPC 分发、`page` 预览页组装、`markdown` 渲染、`sanitize`/`escape` 消毒与转义、`document` 读写、`paths`/`window`/`platform` 等）。
+- 桌面页面模板与前端资源：`frontend/page.html`、`frontend/page.css`、`frontend/page.js`、`frontend/preview-enhance.js`（增强层），由 `src/assets.rs` 用 `include_str!` 内嵌，`src/page.rs` 渲染注入，不再内嵌在 Rust 字符串里。
 - 手机共享渲染层：`mobile/shared/preview.html`。
 - iOS 工程：`mobile/ios/project.yml`，用 XcodeGen 生成。
 - Android 工程：`mobile/android` Gradle project。
+- 前端静态检查：`eslint.config.mjs` + `package.json`；验证脚本共用 `scripts/desktop-page.mjs` 读取前端资源和源码。
 - 测试入口：优先使用 `scripts/verify.sh`。
 - 常用命令：
 
 ```bash
 ./scripts/verify.sh
 cargo test
+npm ci && npm run lint
 cd mobile/ios && xcodegen generate
 cd mobile/android && gradle :app:assembleDebug
 ```

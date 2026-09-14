@@ -1,13 +1,9 @@
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const root = fileURLToPath(new URL('..', import.meta.url));
-const mainRs = await readFile(resolve(root, 'src/main.rs'), 'utf8');
+import { appSource, configScript, desktopScript, desktopStyle } from './desktop-page.mjs';
 
 // 静态检查：转码与另存为的消息必须由 Rust 侧接住
 for (const marker of [
@@ -17,49 +13,10 @@ for (const marker of [
   'data-convert-encoding="UTF-8 BOM"',
   'id="btn-save-as"',
 ]) {
-  if (!mainRs.includes(marker)) throw new Error(`Expected ${marker} in main.rs`);
+  if (!appSource.includes(marker)) throw new Error(`Expected ${marker} in sources`);
 }
 
-const marker = 'var ICON_EDIT';
-const markerIndex = mainRs.indexOf(marker);
-if (markerIndex < 0) throw new Error('desktop script marker not found');
-const scriptStart = mainRs.lastIndexOf('<script>', markerIndex);
-const scriptEnd = mainRs.indexOf('</script>', markerIndex);
-if (scriptStart < 0 || scriptEnd < 0) throw new Error('desktop script block not found');
-
-const desktopScript = mainRs
-  .slice(scriptStart + '<script>'.length, scriptEnd)
-  .replaceAll('{{', '{')
-  .replaceAll('}}', '}')
-  .replaceAll('{btn_edit}', 'Edit')
-  .replaceAll('{btn_preview}', 'Preview')
-  .replaceAll('{btn_edit_js}', 'Edit')
-  .replaceAll('{btn_preview_js}', 'Preview')
-  .replaceAll('{btn_split}', 'Split View')
-  .replaceAll('{code_copy_js}', 'Copy')
-  .replaceAll('{code_copied_js}', 'Copied')
-  .replaceAll('{sidebar_empty_js}', 'Nothing to show')
-  .replaceAll('{sidebar_outline_empty_js}', 'No headings')
-  .replaceAll('{stat_words_js}', 'words')
-  .replaceAll('{stat_chars_js}', 'chars')
-  .replaceAll('{copy_title_line_js}', 'Copy heading')
-  .replaceAll('{copy_title_js}', 'Copy title')
-  .replaceAll('{copy_body_js}', 'Copy body')
-  .replaceAll('{copied_js}', 'Copied')
-  .replaceAll('{tab_menu_close}', 'Close Tab')
-  .replaceAll('{tab_menu_close_others}', 'Close Others')
-  .replaceAll('{tab_menu_copy_path}', 'Copy Path')
-  .replaceAll('{tab_menu_reveal}', 'Reveal in File Manager');
-
-const styleMarker = '<style>\n:root';
-const styleStart = mainRs.indexOf(styleMarker);
-const styleEnd = mainRs.indexOf('</style>', styleStart);
-if (styleStart < 0 || styleEnd < 0) throw new Error('desktop style block not found');
-const desktopStyle = mainRs.slice(styleStart, styleEnd + '</style>'.length)
-  .replaceAll('{{', '{')
-  .replaceAll('}}', '}')
-  .replaceAll('{sidebar_toggle_left}', '272')
-  .replaceAll('{sidebar_width}', '260');
+const pageConfig = configScript();
 
 const encodings = ['UTF-8', 'UTF-8 BOM', 'GBK', 'UTF-16 LE', 'UTF-16 BE'];
 const reopenButtons = encodings
@@ -76,6 +33,7 @@ await page.setContent(`<!doctype html>
   <head>
     <meta charset="utf-8">
     ${desktopStyle}
+    ${pageConfig}
   </head>
   <body class="has-tabs">
     <div class="tabbar" id="tabbar">

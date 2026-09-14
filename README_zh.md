@@ -88,6 +88,15 @@ cd mobile/android && gradle :app:assembleDebug
 ./scripts/verify.sh
 ```
 
+前端资源（`frontend/` 下的 WebView 页面、手机渲染层）是独立文件，单独做静态检查：
+
+```bash
+npm ci          # 安装 ESLint 和 Playwright
+npm run lint    # 检查 WebView 与手机端脚本
+```
+
+`./scripts/verify.sh` 会在 `node_modules/.bin/eslint` 存在时跑 lint，在 Playwright 可用时跑浏览器验证。
+
 ## 隐私与安全
 
 MD Previewer 没有账号、遥测、分析统计或后台更新请求。网页链接只在用户主动点击后交给系统打开；Markdown、图表、公式和代码高亮都在本机渲染。文档仍可能引用远程图片或其他网络资源，系统 WebView 在渲染时可能请求这些资源。

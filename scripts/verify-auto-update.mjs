@@ -1,52 +1,48 @@
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const root = fileURLToPath(new URL('..', import.meta.url));
-const mainRs = await readFile(resolve(root, 'src/main.rs'), 'utf8');
+import { appSource, configScript, desktopScript, desktopStyle } from './desktop-page.mjs';
 
-// 1. Static checks on Rust source
+// 1. Static checks on Rust and frontend sources
 console.log('Verifying 1: Static checks on source...');
-if (!mainRs.includes('id="btn-update-available"')) {
-  throw new Error('Expected #btn-update-available in main.rs');
+if (!appSource.includes('id="btn-update-available"')) {
+  throw new Error('Expected #btn-update-available in the page template');
 }
-if (!mainRs.includes('id="btn-check-update"')) {
-  throw new Error('Expected #btn-check-update in main.rs');
+if (!appSource.includes('id="btn-check-update"')) {
+  throw new Error('Expected #btn-check-update in the page template');
 }
-if (!mainRs.includes('id="update-modal"')) {
-  throw new Error('Expected #update-modal in main.rs');
+if (!appSource.includes('id="update-modal"')) {
+  throw new Error('Expected #update-modal in the page template');
 }
-if (!mainRs.includes('UPDATE_CHECK_INTERVAL_MS')) {
-  throw new Error('Expected UPDATE_CHECK_INTERVAL_MS in main.rs');
+if (!appSource.includes('UPDATE_CHECK_INTERVAL_MS')) {
+  throw new Error('Expected UPDATE_CHECK_INTERVAL_MS in the frontend script');
 }
 // Windows 更新包由 Rust 后台线程下载并回报进度，接手脚本必须无控制台窗口
-if (!mainRs.includes('windows_updater::download_update(')) {
-  throw new Error('Expected windows_updater::download_update in main.rs');
+if (!appSource.includes('windows_updater::download_update(')) {
+  throw new Error('Expected windows_updater::download_update in Rust sources');
 }
-if (!mainRs.includes('windows_updater::launch_installer(')) {
-  throw new Error('Expected windows_updater::launch_installer in main.rs');
+if (!appSource.includes('windows_updater::launch_installer(')) {
+  throw new Error('Expected windows_updater::launch_installer in Rust sources');
 }
-if (!mainRs.includes('.creation_flags(CREATE_NO_WINDOW)')) {
+if (!appSource.includes('.creation_flags(CREATE_NO_WINDOW)')) {
   throw new Error('Expected the updater script to be spawned with CREATE_NO_WINDOW');
 }
-if (mainRs.includes('Invoke-WebRequest')) {
+if (appSource.includes('Invoke-WebRequest')) {
   throw new Error('Downloading must happen in Rust, not inside the PowerShell script');
 }
-if (!mainRs.includes('UserEvent::UpdateProgress { downloaded, total }')) {
+if (!appSource.includes('UserEvent::UpdateProgress { downloaded, total }')) {
   throw new Error('Expected download progress to be forwarded through UserEvent::UpdateProgress');
 }
 // 发布说明必须经 Rust 侧 Markdown 渲染器回填，而不是当纯文本显示
-if (!mainRs.includes('"render-release-notes" => IpcMessage::RenderReleaseNotes')) {
-  throw new Error('Expected render-release-notes IPC handler in main.rs');
+if (!appSource.includes('"render-release-notes" => IpcMessage::RenderReleaseNotes')) {
+  throw new Error('Expected render-release-notes IPC handler in Rust sources');
 }
-if (!mainRs.includes('IpcMessage::RenderReleaseNotes(markdown) =>')) {
-  throw new Error('Expected RenderReleaseNotes event handler in main.rs');
+if (!appSource.includes('IpcMessage::RenderReleaseNotes(markdown) =>')) {
+  throw new Error('Expected RenderReleaseNotes event handler in Rust sources');
 }
-if (!mainRs.includes("window.__setUpdateNotes('{}')")) {
+if (!appSource.includes("window.__setUpdateNotes('{}')")) {
   throw new Error('Expected Rust to hand rendered release notes to window.__setUpdateNotes');
 }
 
@@ -55,51 +51,7 @@ console.log('Verifying 2: In-browser update UI and logic...');
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 
-const marker = 'var ICON_EDIT';
-const markerIndex = mainRs.indexOf(marker);
-if (markerIndex < 0) throw new Error('desktop script marker not found');
-const scriptStart = mainRs.lastIndexOf('<script>', markerIndex);
-const scriptEnd = mainRs.indexOf('</script>', markerIndex);
-if (scriptStart < 0 || scriptEnd < 0) throw new Error('desktop script block not found');
-
-let desktopScript = mainRs
-  .slice(scriptStart + '<script>'.length, scriptEnd)
-  .replaceAll('{{', '{')
-  .replaceAll('}}', '}')
-  .replaceAll('{cargo_version}', '1.4.2')
-  .replaceAll('{update_status_checking_js}', 'Checking...')
-  .replaceAll('{update_status_latest_js}', 'Up to date')
-  .replaceAll('{update_status_failed_js}', 'Check failed')
-  .replaceAll('{update_downloading_js}', 'Downloading...')
-  .replaceAll('{update_installing_js}', 'Installing...')
-  .replaceAll('{update_failed_js}', 'Update failed: ')
-  .replaceAll('{btn_edit}', 'Edit')
-  .replaceAll('{btn_preview}', 'Preview')
-  .replaceAll('{btn_edit_js}', 'Edit')
-  .replaceAll('{btn_preview_js}', 'Preview')
-  .replaceAll('{btn_split}', 'Split View')
-  .replaceAll('{code_copy_js}', 'Copy')
-  .replaceAll('{code_copied_js}', 'Copied')
-  .replaceAll('{sidebar_empty_js}', 'Nothing to show')
-  .replaceAll('{sidebar_outline_empty_js}', 'No headings')
-  .replaceAll('{stat_words_js}', 'words')
-  .replaceAll('{stat_chars_js}', 'chars')
-  .replaceAll('{copy_title_line_js}', 'Copy heading')
-  .replaceAll('{copy_title_js}', 'Copy title')
-  .replaceAll('{copy_body_js}', 'Copy body')
-  .replaceAll('{copied_js}', 'Copied')
-  .replaceAll('{btn_update_text_js}', 'Update Available')
-  .replaceAll('{btn_check_update_js}', 'Check for Updates');
-const styleMarker = '<style>\n:root';
-const styleStart = mainRs.indexOf(styleMarker);
-const styleEnd = mainRs.indexOf('</style>', styleStart);
-const desktopStyle = styleStart >= 0 && styleEnd >= 0
-  ? mainRs.slice(styleStart, styleEnd + '</style>'.length)
-      .replaceAll('{{', '{')
-      .replaceAll('}}', '}')
-      .replaceAll('{sidebar_toggle_left}', '272')
-      .replaceAll('{sidebar_width}', '260')
-  : '';
+const pageConfig = configScript({ cargoVersion: '1.4.2' });
 
 const htmlContent = `
 <!DOCTYPE html>
@@ -108,6 +60,7 @@ const htmlContent = `
   <meta charset="utf-8">
   <title>MD Previewer Auto Update Test</title>
   ${desktopStyle}
+  ${pageConfig}
 </head>
 <body>
   <div class="tabbar" id="tabbar">
