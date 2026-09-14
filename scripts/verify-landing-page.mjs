@@ -19,6 +19,12 @@ const assets = [...windowsBuild.matchAll(/\$(\w+)\s*=\s*Join-Path \$dist "([^"]+
 );
 if (assets.length === 0) throw new Error('build-windows.ps1 里没找到产物名');
 
+const mobileBuild = await readFile(join(root, 'mobile/scripts/build-release.sh'), 'utf8');
+// 安卓包同样以发布脚本里的资产名为准
+const apk = mobileBuild.match(/MD-Previewer-mobile\.apk/);
+if (!apk) throw new Error('build-release.sh 里没找到安卓发布资产名');
+assets.push(apk[0]);
+
 const pages = {};
 for (const name of Object.keys(PAGES)) {
   pages[name] = await readFile(join(SITE, name), 'utf8');

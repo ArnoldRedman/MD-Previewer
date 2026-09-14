@@ -224,16 +224,16 @@
     <h2>A .md that arrives on your phone still opens</h2>
     <p class="intro">
       iOS and Android each have a read-only shell that shares the same rendering rules. Pick MD Previewer from "Open with" in Files, WeChat or any other app and the document is laid out properly —
-      no editor required on the phone.
+      no editor required on the phone. The Android package is published and installable; the iOS shell has to be built with Xcode for now.
     </p>
     <div class="grid">
       <div class="card">
-        <h3>iOS</h3>
-        <p>UIKit + WKWebView, handles the system "open in" flow. Builds are listed on the releases page.</p>
+        <h3>Android</h3>
+        <p>A native WebView shell that responds to <code>ACTION_VIEW</code> and share intents. <a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-mobile.apk">Download MD-Previewer-mobile.apk</a> — allow installs from unknown sources; the package declares no network permission at all.</p>
       </div>
       <div class="card">
-        <h3>Android</h3>
-        <p>A native WebView shell that responds to <code>ACTION_VIEW</code> and share intents. APK on the releases page.</p>
+        <h3>iOS</h3>
+        <p>UIKit + WKWebView, handles the system "open in" flow. Build it from <code>mobile/ios</code> with Xcode; no binary is published yet.</p>
       </div>
       <div class="card">
         <h3>Read-only and quiet</h3>

@@ -225,20 +225,20 @@
     <h2>手机收到的 .md，也能直接看</h2>
     <p class="intro">
       iOS 与 Android 各有一个只读预览版，共用同一套渲染逻辑：在文件管理器、微信或其他应用里用「打开方式」选中 MD Previewer，就能看到排版好的正文，
-      不用担心手机上没有编辑器打不开。
+      不用担心手机上没有编辑器打不开。Android 包已经可以直接下载安装；iOS 需要 macOS + Xcode 自行构建，尚未提供二进制。
     </p>
     <div class="grid">
       <div class="card">
-        <h3>iOS</h3>
-        <p>UIKit + WKWebView，支持系统「用其他应用打开」，安装包见发布页。</p>
+        <h3>Android</h3>
+        <p>原生 WebView 外壳，支持 <code>ACTION_VIEW</code> 与分享进入。<a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-mobile.apk">下载 MD-Previewer-mobile.apk</a>（选「允许安装未知应用」即可）。</p>
       </div>
       <div class="card">
-        <h3>Android</h3>
-        <p>原生 WebView 外壳，支持 <code>ACTION_VIEW</code> 与分享进入，APK 见发布页。</p>
+        <h3>iOS</h3>
+        <p>UIKit + WKWebView，支持系统「用其他应用打开」。目前需自行用 Xcode 构建：<code>mobile/ios</code>。</p>
       </div>
       <div class="card">
         <h3>只读、无广告</h3>
-        <p>移动端定位是「看一眼就走」：不登录、不上传、不弹广告，看完关掉即可。</p>
+        <p>移动端定位是「看一眼就走」：不登录、不上传、不弹广告，安卓包连网络权限都没声明。</p>
       </div>
     </div>
   </div>
@@ -295,12 +295,12 @@
         <tr>
           <td>Android</td>
           <td>只读预览版</td>
-          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">在发布页查看 APK</a></td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-mobile.apk">MD-Previewer-mobile.apk</a></td>
         </tr>
         <tr>
           <td>iOS</td>
           <td>只读预览版</td>
-          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">在发布页查看</a></td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer">需自行用 Xcode 构建</a></td>
         </tr>
         <tr>
           <td>源码</td>

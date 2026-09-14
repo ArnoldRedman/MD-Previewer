@@ -19,7 +19,8 @@ command -v keytool >/dev/null 2>&1 || {
 }
 
 mkdir -p "$KEYSTORE_DIR"
-store_password="$(openssl rand -base64 32 | tr -d '\n')"
+# openssl 在 Windows（git-bash）下输出 CRLF，必须去掉 \r，否则密码尾会带一个回车导致 keytool 失败
+store_password="$(openssl rand -base64 32 | tr -d '\r\n')"
 key_password="$store_password"
 
 keytool -genkeypair \

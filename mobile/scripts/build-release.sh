@@ -29,6 +29,17 @@ fi
 echo "[mobile-release] Android APK: $ANDROID_APK"
 echo "[mobile-release] Android AAB: $ANDROID_AAB"
 
+# 发布用的资产名固定不带版本号，落地页永远指向 releases/latest/download/<name>
+if [ -f "$ROOT/mobile/android/app/build/outputs/apk/release/app-release.apk" ]; then
+  DIST="$ROOT/dist"
+  mkdir -p "$DIST"
+  cp "$ROOT/mobile/android/app/build/outputs/apk/release/app-release.apk" "$DIST/MD-Previewer-mobile.apk"
+  echo "[mobile-release] release asset: $DIST/MD-Previewer-mobile.apk"
+  (cd "$DIST" && sha256sum MD-Previewer-mobile.apk)
+else
+  echo "[mobile-release] only unsigned APK built; source .env.mobile-release before running to sign"
+fi
+
 if command -v xcodegen >/dev/null 2>&1 && command -v xcodebuild >/dev/null 2>&1; then
   echo "[mobile-release] iOS project generation"
   (
