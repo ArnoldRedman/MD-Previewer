@@ -1,0 +1,183 @@
+/* MD Previewer 站点样式：中英文两个页面共用，改这里两边同时生效 */
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --bg-soft: #f6f8f8;
+    --card: #ffffff;
+    --text: #12181a;
+    --muted: #5b6b6d;
+    --line: #e3e9e8;
+    --brand: #0f766e;
+    --brand-soft: #e6f4f2;
+    --shadow: 0 1px 2px rgb(16 32 34 / 6%), 0 12px 32px -12px rgb(16 32 34 / 14%);
+    font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1416;
+      --bg-soft: #141c1e;
+      --card: #161f21;
+      --text: #e8efee;
+      --muted: #9aacad;
+      --line: #253234;
+      --brand: #2dd4bf;
+      --brand-soft: #14312e;
+      --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 16px 40px -16px rgb(0 0 0 / 60%);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--brand); }
+  h1, h2, h3 { line-height: 1.25; letter-spacing: -.01em; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+  code, kbd {
+    font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+    font-size: .9em;
+  }
+  kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    background: var(--bg-soft);
+    text-align: center;
+    white-space: nowrap;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(12px);
+  }
+  header .wrap { display: flex; align-items: center; gap: 16px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; color: inherit; }
+  .brand img { width: 28px; height: 28px; border-radius: 7px; }
+  nav { margin-left: auto; display: flex; align-items: center; gap: 20px; font-size: .94rem; }
+  nav a { color: var(--muted); text-decoration: none; }
+  nav a:hover { color: var(--text); }
+  .lang { display: flex; gap: 8px; padding-left: 16px; border-left: 1px solid var(--line); }
+  .lang .on { color: var(--text); font-weight: 600; }
+  .hero {
+    border-bottom: 1px solid var(--line);
+    background:
+      radial-gradient(900px 320px at 12% -10%, var(--brand-soft), transparent 70%),
+      var(--bg);
+  }
+  .hero .wrap { padding: 72px 24px 64px; }
+  .hero img.mark { width: 84px; height: 84px; border-radius: 18px; box-shadow: var(--shadow); }
+  .hero h1 { margin: 24px 0 12px; font-size: clamp(2rem, 4.2vw, 3rem); }
+  .hero p.lead { margin: 0; max-width: 46em; font-size: 1.12rem; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 0; padding: 0; list-style: none; }
+  .chips li {
+    padding: 4px 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--card);
+    font-size: .86rem;
+    color: var(--muted);
+  }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .button {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 22px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: var(--brand);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    box-shadow: var(--shadow);
+  }
+  .button small { font-weight: 400; opacity: .85; font-size: .78rem; }
+  .button.ghost { background: var(--card); color: var(--text); border-color: var(--line); box-shadow: none; }
+  section { padding: 64px 0; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: 0; }
+  .eyebrow { margin: 0 0 8px; color: var(--brand); font-size: .82rem; font-weight: 700; letter-spacing: .08em; }
+  section h2 { margin: 0 0 10px; font-size: clamp(1.5rem, 2.6vw, 2rem); }
+  section > .wrap > p.intro { margin: 0 0 32px; max-width: 44em; color: var(--muted); }
+  .shots { display: grid; gap: 28px; }
+  figure { margin: 0; }
+  figure img {
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+  }
+  figcaption { margin-top: 12px; color: var(--muted); font-size: .92rem; }
+  .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .card {
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+  }
+  .card h3 { margin: 0 0 8px; font-size: 1.06rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .95rem; }
+  .card ul { margin: 10px 0 0; padding-left: 1.1em; color: var(--muted); font-size: .95rem; }
+  .card li { margin: 4px 0; }
+  .card .ico { width: 34px; height: 34px; margin-bottom: 14px; color: var(--brand); }
+  table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; }
+  td:first-child { white-space: nowrap; }
+  .dl-table td:last-child, .dl-table th:last-child { text-align: right; white-space: nowrap; }
+  details {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--card);
+    padding: 14px 18px;
+    margin-bottom: 12px;
+  }
+  details[open] { box-shadow: var(--shadow); }
+  summary { cursor: pointer; font-weight: 600; }
+  summary::marker { color: var(--brand); }
+  details p { margin: 12px 0 0; color: var(--muted); font-size: .95rem; }
+  .note {
+    margin-top: 18px;
+    padding: 14px 18px;
+    border-left: 3px solid var(--brand);
+    border-radius: 0 10px 10px 0;
+    background: var(--bg-soft);
+    color: var(--muted);
+    font-size: .93rem;
+  }
+  pre {
+    margin: 0;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg-soft);
+    overflow-x: auto;
+    font-size: .9rem;
+  }
+  footer { padding: 40px 0 64px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center; color: var(--muted); font-size: .9rem; }
+  footer nav { margin-left: auto; gap: 18px; }
+  @media (max-width: 720px) {
+    nav.links { display: none; }
+    .hero .wrap { padding: 48px 20px 44px; }
+    section { padding: 48px 0; }
+    /* 窄屏按钮竖排撑满，避免两个按钮宽窄不一 */
+    .cta { flex-direction: column; align-items: stretch; }
+    .cta .button { text-align: center; }
+    /* 窄屏放不下三列：隐藏「包」列，文件名允许换行，否则整页会横向溢出 */
+    .dl-table th:nth-child(2), .dl-table td:nth-child(2) { display: none; }
+    .dl-table td:last-child, .dl-table th:last-child {
+      white-space: normal;
+      overflow-wrap: break-word;
+    }
+    th, td { padding: 10px 6px; }
+  }

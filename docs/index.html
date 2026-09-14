@@ -1,88 +1,348 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="MD Previewer is a small, local-first Markdown reader built with Rust and the system WebView.">
-  <meta name="color-scheme" content="light dark">
-  <title>MD Previewer</title>
-  <style>
-    :root { font: 16px/1.6 system-ui, sans-serif; color-scheme: light dark; }
-    body { margin: 0; }
-    main { max-width: 720px; margin: auto; padding: 72px 24px; }
-    img { width: 112px; height: 112px; }
-    h1 { margin: 20px 0 8px; font-size: clamp(2rem, 7vw, 4rem); line-height: 1.05; }
-    p { color: color-mix(in srgb, CanvasText 72%, transparent); }
-    ul { padding-left: 1.25rem; }
-    a.button { display: inline-block; margin-top: 16px; padding: 10px 16px; border-radius: 9px; color: #fff; background: #0f766e; text-decoration: none; }
-    a.button.secondary { color: inherit; background: transparent; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); }
-    .downloads { margin-top: 40px; }
-    .downloads h2 { margin: 0 0 4px; font-size: 1.25rem; }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent); overflow-wrap: break-word; }
-    th { font-weight: 600; }
-    td:last-child, th:last-child { text-align: right; }
-    @media (max-width: 520px) {
-      main { padding: 48px 16px; }
-      th, td { padding: 8px 4px; }
-    }
-    footer { margin-top: 56px; font-size: .875rem; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MD Previewer — 本地优先的 Markdown 阅读器与编辑器（Windows）</title>
+<meta name="description" content="MD Previewer 是一个用 Rust 和系统 WebView 写的本地 Markdown 阅读器与编辑器：多标签、文件实时监听、编码自动识别、大纲与全文搜索、KaTeX 公式与 Mermaid 图表、深色模式。无 Electron、无遥测、不联网。Windows 10/11 免费下载，另附 iOS 与 Android 只读预览版。">
+<meta name="keywords" content="Markdown 阅读器,Markdown 预览器,Markdown 编辑器,Windows Markdown,Rust,本地离线,KaTeX,Mermaid,GBK 编码">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0f766e">
+<link rel="canonical" href="https://arnoldredman.github.io/MD-Previewer/">
+<link rel="alternate" hreflang="zh-CN" href="https://arnoldredman.github.io/MD-Previewer/">
+<link rel="alternate" hreflang="en" href="https://arnoldredman.github.io/MD-Previewer/en.html">
+<link rel="alternate" hreflang="x-default" href="https://arnoldredman.github.io/MD-Previewer/en.html">
+<link rel="icon" href="icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="MD Previewer — 本地优先的 Markdown 阅读器">
+<meta property="og:description" content="Rust + 系统 WebView 写的本地 Markdown 阅读器：多标签、实时文件监听、编码自动识别、公式与图表渲染，无 Electron、无遥测。">
+<meta property="og:image" content="https://arnoldredman.github.io/MD-Previewer/icon.png">
+<meta property="og:url" content="https://arnoldredman.github.io/MD-Previewer/">
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
-  <main>
-    <img src="icon.png" alt="MD Previewer icon">
-    <h1>MD Previewer</h1>
-    <p>A small, local-first Markdown reader and quick editor. Rust + system WebView, no Electron, no telemetry, and no background update requests.</p>
-    <ul>
-      <li>Tabs, session restore, file watching, search, zoom, print, and source editing</li>
-      <li>Tables, code highlighting, KaTeX, Mermaid, local images, and document links</li>
-      <li>Desktop plus native iOS and Android preview shells</li>
-    </ul>
-    <a class="button" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">Download for Windows</a>
-    <a class="button secondary" href="https://github.com/ArnoldRedman/MD-Previewer">Source on GitHub</a>
 
-    <section class="downloads">
-      <h2>Downloads</h2>
-      <p>Every build below is attached to the latest GitHub release, so the links never go stale.</p>
-      <table>
-        <thead>
-          <tr><th>Platform</th><th>Package</th><th>Download</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Windows 10/11</td>
-            <td>Recommended installer</td>
-            <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">MD-Previewer-Setup.exe</a></td>
-          </tr>
-          <tr>
-            <td>Windows 10/11</td>
-            <td>Portable, no install</td>
-            <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">MD-Previewer-windows-x64.exe</a></td>
-          </tr>
-          <tr>
-            <td>Android</td>
-            <td>Read-only preview shell</td>
-            <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">APK on releases</a></td>
-          </tr>
-          <tr>
-            <td>iOS</td>
-            <td>Read-only preview shell</td>
-            <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">See releases</a></td>
-          </tr>
-          <tr>
-            <td>Source</td>
-            <td>Rust, MIT licensed</td>
-            <td><a href="https://github.com/ArnoldRedman/MD-Previewer">GitHub</a></td>
-          </tr>
-        </tbody>
-      </table>
-      <p>Windows builds are not code signed yet, so SmartScreen may warn on first launch.</p>
-    </section>
-    <footer>
-      Derived from <a href="https://github.com/vorojar/md-preview">MD Preview</a> under the MIT License.
-      <a href="privacy.html">Privacy</a> · <a href="support.html">Support</a>
-    </footer>
-  </main>
+<header>
+  <div class="wrap">
+    <a class="brand" href="./"><img src="icon.png" alt="" width="28" height="28">MD Previewer</a>
+    <nav class="links">
+      <a href="#features">功能</a>
+      <a href="#shots">截图</a>
+      <a href="#shortcuts">快捷键</a>
+      <a href="#mobile">移动端</a>
+      <a href="#faq">常见问题</a>
+      <a href="#download">下载</a>
+    </nav>
+    <div class="lang"><span class="on">中文</span><a href="en.html" hreflang="en">English</a></div>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <img class="mark" src="icon.png" alt="MD Previewer 图标" width="84" height="84">
+    <h1>打开 Markdown，就该像打开记事本一样快</h1>
+    <p class="lead">
+      MD Previewer 是一个本地优先的 Markdown 阅读器与编辑器。它用 Rust 加系统自带的 WebView 写成，
+      不打包浏览器内核，双击即开、秒出正文；渲染全在本地完成，不上传任何文档。
+    </p>
+    <ul class="chips">
+      <li>Windows 10 / 11</li>
+      <li>安装包约 5 MB</li>
+      <li>无 Electron</li>
+      <li>无遥测、无账号</li>
+      <li>离线渲染公式与图表</li>
+      <li>MIT 许可</li>
+    </ul>
+    <div class="cta">
+      <a class="button" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">
+        下载 Windows 版
+        <small>安装包 · 自动关联 .md 文件</small>
+      </a>
+      <a class="button ghost" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">
+        免安装版
+        <small>单文件绿色版，解压即用</small>
+      </a>
+    </div>
+    <p class="note">下载链接永远指向最新版本，不用管版本号。App 内也能检查更新并直接升级。</p>
+  </div>
+</div>
+
+<section id="shots">
+  <div class="wrap">
+    <p class="eyebrow">界面</p>
+    <h2>阅读、编辑、对照，都在同一个窗口里</h2>
+    <p class="intro">左侧是当前文件夹与最近打开，中间是正文，标签栏在顶部——没有多余的侧边面板和工具栏干扰阅读。</p>
+    <div class="shots">
+      <figure>
+        <img src="preview.png" alt="MD Previewer 预览模式：左侧文件列表，顶部标签栏，正文渲染了表格与代码块" loading="lazy" width="1766" height="1005">
+        <figcaption>预览模式：章节标题、表格、代码块、本地图片、公式与流程图都会渲染出来，右上角实时显示字数与字符数。</figcaption>
+      </figure>
+      <figure>
+        <img src="editor.png" alt="MD Previewer 编辑模式：左侧显示源码，右侧是设置面板，可切换作者模式与标签栏行为" loading="lazy" width="1766" height="1012">
+        <figcaption>编辑模式：左侧改源码，右侧随时切回预览；设置面板里可以调打开方式、作者模式、标签栏行为和外观。</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <p class="eyebrow">功能</p>
+    <h2>为「每天要读很多 Markdown」的人准备</h2>
+    <p class="intro">特别是 AI 生成的长文档、写作项目里的章节文件、手机传到电脑上的 .md——这些文件用重型编辑器打开太慢，用记事本打开又看不清结构。</p>
+
+    <div class="grid">
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6.5A2.5 2.5 0 0 1 4 19.5Z"/><path d="M8 7h6M8 11h8"/></svg>
+        <h3>打开就能读</h3>
+        <p>不只是 .md——任何后缀的纯文本（.txt、.json、.log、源码）都能直接打开阅读，8 KB 二进制嗅探会拦住误开的程序与压缩包。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        <h3>随时切换编辑</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>E</kbd> 在预览与源码之间切换，<kbd>Ctrl</kbd>+<kbd>\</kbd> 分栏对照。编辑时实时预览，改完直接保存回原文件。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <h3>全文搜索与大纲</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>F</kbd> 在正文里查找并高亮，回车逐个跳转；侧栏能从标题生成大纲，滚动时自动跟着高亮当前位置。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>
+        <h3>多标签与分屏</h3>
+        <p>一次打开多个文档；退出后重新打开会恢复上次的标签。同一份文档也能开两个窗口左右对照。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+        <h3>文件改动自动跟上</h3>
+        <p>磁盘上的文件被其他程序改写时，这里会自动重载。如果你正好有未保存的修改，它会先把冲突摆出来问你怎么处理，而不是默默覆盖。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>
+        <h3>中文编码不踩坑</h3>
+        <p>自动识别 UTF-8、UTF-8 BOM、GBK / ANSI、UTF-16 LE/BE。老文档乱码时，可以按指定编码重新打开，或转码后另存为新文件。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h13"/></svg>
+        <h3>公式、图表、高亮</h3>
+        <p>KaTeX 数学公式、Mermaid 流程图时序图、代码语法高亮，都随安装包离线带走，断网也能正常渲染，代码块右上角一键复制。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+        <h3>深浅色与排版控制</h3>
+        <p>跟随系统深浅色，也可以强制浅色或深色；缩放比例会被记住，长表格和长代码行可以一键换行。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 4v5c0 4.4-3 8.4-7 9.5C8 20.4 5 16.4 5 12V7Z"/><path d="m9 12 2 2 4-4"/></svg>
+        <h3>不联网也能放心用</h3>
+        <p>不收集数据、不埋点、不要账号，打开文档不产生任何网络请求。唯一的联网动作是你主动点「检查更新」。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M12 7v5l3 2"/></svg>
+        <h3>应用内升级</h3>
+        <p>发现新版本后可以直接在应用里下载，进度条看得见，下完自动替换重启，不用再手动去网页里找安装包。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
+        <h3>作者模式</h3>
+        <p>写长文的人可以把作者批注、章节编号这类内容折叠起来，只留干净正文给读者，开关就在设置面板里。</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h5M10 17h5"/></svg>
+        <h3>打印与另存</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>P</kbd> 直接调系统打印（不是浏览器打印对话框），<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> 另存为，编码可选。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="shortcuts">
+  <div class="wrap">
+    <p class="eyebrow">快捷键</p>
+    <h2>常用操作都能只用键盘完成</h2>
+    <p class="intro">macOS 上把 Ctrl 换成 Cmd 即可，下面这些快捷键两边一致。</p>
+    <table>
+      <tbody>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>打开文件</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>新建 Markdown</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>在正文里查找</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>预览 / 编辑模式切换</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>分栏对照编辑</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>保存</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>另存为</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>打印</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>关闭当前标签</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>放大 / 缩小 / 恢复默认缩放</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>R</kbd></td><td>重新渲染当前文档</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>关闭浮层，或退出编辑模式</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <p class="eyebrow">安装</p>
+    <h2>三步开始用</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>1 · 下载</h3>
+        <p>推荐用安装包：装完会把 <code>.md</code> 关联到 MD Previewer，双击文档直接打开，并写入卸载信息。</p>
+      </div>
+      <div class="card">
+        <h3>2 · 如果出现 SmartScreen 提示</h3>
+        <p>安装包暂时没有代码签名，Windows 可能提示「未知发布者」。点「更多信息」→「仍要运行」即可；下载页下方也附了 SHA-256 校验文件。</p>
+      </div>
+      <div class="card">
+        <h3>3 · 不想安装就用绿色版</h3>
+        <p><code>MD-Previewer-windows-x64.exe</code> 是单文件版本，放到任意目录双击就能用，卸载就是删掉它。</p>
+      </div>
+    </div>
+    <p class="note">
+      系统要求：Windows 10 1809 或更高（Windows 11 均可）。渲染用的是系统自带的 WebView2，Win10 1809 之前的系统可能需要另外装一次 WebView2 Runtime。
+    </p>
+  </div>
+</section>
+
+<section id="mobile">
+  <div class="wrap">
+    <p class="eyebrow">移动端</p>
+    <h2>手机收到的 .md，也能直接看</h2>
+    <p class="intro">
+      iOS 与 Android 各有一个只读预览版，共用同一套渲染逻辑：在文件管理器、微信或其他应用里用「打开方式」选中 MD Previewer，就能看到排版好的正文，
+      不用担心手机上没有编辑器打不开。
+    </p>
+    <div class="grid">
+      <div class="card">
+        <h3>iOS</h3>
+        <p>UIKit + WKWebView，支持系统「用其他应用打开」，安装包见发布页。</p>
+      </div>
+      <div class="card">
+        <h3>Android</h3>
+        <p>原生 WebView 外壳，支持 <code>ACTION_VIEW</code> 与分享进入，APK 见发布页。</p>
+      </div>
+      <div class="card">
+        <h3>只读、无广告</h3>
+        <p>移动端定位是「看一眼就走」：不登录、不上传、不弹广告，看完关掉即可。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <p class="eyebrow">常见问题</p>
+    <h2>你可能想先确认的几件事</h2>
+
+    <details>
+      <summary>它会把我的文档传到网上吗？</summary>
+      <p>不会。渲染、搜索、公式和图表全部在本地完成，应用只在更新检查时访问一次 GitHub 的发布接口（你也可以完全不管它）。没有统计、没有遥测、没有账号。</p>
+    </details>
+    <details>
+      <summary>为什么打开大文件比 VS Code 快？</summary>
+      <p>因为它不携带 Chromium：界面跑在系统自带的 WebView 上，安装包只有几 MB，冷启动不需要先拉起一个浏览器内核。</p>
+    </details>
+    <details>
+      <summary>能当 Markdown 编辑器用吗？</summary>
+      <p>能。源码编辑、实时预览、分栏对照、另存为和编码转换都有。它不是 IDE，没有插件生态和 Git 面板——如果你要的是「快速看、顺手改」，这个取舍刚好。</p>
+    </details>
+    <details>
+      <summary>老文档是 GBK 编码，打开是乱码怎么办？</summary>
+      <p>点标题栏下方的编码标签，选「以指定编码重新打开」；要长期使用就选「转换为指定编码」，再用 <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存。</p>
+    </details>
+    <details>
+      <summary>和上游 MD Preview 是什么关系？</summary>
+      <p>这是从 <a href="https://github.com/vorojar/md-preview">MD Preview</a> 派生出来的分支，做了品牌隔离并换成自己的发布与更新通道，保留 MIT 许可。</p>
+    </details>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <p class="eyebrow">下载</p>
+    <h2>选择适合你的版本</h2>
+    <p class="intro">下面每个链接都指向 GitHub 上最新一版 release 的固定文件名，因此不会过期。</p>
+    <table class="dl-table">
+      <thead>
+        <tr><th>平台</th><th>包</th><th>下载</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Windows 10/11</td>
+          <td>安装包（推荐）</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">MD-Previewer-Setup.exe</a></td>
+        </tr>
+        <tr>
+          <td>Windows 10/11</td>
+          <td>免安装单文件</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">MD-Previewer-windows-x64.exe</a></td>
+        </tr>
+        <tr>
+          <td>Android</td>
+          <td>只读预览版</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">在发布页查看 APK</a></td>
+        </tr>
+        <tr>
+          <td>iOS</td>
+          <td>只读预览版</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">在发布页查看</a></td>
+        </tr>
+        <tr>
+          <td>源码</td>
+          <td>Rust · MIT</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer">GitHub 仓库</a></td>
+        </tr>
+        <tr>
+          <td>校验</td>
+          <td>SHA-256</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">SHA256SUMS.txt</a></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note">Windows 版本暂未做代码签名，首次运行可能被 SmartScreen 拦一下，属正常现象。</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>派生自 <a href="https://github.com/vorojar/md-preview">MD Preview</a>，遵循 MIT 许可。</span>
+    <nav>
+      <a href="privacy.html">隐私</a>
+      <a href="support.html">支持</a>
+      <a href="en.html" hreflang="en">English</a>
+      <a href="https://github.com/ArnoldRedman/MD-Previewer">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "MD Previewer",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "Windows 10, Windows 11",
+  "description": "本地优先的 Markdown 阅读器与编辑器，Rust 加系统 WebView 实现，支持多标签、文件监听、编码识别、KaTeX 与 Mermaid 离线渲染。",
+  "url": "https://arnoldredman.github.io/MD-Previewer/",
+  "downloadUrl": "https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe",
+  "softwareHelp": "https://github.com/ArnoldRedman/MD-Previewer",
+  "license": "https://opensource.org/license/mit",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+  "inLanguage": "zh-CN"
+}
+</script>
+
 </body>
 </html>

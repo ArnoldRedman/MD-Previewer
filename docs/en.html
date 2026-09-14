@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MD Previewer — a local-first Markdown reader and editor for Windows</title>
+<meta name="description" content="MD Previewer is a local-first Markdown reader and editor built with Rust and the system WebView: tabs, live file watching, encoding detection, document outline, full-text search, offline KaTeX and Mermaid rendering, dark mode. No Electron, no telemetry. Free for Windows 10/11, plus read-only iOS and Android shells.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0f766e">
+<link rel="canonical" href="https://arnoldredman.github.io/MD-Previewer/en.html">
+<link rel="alternate" hreflang="zh-CN" href="https://arnoldredman.github.io/MD-Previewer/">
+<link rel="alternate" hreflang="en" href="https://arnoldredman.github.io/MD-Previewer/en.html">
+<link rel="alternate" hreflang="x-default" href="https://arnoldredman.github.io/MD-Previewer/en.html">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="site.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="MD Previewer — a local-first Markdown reader">
+<meta property="og:description" content="A Markdown reader and editor built on Rust and the system WebView: tabs, live file watching, encoding detection, offline math and diagram rendering. No Electron, no telemetry.">
+<meta property="og:image" content="https://arnoldredman.github.io/MD-Previewer/icon.png">
+<meta property="og:url" content="https://arnoldredman.github.io/MD-Previewer/en.html">
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a class="brand" href="en.html"><img src="icon.png" alt="" width="28" height="28">MD Previewer</a>
+    <nav class="links">
+      <a href="#features">Features</a>
+      <a href="#shots">Screenshots</a>
+      <a href="#shortcuts">Shortcuts</a>
+      <a href="#mobile">Mobile</a>
+      <a href="#faq">FAQ</a>
+      <a href="#download">Download</a>
+    </nav>
+    <div class="lang"><a href="./" hreflang="zh-CN">中文</a><span class="on">English</span></div>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <img class="mark" src="icon.png" alt="MD Previewer icon" width="84" height="84">
+    <h1>Markdown should open as fast as a text file</h1>
+    <p class="lead">
+      MD Previewer is a local-first Markdown reader and editor written in Rust on top of the system WebView.
+      It ships no browser engine, opens on double click, and renders everything on your machine.
+    </p>
+    <ul class="chips">
+      <li>Windows 10 / 11</li>
+      <li>~5 MB installer</li>
+      <li>No Electron</li>
+      <li>No telemetry, no account</li>
+      <li>Offline math and diagrams</li>
+      <li>MIT licensed</li>
+    </ul>
+    <div class="cta">
+      <a class="button" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">
+        Download for Windows
+        <small>Installer · associates .md files</small>
+      </a>
+      <a class="button ghost" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">
+        Portable build
+        <small>Single .exe, nothing to install</small>
+      </a>
+    </div>
+    <p class="note">These links always resolve to the newest release, so the version number never goes stale. The app can also check for updates and upgrade itself in place.</p>
+  </div>
+</div>
+
+<section id="shots">
+  <div class="wrap">
+    <p class="eyebrow">Interface</p>
+    <h2>Read, edit, and compare in one window</h2>
+    <p class="intro">Folder and recent files on the left, document in the middle, tabs on top. Nothing else competes for attention.</p>
+    <div class="shots">
+      <figure>
+        <img src="preview.png" alt="MD Previewer in preview mode: file list on the left, tabs on top, rendered tables and code blocks in the document" loading="lazy" width="1766" height="1005">
+        <figcaption>Preview mode: headings, tables, code blocks, local images, math and diagrams all render, with live word and character counts in the corner.</figcaption>
+      </figure>
+      <figure>
+        <img src="editor.png" alt="MD Previewer in source mode: raw Markdown on the left, settings panel on the right" loading="lazy" width="1766" height="1012">
+        <figcaption>Source mode: edit on the left, switch back to preview at any time, and tune open behaviour, author mode, tab handling and appearance in the settings panel.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <p class="eyebrow">Features</p>
+    <h2>Built for people who read a lot of Markdown</h2>
+    <p class="intro">Long AI-generated documents, chapter files inside a writing project, a .md that arrived from your phone — heavy editors are slow for these, and a plain text editor shows you no structure.</p>
+
+    <div class="grid">
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6.5A2.5 2.5 0 0 1 4 19.5Z"/><path d="M8 7h6M8 11h8"/></svg>
+        <h3>Opens anything readable</h3>
+        <p>Not just .md: any plain-text file — .txt, .json, .log, source code — opens directly. An 8 KB binary sniff stops you from opening an executable or archive by accident.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        <h3>Edit whenever you want</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>E</kbd> flips between preview and source, <kbd>Ctrl</kbd>+<kbd>\</kbd> puts them side by side. Edits preview live and save straight back to the original file.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <h3>Search and outline</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>F</kbd> highlights matches in the document and steps through them; the sidebar builds an outline from your headings and follows the scroll position.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>
+        <h3>Tabs and split views</h3>
+        <p>Keep several documents open, and get your tabs back the next time you launch. The same file can also be opened in two windows for a side-by-side comparison.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+        <h3>Keeps up with the file</h3>
+        <p>When another program rewrites the file on disk, the view reloads itself. If you happen to have unsaved changes, it surfaces the conflict and asks what to do instead of overwriting.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>
+        <h3>Encoding handled for you</h3>
+        <p>Detects UTF-8, UTF-8 BOM, GBK / ANSI and UTF-16 LE/BE. If an old file still shows as garbage, reopen it with a chosen encoding or convert it and save as a new file.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h13"/></svg>
+        <h3>Math, diagrams, highlighting</h3>
+        <p>KaTeX math, Mermaid flowcharts and sequence diagrams, and syntax highlighting all ship inside the installer. They render offline, and every code block has a copy button.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+        <h3>Light, dark, and typography</h3>
+        <p>Follows the system theme, or force light/dark. Zoom level is remembered, and long tables or code lines can be wrapped with one toggle.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 4v5c0 4.4-3 8.4-7 9.5C8 20.4 5 16.4 5 12V7Z"/><path d="m9 12 2 2 4-4"/></svg>
+        <h3>Quiet by design</h3>
+        <p>No data collection, no analytics, no account, and no network request when you open a document. The only time it goes online is when you ask it to check for updates.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M12 7v5l3 2"/></svg>
+        <h3>Updates itself</h3>
+        <p>When a new version exists, the app downloads it with a visible progress bar and swaps itself in on restart — no hunting for the installer again.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
+        <h3>Author mode</h3>
+        <p>For long-form writers: fold away author notes and chapter numbering so only clean prose remains. One switch in the settings panel.</p>
+      </div>
+
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h5M10 17h5"/></svg>
+        <h3>Print and save as</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>P</kbd> goes through the native print path rather than a browser dialog, and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> saves a copy with an encoding of your choice.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="shortcuts">
+  <div class="wrap">
+    <p class="eyebrow">Shortcuts</p>
+    <h2>The common actions stay on the keyboard</h2>
+    <p class="intro">On macOS, replace Ctrl with Cmd — everything else behaves the same.</p>
+    <table>
+      <tbody>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Open a file</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New Markdown file</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in the document</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Toggle preview / source</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Split source and preview</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Save as</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Print</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>Close the current tab</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>Zoom in / out / reset</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>R</kbd></td><td>Re-render the document</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Close overlays, or leave edit mode</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <p class="eyebrow">Install</p>
+    <h2>Three steps</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>1 · Download</h3>
+        <p>The installer associates <code>.md</code> files with MD Previewer, so a double click opens the document and registers an uninstaller.</p>
+      </div>
+      <div class="card">
+        <h3>2 · If SmartScreen complains</h3>
+        <p>Builds are not code signed yet, so Windows may show "unknown publisher". Choose "More info" → "Run anyway"; the release also ships a SHA-256 checksum file.</p>
+      </div>
+      <div class="card">
+        <h3>3 · Or use the portable build</h3>
+        <p><code>MD-Previewer-windows-x64.exe</code> is a single file that runs from any folder. Uninstalling means deleting it.</p>
+      </div>
+    </div>
+    <p class="note">
+      Requirements: Windows 10 1809 or newer (any Windows 11 build). Rendering uses the WebView2 runtime that ships with Windows; builds older than 1809 may need the WebView2 runtime installed once.
+    </p>
+  </div>
+</section>
+
+<section id="mobile">
+  <div class="wrap">
+    <p class="eyebrow">Mobile</p>
+    <h2>A .md that arrives on your phone still opens</h2>
+    <p class="intro">
+      iOS and Android each have a read-only shell that shares the same rendering rules. Pick MD Previewer from "Open with" in Files, WeChat or any other app and the document is laid out properly —
+      no editor required on the phone.
+    </p>
+    <div class="grid">
+      <div class="card">
+        <h3>iOS</h3>
+        <p>UIKit + WKWebView, handles the system "open in" flow. Builds are listed on the releases page.</p>
+      </div>
+      <div class="card">
+        <h3>Android</h3>
+        <p>A native WebView shell that responds to <code>ACTION_VIEW</code> and share intents. APK on the releases page.</p>
+      </div>
+      <div class="card">
+        <h3>Read-only and quiet</h3>
+        <p>The mobile shells are meant to be opened, read and closed: no sign-in, no uploads, no ads.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <p class="eyebrow">FAQ</p>
+    <h2>Things worth checking first</h2>
+
+    <details>
+      <summary>Does it send my documents anywhere?</summary>
+      <p>No. Rendering, search, math and diagrams all happen locally. The app only touches the network when it checks GitHub for a release (and you can ignore that entirely). No analytics, no telemetry, no account.</p>
+    </details>
+    <details>
+      <summary>Why does it open large files faster than a code editor?</summary>
+      <p>Because it does not ship Chromium: the interface runs on the WebView your operating system already provides, the installer is a few megabytes, and start-up does not have to boot a browser engine first.</p>
+    </details>
+    <details>
+      <summary>Can I use it as an editor?</summary>
+      <p>Yes — source editing, live preview, split view, save as and encoding conversion are all there. It is not an IDE: no plugin ecosystem, no Git panel. If what you want is "look quickly, fix quickly", that trade is the point.</p>
+    </details>
+    <details>
+      <summary>An old file is GBK-encoded and shows as garbage</summary>
+      <p>Click the encoding label under the tab bar and pick "Reopen with" that encoding, or choose "Convert to" and save with <kbd>Ctrl</kbd>+<kbd>S</kbd>.</p>
+    </details>
+    <details>
+      <summary>How does this relate to upstream MD Preview?</summary>
+      <p>It is a fork of <a href="https://github.com/vorojar/md-preview">MD Preview</a> with its own branding and release/update channel, kept under the MIT license.</p>
+    </details>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <p class="eyebrow">Download</p>
+    <h2>Pick the build you want</h2>
+    <p class="intro">Every link below points at a stable asset name inside the newest GitHub release, so it never expires.</p>
+    <table class="dl-table">
+      <thead>
+        <tr><th>Platform</th><th>Package</th><th>Download</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Windows 10/11</td>
+          <td>Installer (recommended)</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">MD-Previewer-Setup.exe</a></td>
+        </tr>
+        <tr>
+          <td>Windows 10/11</td>
+          <td>Portable single file</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">MD-Previewer-windows-x64.exe</a></td>
+        </tr>
+        <tr>
+          <td>Android</td>
+          <td>Read-only preview shell</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">APK on the releases page</a></td>
+        </tr>
+        <tr>
+          <td>iOS</td>
+          <td>Read-only preview shell</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">See the releases page</a></td>
+        </tr>
+        <tr>
+          <td>Source</td>
+          <td>Rust · MIT</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer">GitHub repository</a></td>
+        </tr>
+        <tr>
+          <td>Checksums</td>
+          <td>SHA-256</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">SHA256SUMS.txt</a></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note">Windows builds are not code signed yet, so SmartScreen may warn on first launch. That is expected.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Derived from <a href="https://github.com/vorojar/md-preview">MD Preview</a> under the MIT license.</span>
+    <nav>
+      <a href="privacy.html">Privacy</a>
+      <a href="support.html">Support</a>
+      <a href="./" hreflang="zh-CN">中文</a>
+      <a href="https://github.com/ArnoldRedman/MD-Previewer">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "MD Previewer",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "Windows 10, Windows 11",
+  "description": "A local-first Markdown reader and editor built with Rust and the system WebView, with tabs, file watching, encoding detection and offline KaTeX/Mermaid rendering.",
+  "url": "https://arnoldredman.github.io/MD-Previewer/en.html",
+  "downloadUrl": "https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe",
+  "softwareHelp": "https://github.com/ArnoldRedman/MD-Previewer",
+  "license": "https://opensource.org/license/mit",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "inLanguage": "en"
+}
+</script>
+
+</body>
+</html>
