@@ -65,16 +65,23 @@ try {
 
     $secondary = Start-Previewer $secondDoc
     Wait-Forwarded $secondary
+    # On a cold CI runner the primary instance has to boot WebView2 before it handles the
+    # forwarded document, so 10 seconds is not enough here.
     Wait-For {
         $session = Read-Session
         $session -and $session.tabs.Count -eq 2 -and $session.active -eq 1
-    } "primary session did not receive the second document"
+    } "primary session did not receive the second document" 30
 
     $duplicate = Start-Previewer $secondDoc
     Wait-Forwarded $duplicate
-    Start-Sleep -Milliseconds 300
+    # Do not sleep a fixed amount: wait until the primary flushed the session, otherwise a
+    # slow start looks like a duplicated tab.
+    Wait-For {
+        $session = Read-Session
+        $session -and $session.tabs.Count -eq 2 -and $session.active -eq 1
+    } "primary session lost its tabs after a duplicate open" 20
     $session = Read-Session
-    if (-not $session -or $session.tabs.Count -ne 2 -or $session.active -ne 1) {
+    if ($session.tabs.Count -ne 2 -or $session.active -ne 1) {
         throw "opening the same document created a duplicate tab"
     }
     $names = @($session.tabs | ForEach-Object { [IO.Path]::GetFileName($_) })
