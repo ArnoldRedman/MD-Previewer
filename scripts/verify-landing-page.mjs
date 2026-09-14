@@ -25,6 +25,19 @@ const apk = mobileBuild.match(/MD-Previewer-mobile\.apk/);
 if (!apk) throw new Error('build-release.sh 里没找到安卓发布资产名');
 assets.push(apk[0]);
 
+// Linux 两个包在 build-linux.sh 里复制成不带版本号的发布名，架构取自脚本里的默认值
+const linuxBuild = await readFile(join(root, 'scripts/build-linux.sh'), 'utf8');
+const releaseArch = linuxBuild.match(/^RELEASE_ARCH="([a-z0-9]+)"/m)?.[1];
+const debArch = linuxBuild.match(/^DEB_ARCH="([a-z0-9]+)"/m)?.[1];
+if (!releaseArch || !debArch) throw new Error('build-linux.sh 里没找到发布架构默认值');
+for (const [template, name] of [
+  ['MD-Previewer-linux-$RELEASE_ARCH.tar.gz', `MD-Previewer-linux-${releaseArch}.tar.gz`],
+  ['MD-Previewer-linux-$DEB_ARCH.deb', `MD-Previewer-linux-${debArch}.deb`],
+]) {
+  if (!linuxBuild.includes(template)) throw new Error(`build-linux.sh 里没找到发布资产名模板 ${template}`);
+  assets.push(name);
+}
+
 const pages = {};
 for (const name of Object.keys(PAGES)) {
   pages[name] = await readFile(join(SITE, name), 'utf8');

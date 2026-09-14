@@ -46,7 +46,7 @@
       不打包浏览器内核，双击即开、秒出正文；渲染全在本地完成，不上传任何文档。
     </p>
     <ul class="chips">
-      <li>Windows 10 / 11</li>
+      <li>Windows 10/11 · Linux</li>
       <li>安装包约 5 MB</li>
       <li>无 Electron</li>
       <li>无遥测、无账号</li>
@@ -293,6 +293,16 @@
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">MD-Previewer-windows-x64.exe</a></td>
         </tr>
         <tr>
+          <td>Linux (deb)</td>
+          <td>Debian / Ubuntu</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-amd64.deb">MD-Previewer-linux-amd64.deb</a></td>
+        </tr>
+        <tr>
+          <td>Linux</td>
+          <td>免安装压缩包</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-x64.tar.gz">MD-Previewer-linux-x64.tar.gz</a></td>
+        </tr>
+        <tr>
           <td>Android</td>
           <td>只读预览版</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-mobile.apk">MD-Previewer-mobile.apk</a></td>
@@ -314,7 +324,7 @@
         </tr>
       </tbody>
     </table>
-    <p class="note">Windows 版本暂未做代码签名，首次运行可能被 SmartScreen 拦一下，属正常现象。</p>
+    <p class="note">Windows 版本暂未做代码签名，首次运行可能被 SmartScreen 拦一下，属正常现象。Linux 版需要系统自带 WebKitGTK 4.1（Ubuntu 22.04+、Debian 12+、Fedora 36+ 均已内置），包由 CI 构建，尚未在真机验证渲染效果。</p>
   </div>
 </section>
 

@@ -18,8 +18,12 @@ APP_NAME="MD Previewer"
 BIN_NAME="md-previewer"
 ICON_NAME="md-previewer"
 VERSION="$(awk -F\" '/^version = / { print $2; exit }' Cargo.toml)"
-ARCH="amd64"
-[ "$(uname -m)" = "aarch64" ] && ARCH="arm64"
+# 发布资产名里带的架构：tar 包用 x64/arm64，deb 的 Architecture 字段用 amd64/arm64
+RELEASE_ARCH="x64"
+DEB_ARCH="amd64"
+case "$(uname -m)" in
+  aarch64 | arm64) RELEASE_ARCH="arm64"; DEB_ARCH="arm64" ;;
+esac
 
 BINARY="target/release/$BIN_NAME"
 [ -f "$BINARY" ] || fail "missing $BINARY (run cargo build --release first)"
@@ -34,12 +38,14 @@ WEBKIT_DEP="libwebkit2gtk-4.1-0"
 sed -e "s/@APP_NAME@/$APP_NAME/g" \
     -e "s/@BIN_NAME@/$BIN_NAME/g" \
     -e "s/@ICON_NAME@/$ICON_NAME/g" \
-    -e "s/@VERSION@/$VERSION/g" \
-    -e "s/@ARCH@/$ARCH/g" \
     scripts/linux/md-previewer.desktop.in > "$DIST/$ICON_NAME.desktop"
+# 模板里没有的占位符不该残留，免得哪天改模板漏改又没人发现
+if grep -q "@[A-Z_]*@" "$DIST/$ICON_NAME.desktop"; then
+  fail "desktop file has unresolved placeholders"
+fi
 
 # ---------- tar.gz：二进制 + .desktop + 图标 + 许可证，解压即用 ----------
-TAR_STAGE="$STAGE/tar/$BIN_NAME-$VERSION-linux-x64"
+TAR_STAGE="$STAGE/tar/$BIN_NAME-$VERSION-linux-$RELEASE_ARCH"
 mkdir -p "$TAR_STAGE"
 install -m 0755 "$BINARY" "$TAR_STAGE/$BIN_NAME"
 install -m 0644 "$DIST/$ICON_NAME.desktop" "$TAR_STAGE/$ICON_NAME.desktop"
@@ -62,7 +68,7 @@ cat > "$TAR_STAGE/README.md" <<EOF
 桌面文件里的 Exec 是 $BIN_NAME，所以请把它放进 PATH 里的目录（例如 ~/.local/bin）。
 EOF
 
-TARBALL="$DIST/$BIN_NAME-$VERSION-linux-x64.tar.gz"
+TARBALL="$DIST/$BIN_NAME-$VERSION-linux-$RELEASE_ARCH.tar.gz"
 tar -C "$STAGE/tar" -czf "$TARBALL" "$(basename "$TAR_STAGE")"
 
 # ---------- .deb ----------
@@ -87,7 +93,7 @@ Package: $BIN_NAME
 Version: $VERSION
 Section: utils
 Priority: optional
-Architecture: $ARCH
+Architecture: $DEB_ARCH
 Depends: $WEBKIT_DEP, libgtk-3-0
 Recommends: xdg-utils
 Installed-Size: $INSTALLED_SIZE
@@ -101,10 +107,19 @@ Description: Lightweight local-first Markdown reader
  The application makes no network requests while reading documents.
 EOF
 
-DEB="$DIST/${BIN_NAME}_${VERSION}_${ARCH}.deb"
+DEB="$DIST/${BIN_NAME}_${VERSION}_${DEB_ARCH}.deb"
 dpkg-deb --root-owner-group --build "$DEB_ROOT" "$DEB" >/dev/null
+
+# 发布资产名固定不带版本号，落地页的 releases/latest/download/<name> 才不会随版本失效；
+# 带版本号的那份保留在 dist/ 里，适合归档和本地源
+TARBALL_ASSET="$DIST/MD-Previewer-linux-$RELEASE_ARCH.tar.gz"
+DEB_ASSET="$DIST/MD-Previewer-linux-$DEB_ARCH.deb"
+cp "$TARBALL" "$TARBALL_ASSET"
+cp "$DEB" "$DEB_ASSET"
 
 rm -rf "$STAGE"
 
-echo "[linux-package] version $VERSION ($ARCH)"
-(cd "$DIST" && sha256sum "$(basename "$TARBALL")" "$(basename "$DEB")")
+echo "[linux-package] version $VERSION ($RELEASE_ARCH / $DEB_ARCH)"
+(cd "$DIST" && sha256sum \
+  "$(basename "$TARBALL_ASSET")" "$(basename "$DEB_ASSET")" \
+  "$(basename "$TARBALL")" "$(basename "$DEB")")

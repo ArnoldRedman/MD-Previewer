@@ -45,7 +45,7 @@
       It ships no browser engine, opens on double click, and renders everything on your machine.
     </p>
     <ul class="chips">
-      <li>Windows 10 / 11</li>
+      <li>Windows 10/11 · Linux</li>
       <li>~5 MB installer</li>
       <li>No Electron</li>
       <li>No telemetry, no account</li>
@@ -292,6 +292,16 @@
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">MD-Previewer-windows-x64.exe</a></td>
         </tr>
         <tr>
+          <td>Linux (deb)</td>
+          <td>Debian / Ubuntu</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-amd64.deb">MD-Previewer-linux-amd64.deb</a></td>
+        </tr>
+        <tr>
+          <td>Linux</td>
+          <td>Portable tarball</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-x64.tar.gz">MD-Previewer-linux-x64.tar.gz</a></td>
+        </tr>
+        <tr>
           <td>Android</td>
           <td>Read-only preview shell</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">APK on the releases page</a></td>
@@ -313,7 +323,7 @@
         </tr>
       </tbody>
     </table>
-    <p class="note">Windows builds are not code signed yet, so SmartScreen may warn on first launch. That is expected.</p>
+    <p class="note">Windows builds are not code signed yet, so SmartScreen may warn on first launch. That is expected. Linux packages need WebKitGTK 4.1, which Ubuntu 22.04+, Debian 12+ and Fedora 36+ ship by default; they are produced by CI and have not been rendered on real hardware yet.</p>
   </div>
 </section>
 
