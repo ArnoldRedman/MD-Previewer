@@ -59,7 +59,11 @@ use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
 use tao::window::WindowBuilder;
 use wry::WebViewBuilder;
 
+/// 事件循环消息：页面回调、文件监听、更新线程都只把消息投进队列，状态全部在主线程改
+/// macOS 原生菜单直接构造其中一部分动作，其他平台的同名动作由页面 IPC 触发，
+/// 所以非 macOS 构建下这些变体没有构造点，属于设计如此
 #[derive(Debug)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum UserEvent {
     /// 页面发来的原始 IPC 消息，在事件循环里解析和处理，页面回调线程不碰任何状态
     Ipc(String),
