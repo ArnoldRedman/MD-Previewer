@@ -15,6 +15,17 @@
     p { color: color-mix(in srgb, CanvasText 72%, transparent); }
     ul { padding-left: 1.25rem; }
     a.button { display: inline-block; margin-top: 16px; padding: 10px 16px; border-radius: 9px; color: #fff; background: #0f766e; text-decoration: none; }
+    a.button.secondary { color: inherit; background: transparent; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); }
+    .downloads { margin-top: 40px; }
+    .downloads h2 { margin: 0 0 4px; font-size: 1.25rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent); overflow-wrap: break-word; }
+    th { font-weight: 600; }
+    td:last-child, th:last-child { text-align: right; }
+    @media (max-width: 520px) {
+      main { padding: 48px 16px; }
+      th, td { padding: 8px 4px; }
+    }
     footer { margin-top: 56px; font-size: .875rem; }
   </style>
 </head>
@@ -28,7 +39,46 @@
       <li>Tables, code highlighting, KaTeX, Mermaid, local images, and document links</li>
       <li>Desktop plus native iOS and Android preview shells</li>
     </ul>
-    <a class="button" href="https://github.com/ArnoldRedman/md-preview">Source on GitHub</a>
+    <a class="button" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">Download for Windows</a>
+    <a class="button secondary" href="https://github.com/ArnoldRedman/MD-Previewer">Source on GitHub</a>
+
+    <section class="downloads">
+      <h2>Downloads</h2>
+      <p>Every build below is attached to the latest GitHub release, so the links never go stale.</p>
+      <table>
+        <thead>
+          <tr><th>Platform</th><th>Package</th><th>Download</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Windows 10/11</td>
+            <td>Recommended installer</td>
+            <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">MD-Previewer-Setup.exe</a></td>
+          </tr>
+          <tr>
+            <td>Windows 10/11</td>
+            <td>Portable, no install</td>
+            <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">MD-Previewer-windows-x64.exe</a></td>
+          </tr>
+          <tr>
+            <td>Android</td>
+            <td>Read-only preview shell</td>
+            <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">APK on releases</a></td>
+          </tr>
+          <tr>
+            <td>iOS</td>
+            <td>Read-only preview shell</td>
+            <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases">See releases</a></td>
+          </tr>
+          <tr>
+            <td>Source</td>
+            <td>Rust, MIT licensed</td>
+            <td><a href="https://github.com/ArnoldRedman/MD-Previewer">GitHub</a></td>
+          </tr>
+        </tbody>
+      </table>
+      <p>Windows builds are not code signed yet, so SmartScreen may warn on first launch.</p>
+    </section>
     <footer>
       Derived from <a href="https://github.com/vorojar/md-preview">MD Preview</a> under the MIT License.
       <a href="privacy.html">Privacy</a> · <a href="support.html">Support</a>
