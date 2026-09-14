@@ -8,6 +8,10 @@ export default [
       'assets/katex/**',
       'assets/mermaid/**',
       'mobile/shared/vendor/**',
+      // 构建产物：Android 打包会把手机渲染层拷进 build/ 下
+      'mobile/android/**/build/**',
+      'mobile/android/.gradle/**',
+      'mobile/ios/build/**',
       'node_modules/**',
       'target/**',
       'dist/**',

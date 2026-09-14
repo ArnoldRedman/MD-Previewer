@@ -125,19 +125,17 @@ else
   echo "[verify] browser checks skipped: Playwright unavailable"
 fi
 
-# 有些环境的 gradle 只是坏掉的 shim，光看 PATH 不够，真的跑一次再决定
-if command -v gradle >/dev/null 2>&1 && gradle --version >/dev/null 2>&1; then
-  GRADLE_VERSION="$(gradle --version | awk '/^Gradle / { print $2; exit }')"
+# Android 统一走仓库自带的 wrapper（固定 Gradle 8.14.3）：
+# AGP 8.13 与 Gradle 9.6+ 不兼容，依赖系统 gradle 会随机器而变
+if [ -x mobile/android/gradlew ]; then
   if [ -z "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ] && [ ! -f mobile/android/local.properties ]; then
     echo "[verify] Android build skipped: Android SDK location is not configured"
-  elif [[ "$GRADLE_VERSION" =~ ^9\.([6-9]|[1-9][0-9]) ]] || [[ "$GRADLE_VERSION" =~ ^[1-9][0-9]\. ]]; then
-    echo "[verify] Android build skipped: Gradle $GRADLE_VERSION is newer than Android Gradle Plugin 8.x supports"
   else
     echo "[verify] Android debug build"
-    (cd mobile/android && gradle :app:assembleDebug)
+    (cd mobile/android && ./gradlew --no-daemon :app:assembleDebug)
   fi
 else
-  echo "[verify] Android build skipped: Gradle unavailable"
+  echo "[verify] Android build skipped: Gradle wrapper missing"
 fi
 
 if command -v xcodegen >/dev/null 2>&1 && command -v xcodebuild >/dev/null 2>&1; then

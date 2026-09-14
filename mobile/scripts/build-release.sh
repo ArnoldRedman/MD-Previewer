@@ -16,7 +16,8 @@ fi
 echo "[mobile-release] Android release APK/AAB"
 (
   cd mobile/android
-  gradle :app:clean :app:assembleRelease :app:bundleRelease
+  # 用仓库自带的 wrapper，版本固定为 Gradle 8.14.3（AGP 8.13 不支持 Gradle 9.6+）
+  ./gradlew --no-daemon :app:clean :app:assembleRelease :app:bundleRelease
 )
 
 ANDROID_APK="$ROOT/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk"
