@@ -26,6 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+        with:
+          # 仓库还没开过 Pages 时由这次运行自己开，免得还要手动去 Settings 点一遍
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs
