@@ -1068,6 +1068,26 @@ pub(crate) fn ipc_messages_parse_into_typed_commands() {
         Some(IpcMessage::ClearRecent)
     );
     assert_eq!(parse_ipc_message("refresh"), Some(IpcMessage::Refresh));
+    assert_eq!(parse_ipc_message("open-log"), Some(IpcMessage::OpenLog));
+    assert_eq!(parse_ipc_message("clear-log"), Some(IpcMessage::ClearLog));
+    assert_eq!(
+        parse_ipc_message("log-error:something broke"),
+        Some(IpcMessage::LogError("something broke".to_string()))
+    );
+    assert_eq!(
+        parse_ipc_message("set-setting:disable-all-shortcuts=on"),
+        Some(IpcMessage::SetSetting {
+            key: "disable-all-shortcuts".to_string(),
+            value: "on".to_string(),
+        })
+    );
+    assert_eq!(
+        parse_ipc_message("set-setting:disable-shortcut=close-tab"),
+        Some(IpcMessage::SetSetting {
+            key: "disable-shortcut".to_string(),
+            value: "close-tab".to_string(),
+        })
+    );
     assert_eq!(parse_ipc_message("open:"), None);
     assert_eq!(parse_ipc_message("bogus"), None);
 }

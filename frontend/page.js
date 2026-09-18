@@ -1,6 +1,14 @@
 (function(){
   // 渲染期由 Rust 注入的界面文案与特性开关，全部集中在这里读取
   var CFG = window.__mdPreviewerConfig;
+  window.addEventListener('error', function(e) {
+    var msg = 'JS Error: ' + (e.message || 'unknown') + ' at ' + (e.filename || '') + ':' + (e.lineno || 0) + ':' + (e.colno || 0);
+    if (window.ipc) window.ipc.postMessage('log-error:' + msg);
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    var reason = e.reason ? (e.reason.stack || e.reason.message || String(e.reason)) : 'unknown';
+    if (window.ipc) window.ipc.postMessage('log-error:Unhandled Rejection: ' + reason);
+  });
 	  var ICON_EDIT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
 	  var ICON_VIEW = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 	  var ICON_OPEN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6A2 2 0 0 1 18.45 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>';
@@ -101,6 +109,13 @@
 	  var ZOOM_MAX = 200;
 	  var ZOOM_STEP = 10;
 	  var zoomPercent = 100;
+	  var disableAllShortcuts = false;
+	  var disabledShortcuts = [];
+	  function isShortcutEnabled(id) {
+	    if (disableAllShortcuts) return false;
+	    if (disabledShortcuts.indexOf(id) >= 0) return false;
+	    return true;
+	  }
 
 	  btnOpen.innerHTML = ICON_OPEN;
 	  btnSearch.innerHTML = ICON_SEARCH;
@@ -584,6 +599,46 @@
 	  });
 	  // 只上报点击，选中态一律等 Rust 存盘后通过 __setSettings 回显，避免界面和实际配置不一致
 	  settingsControl.addEventListener('click', function(e) {
+	    var tabBtn = hit(e, '.settings-tab-btn');
+	    if (tabBtn) {
+	      e.preventDefault();
+	      var targetTab = tabBtn.getAttribute('data-settings-tab');
+	      var allTabBtns = settingsControl.querySelectorAll('.settings-tab-btn');
+	      var allContents = settingsControl.querySelectorAll('.settings-tab-content');
+	      for (var t = 0; t < allTabBtns.length; t++) {
+	        allTabBtns[t].classList.toggle('active', allTabBtns[t].getAttribute('data-settings-tab') === targetTab);
+	      }
+	      for (var c = 0; c < allContents.length; c++) {
+	        allContents[c].classList.toggle('active', allContents[c].id === 'settings-tab-' + targetTab);
+	      }
+	      return;
+	    }
+	    var shortcutBtn = hit(e, '[data-shortcut-toggle]');
+	    if (shortcutBtn) {
+	      e.preventDefault();
+	      var scId = shortcutBtn.getAttribute('data-shortcut-toggle');
+	      var action = shortcutBtn.getAttribute('data-value');
+	      if (window.ipc) {
+	        if (action === 'disable') {
+	          window.ipc.postMessage('set-setting:disable-shortcut=' + scId);
+	        } else {
+	          window.ipc.postMessage('set-setting:enable-shortcut=' + scId);
+	        }
+	      }
+	      return;
+	    }
+	    var openLogBtn = hit(e, '#btn-open-log');
+	    if (openLogBtn) {
+	      e.preventDefault();
+	      if (window.ipc) window.ipc.postMessage('open-log');
+	      return;
+	    }
+	    var clearLogBtn = hit(e, '#btn-clear-log');
+	    if (clearLogBtn) {
+	      e.preventDefault();
+	      if (window.ipc) window.ipc.postMessage('clear-log');
+	      return;
+	    }
 	    var btn = hit(e, '[data-setting]');
 	    if (!btn) return;
 	    e.preventDefault();
@@ -1067,18 +1122,34 @@
 	    applyAuthorMode();
 	    document.body.classList.toggle('sidebar-open', !!settings.sidebarOpen);
 	    document.body.classList.toggle('no-wrap', settings.wordWrap === false);
+	    disableAllShortcuts = !!settings.disableAllShortcuts;
+	    disabledShortcuts = Array.isArray(settings.disabledShortcuts) ? settings.disabledShortcuts : [];
 	    var current = {
 	      'open-mode': settings.openMode,
 	      'tab-mode': settings.tabMode,
 	      'word-wrap': settings.wordWrap === false ? 'off' : 'on',
 	      'author-mode': settings.authorMode ? 'on' : 'off',
-	      'theme': settings.theme
+	      'theme': settings.theme,
+	      'disable-all-shortcuts': settings.disableAllShortcuts ? 'on' : 'off'
 	    };
 	    var buttons = settingsControl.querySelectorAll('[data-setting]');
 	    for (var i = 0; i < buttons.length; i++) {
 	      var btn = buttons[i];
 	      var selected = current[btn.getAttribute('data-setting')] === btn.getAttribute('data-value');
 	      btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+	    }
+	    var shortcutsList = document.getElementById('shortcuts-list');
+	    if (shortcutsList) {
+	      shortcutsList.classList.toggle('disabled', disableAllShortcuts);
+	    }
+	    var scButtons = settingsControl.querySelectorAll('[data-shortcut-toggle]');
+	    for (var s = 0; s < scButtons.length; s++) {
+	      var scBtn = scButtons[s];
+	      var scId = scBtn.getAttribute('data-shortcut-toggle');
+	      var val = scBtn.getAttribute('data-value');
+	      var isDisabled = disabledShortcuts.indexOf(scId) >= 0;
+	      var isSelected = (val === 'disable' && isDisabled) || (val === 'enable' && !isDisabled);
+	      scBtn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
 	    }
 	  };
 	  btnZoomOut.addEventListener('click', function() { changeZoom(-ZOOM_STEP); });
@@ -1129,7 +1200,9 @@
   }
 
   document.addEventListener('keydown', function(e) {
+	if (e.isComposing || e.keyCode === 229) return;
 	if ((e.metaKey || e.ctrlKey) && (e.key === 'w' || e.key === 'W')) {
+	  if (!isShortcutEnabled('close-tab')) return;
 	  if (activeTabId) {
 	    e.preventDefault();
 	    requestTabAction('close', activeTabId);
@@ -1137,68 +1210,81 @@
 	  return;
 	}
 	if ((e.metaKey || e.ctrlKey) && (e.key === 'n' || e.key === 'N')) {
+	  if (!isShortcutEnabled('new-file')) return;
 	  e.preventDefault();
 	  newFile();
 	  return;
 	}
     if ((e.metaKey || e.ctrlKey) && (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd')) {
+      if (!isShortcutEnabled('zoom-in')) return;
       e.preventDefault();
       changeZoom(ZOOM_STEP);
       return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === '-' || e.code === 'NumpadSubtract')) {
+      if (!isShortcutEnabled('zoom-out')) return;
       e.preventDefault();
       changeZoom(-ZOOM_STEP);
       return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === '0' || e.code === 'Numpad0')) {
+      if (!isShortcutEnabled('zoom-reset')) return;
       e.preventDefault();
       applyZoom(100, true);
       return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'r' || e.key === 'R')) {
+      if (!isShortcutEnabled('refresh')) return;
       e.preventDefault();
       if (!inEdit()) window.ipc.postMessage('refresh');
       return;
     }
 	    if ((e.metaKey || e.ctrlKey) && (e.key === 'o' || e.key === 'O')) {
+	      if (!isShortcutEnabled('open-file')) return;
 	      e.preventDefault();
 	      openFile();
 	      return;
 	    }
 	    if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+	      if (!isShortcutEnabled('find')) return;
 	      if (inEdit()) return;
 	      e.preventDefault();
 	      showFind();
 	      return;
 	    }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'e' || e.key === 'E')) {
+      if (!isShortcutEnabled('toggle-edit')) return;
       e.preventDefault();
       if (inEdit()) leaveEdit(); else enterEdit();
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+      if (!isShortcutEnabled('save-as')) return;
       e.preventDefault();
       saveAs();
       return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+      if (!isShortcutEnabled('save')) return;
       if (inEdit()) { e.preventDefault(); save(); }
       return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'p' || e.key === 'P')) {
+      if (!isShortcutEnabled('print')) return;
       e.preventDefault();
       if (inEdit()) leaveEdit();
       setTimeout(function(){ window.ipc.postMessage('print'); }, 0);
       return;
     }
 	    if ((e.metaKey || e.ctrlKey) && (e.key === '\\' || e.code === 'Backslash')) {
+	      if (!isShortcutEnabled('split-view')) return;
 	      e.preventDefault();
 	      if (!inEdit()) enterEdit();
 	      toggleSplitView();
 	      return;
 	    }
 	    if (e.key === 'Escape') {
+	      if (!isShortcutEnabled('escape')) return;
 	      if (closeAllOverlays()) return;
 	      if (document.body.classList.contains('finding')) { hideFind(); return; }
 	      if (inEdit()) leaveEdit();

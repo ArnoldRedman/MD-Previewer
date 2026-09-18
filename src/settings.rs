@@ -62,7 +62,7 @@ fn default_true() -> bool {
 
 /// 用户偏好。容器上带 `serde(default)`，所以手工编辑漏了字段、
 /// 或者以后新增字段，都不会让整份配置失效
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub open_mode: OpenMode,
@@ -76,6 +76,11 @@ pub struct Settings {
     pub word_wrap: bool,
     /// 外观：跟随系统 / 浅色 / 深色。macOS 菜单和设置面板共用这一个字段
     pub theme: ThemeChoice,
+    /// 是否禁用所有快捷键
+    pub disable_all_shortcuts: bool,
+    /// 单独禁用的快捷键 ID 列表
+    #[serde(default)]
+    pub disabled_shortcuts: Vec<String>,
 }
 
 impl Default for Settings {
@@ -87,6 +92,8 @@ impl Default for Settings {
             author_mode: false,
             word_wrap: true,
             theme: ThemeChoice::System,
+            disable_all_shortcuts: false,
+            disabled_shortcuts: Vec::new(),
         }
     }
 }
@@ -117,63 +124,128 @@ impl Settings {
     /// 应用页面发来的 `set-setting:<key>=<value>`。
     /// 返回是否真的改变了取值，未知键、未知值和重复设置都返回 false
     pub fn apply(&mut self, key: &str, value: &str) -> bool {
-        let updated = match (key, value) {
-            ("open-mode", "new-tab") => Self {
-                open_mode: OpenMode::NewTab,
-                ..*self
-            },
-            ("open-mode", "new-window") => Self {
-                open_mode: OpenMode::NewWindow,
-                ..*self
-            },
-            ("tab-mode", "accumulate") => Self {
-                tab_mode: TabMode::Accumulate,
-                ..*self
-            },
-            ("tab-mode", "single") => Self {
-                tab_mode: TabMode::Single,
-                ..*self
-            },
-            ("author-mode", "on") => Self {
-                author_mode: true,
-                ..*self
-            },
-            ("author-mode", "off") => Self {
-                author_mode: false,
-                ..*self
-            },
-            ("sidebar", "1") => Self {
-                sidebar_open: true,
-                ..*self
-            },
-            ("sidebar", "0") => Self {
-                sidebar_open: false,
-                ..*self
-            },
-            ("word-wrap", "on") => Self {
-                word_wrap: true,
-                ..*self
-            },
-            ("word-wrap", "off") => Self {
-                word_wrap: false,
-                ..*self
-            },
-            ("theme", "system" | "light" | "dark") => Self {
-                theme: ThemeChoice::from_str(value),
-                ..*self
-            },
-            _ => return false,
-        };
-        if updated == *self {
-            return false;
+        match (key, value) {
+            ("open-mode", "new-tab") => {
+                if self.open_mode == OpenMode::NewTab {
+                    return false;
+                }
+                self.open_mode = OpenMode::NewTab;
+                true
+            }
+            ("open-mode", "new-window") => {
+                if self.open_mode == OpenMode::NewWindow {
+                    return false;
+                }
+                self.open_mode = OpenMode::NewWindow;
+                true
+            }
+            ("tab-mode", "accumulate") => {
+                if self.tab_mode == TabMode::Accumulate {
+                    return false;
+                }
+                self.tab_mode = TabMode::Accumulate;
+                true
+            }
+            ("tab-mode", "single") => {
+                if self.tab_mode == TabMode::Single {
+                    return false;
+                }
+                self.tab_mode = TabMode::Single;
+                true
+            }
+            ("author-mode", "on") => {
+                if self.author_mode {
+                    return false;
+                }
+                self.author_mode = true;
+                true
+            }
+            ("author-mode", "off") => {
+                if !self.author_mode {
+                    return false;
+                }
+                self.author_mode = false;
+                true
+            }
+            ("sidebar", "1") => {
+                if self.sidebar_open {
+                    return false;
+                }
+                self.sidebar_open = true;
+                true
+            }
+            ("sidebar", "0") => {
+                if !self.sidebar_open {
+                    return false;
+                }
+                self.sidebar_open = false;
+                true
+            }
+            ("word-wrap", "on") => {
+                if self.word_wrap {
+                    return false;
+                }
+                self.word_wrap = true;
+                true
+            }
+            ("word-wrap", "off") => {
+                if !self.word_wrap {
+                    return false;
+                }
+                self.word_wrap = false;
+                true
+            }
+            ("theme", "system" | "light" | "dark") => {
+                let choice = ThemeChoice::from_str(value);
+                if self.theme == choice {
+                    return false;
+                }
+                self.theme = choice;
+                true
+            }
+            ("disable-all-shortcuts", "on" | "1" | "true") => {
+                if self.disable_all_shortcuts {
+                    return false;
+                }
+                self.disable_all_shortcuts = true;
+                true
+            }
+            ("disable-all-shortcuts", "off" | "0" | "false") => {
+                if !self.disable_all_shortcuts {
+                    return false;
+                }
+                self.disable_all_shortcuts = false;
+                true
+            }
+            ("disable-shortcut", shortcut_id) => {
+                if shortcut_id.is_empty()
+                    || self.disabled_shortcuts.iter().any(|s| s == shortcut_id)
+                {
+                    return false;
+                }
+                self.disabled_shortcuts.push(shortcut_id.to_string());
+                true
+            }
+            ("enable-shortcut", shortcut_id) => {
+                let original_len = self.disabled_shortcuts.len();
+                self.disabled_shortcuts.retain(|s| s != shortcut_id);
+                self.disabled_shortcuts.len() != original_len
+            }
+            ("reset-shortcuts", _) => {
+                if !self.disable_all_shortcuts && self.disabled_shortcuts.is_empty() {
+                    return false;
+                }
+                self.disable_all_shortcuts = false;
+                self.disabled_shortcuts.clear();
+                true
+            }
+            _ => false,
         }
-        *self = updated;
-        true
     }
 
     /// 推给页面回显当前选中项
-    pub fn to_json(self) -> String {
-        serde_json::to_string(&self).expect("settings are serializable")
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("settings are serializable")
     }
 }
 
@@ -190,8 +262,10 @@ mod tests {
         assert!(settings.keeps_session());
         assert!(!settings.sidebar_open);
         assert!(!settings.author_mode);
-        assert!(settings.word_wrap);
+        assert_eq!(settings.word_wrap, true);
         assert_eq!(settings.theme, ThemeChoice::System);
+        assert!(!settings.disable_all_shortcuts);
+        assert!(settings.disabled_shortcuts.is_empty());
     }
 
     #[test]
@@ -248,6 +322,26 @@ mod tests {
         assert_eq!(settings.theme, ThemeChoice::System);
         assert_eq!(settings.tab_mode, TabMode::Single);
         assert_eq!(settings.open_mode, OpenMode::NewTab);
+
+        // 快捷键设置测试
+        assert!(settings.apply("disable-all-shortcuts", "on"));
+        assert!(settings.disable_all_shortcuts);
+        assert!(!settings.apply("disable-all-shortcuts", "on"));
+        assert!(settings.apply("disable-all-shortcuts", "off"));
+        assert!(!settings.disable_all_shortcuts);
+
+        assert!(settings.apply("disable-shortcut", "close-tab"));
+        assert_eq!(settings.disabled_shortcuts, vec!["close-tab"]);
+        assert!(!settings.apply("disable-shortcut", "close-tab"));
+        assert!(settings.apply("disable-shortcut", "new-file"));
+        assert_eq!(settings.disabled_shortcuts, vec!["close-tab", "new-file"]);
+        assert!(settings.apply("enable-shortcut", "close-tab"));
+        assert_eq!(settings.disabled_shortcuts, vec!["new-file"]);
+        assert!(!settings.apply("enable-shortcut", "close-tab"));
+        assert!(settings.apply("reset-shortcuts", ""));
+        assert!(settings.disabled_shortcuts.is_empty());
+        assert!(!settings.disable_all_shortcuts);
+        assert!(!settings.apply("reset-shortcuts", ""));
     }
 
     #[test]
@@ -269,6 +363,8 @@ mod tests {
             author_mode: true,
             word_wrap: false,
             theme: ThemeChoice::Dark,
+            disable_all_shortcuts: true,
+            disabled_shortcuts: vec!["close-tab".to_string(), "toggle-edit".to_string()],
         };
 
         saved.save(&path).unwrap();
@@ -278,6 +374,8 @@ mod tests {
         assert!(raw.contains("\"tabMode\": \"single\""), "{raw}");
         assert!(raw.contains("\"wordWrap\": false"), "{raw}");
         assert!(raw.contains("\"theme\": \"dark\""), "{raw}");
+        assert!(raw.contains("\"disableAllShortcuts\": true"), "{raw}");
+        assert!(raw.contains("\"disabledShortcuts\": ["), "{raw}");
         assert_eq!(Settings::load(&path), saved);
 
         fs::write(&path, "{ not json").unwrap();
@@ -305,6 +403,8 @@ mod tests {
         assert_eq!(loaded.open_mode, OpenMode::NewTab);
         assert!(loaded.word_wrap);
         assert_eq!(loaded.theme, ThemeChoice::System);
+        assert!(!loaded.disable_all_shortcuts);
+        assert!(loaded.disabled_shortcuts.is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 }

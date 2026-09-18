@@ -277,14 +277,58 @@ body.empty .toolbar { display: none !important; }
 	.settings-control { position: relative; }
 	.settings-popover {
 	  position: absolute; top: 40px; right: 0;
-	  min-width: 180px;
-	  display: none; flex-direction: column; gap: 10px; padding: 10px;
+	  width: 320px; max-width: calc(100vw - 24px);
+	  max-height: calc(100vh - 80px);
+	  display: none; flex-direction: column; gap: 8px; padding: 12px;
 	  border: 1px solid rgba(0,0,0,.1); border-radius: 8px;
 	  background: rgba(255,255,255,.96); box-shadow: 0 6px 20px rgba(0,0,0,.12);
 	  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 	  white-space: nowrap; text-align: left;
+	  box-sizing: border-box;
 	}
 	.settings-control.open .settings-popover { display: flex; }
+	.settings-header {
+	  display: flex; align-items: center; justify-content: space-between;
+	  border-bottom: 1px solid rgba(0,0,0,.08); padding-bottom: 8px;
+	}
+	.settings-title { font-size: 13px; font-weight: 600; color: #333; }
+	.settings-tabs {
+	  display: flex; gap: 4px; background: rgba(0,0,0,.06); border-radius: 6px; padding: 2px;
+	}
+	.toolbar .settings-tab-btn {
+	  height: 22px; width: auto; padding: 0 10px; border: 0; border-radius: 4px;
+	  font-size: 11px; font-weight: 500; color: #666; background: transparent; cursor: pointer;
+	}
+	.toolbar .settings-tab-btn:hover { color: #333; background: rgba(0,0,0,.04); }
+	.toolbar .settings-tab-btn.active {
+	  background: #fff; color: #1a73e8; box-shadow: 0 1px 3px rgba(0,0,0,.1);
+	}
+	.settings-body { display: flex; flex-direction: column; overflow-y: auto; }
+	.settings-tab-content { display: none; flex-direction: column; gap: 10px; padding-top: 4px; }
+	.settings-tab-content.active { display: flex; }
+	.settings-action-row { display: flex; gap: 8px; }
+	.settings-action-row .settings-action-btn { flex: 1; }
+	.shortcuts-master-row {
+	  background: rgba(0,0,0,.025); padding: 6px 8px; border-radius: 6px;
+	}
+	.shortcuts-list {
+	  display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; padding-right: 2px;
+	}
+	.shortcuts-list.disabled { opacity: 0.45; pointer-events: none; }
+	.shortcut-row {
+	  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+	}
+	.shortcut-info {
+	  display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;
+	}
+	.shortcut-name {
+	  font-size: 11px; color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	}
+	.shortcut-key {
+	  font-family: inherit; font-size: 10px; background: rgba(0,0,0,.06); color: #555;
+	  padding: 1px 5px; border-radius: 4px; border: 1px solid rgba(0,0,0,.12);
+	  white-space: nowrap; font-variant-numeric: tabular-nums;
+	}
 	.settings-row { display: flex; flex-direction: column; gap: 5px; align-items: stretch; }
 	.settings-label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #666; }
 	.settings-help {
@@ -619,6 +663,15 @@ body.empty .toolbar { display: none !important; }
 	  .zoom-popover { background: rgba(34,34,34,.96); border-color: rgba(255,255,255,.12); }
 	  .toolbar .zoom-popover button:hover { background: rgba(255,255,255,.1); }
 	  .settings-popover { background: rgba(34,34,34,.96); border-color: rgba(255,255,255,.12); }
+	  .settings-header { border-bottom-color: rgba(255,255,255,.08); }
+	  .settings-title { color: #e0e0e0; }
+	  .settings-tabs { background: rgba(255,255,255,.08); }
+	  .toolbar .settings-tab-btn { color: #aaa; }
+	  .toolbar .settings-tab-btn:hover { color: #fff; background: rgba(255,255,255,.06); }
+	  .toolbar .settings-tab-btn.active { background: #333; color: #8ab4f8; }
+	  .shortcuts-master-row { background: rgba(255,255,255,.03); }
+	  .shortcut-name { color: #ccc; }
+	  .shortcut-key { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.14); color: #bbb; }
 	  .settings-label { color: #999; }
 	  .settings-seg { border-color: rgba(255,255,255,.16); }
 	  .toolbar .settings-seg button { color: #bbb; }

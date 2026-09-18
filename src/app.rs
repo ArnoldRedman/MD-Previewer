@@ -131,7 +131,9 @@ pub(crate) struct App {
 
 impl App {
     pub(crate) fn eval(&self, script: &str) {
-        let _ = self.webview.evaluate_script(script);
+        if let Err(error) = self.webview.evaluate_script(script) {
+            crate::logger::write_log("WARN", &format!("Failed to evaluate script: {error}"));
+        }
     }
 
     // 新窗口模式是多进程、单标签模式按设计不恢复，这两种情况下落盘只会互相覆盖或把老标签带回来
@@ -319,6 +321,10 @@ impl App {
                 true
             }
             Err(error) => {
+                crate::logger::write_log(
+                    "ERROR",
+                    &format!("Could not save {}: {error}", path.display()),
+                );
                 self.pending_window_close = false;
                 show_warning_dialog("Could Not Save", &format!("{}: {error}", path.display()));
                 false
@@ -350,10 +356,16 @@ impl App {
                     self.push_author_doc(&path, &raw);
                     self.bootstrap_enhancers(flags);
                 }
-                Err(error) => show_warning_dialog(
-                    self.strings.cannot_read,
-                    &format!("{}: {error}", path.display()),
-                ),
+                Err(error) => {
+                    crate::logger::write_log(
+                        "ERROR",
+                        &format!("Cannot read {}: {error}", path.display()),
+                    );
+                    show_warning_dialog(
+                        self.strings.cannot_read,
+                        &format!("{}: {error}", path.display()),
+                    );
+                }
             }
         }
         self.persist_session();
@@ -668,7 +680,7 @@ impl App {
     }
 
     pub(crate) fn on_settings_changed(&mut self) {
-        let current = self.settings;
+        let current = self.settings.clone();
         if current.sidebar_open != self.sidebar_open_applied {
             resize_for_sidebar(&self.window, current.sidebar_open);
             self.sidebar_open_applied = current.sidebar_open;
@@ -830,7 +842,20 @@ impl App {
             IpcMessage::Refresh => self.refresh_active(),
             IpcMessage::SetEncoding(encoding) => self.set_encoding(encoding),
             IpcMessage::SelfUpdate(download_url) => self.start_self_update(download_url),
+            IpcMessage::LogError(msg) => {
+                crate::logger::write_log("JS_ERROR", &msg);
+            }
+            IpcMessage::OpenLog => self.open_log(),
+            IpcMessage::ClearLog => self.clear_log(),
         }
+    }
+
+    pub(crate) fn open_log(&self) {
+        crate::logger::reveal_log();
+    }
+
+    pub(crate) fn clear_log(&self) {
+        crate::logger::clear_log();
     }
 
     /// Windows 上在后台线程下载更新包并把进度推给页面；其他平台只打开下载页

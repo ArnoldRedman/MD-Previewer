@@ -10,6 +10,7 @@ mod escape;
 mod finder;
 mod i18n;
 mod ipc;
+mod logger;
 mod macos_menu;
 mod markdown;
 mod page;
@@ -107,6 +108,7 @@ fn print_help() {
 }
 
 fn main() {
+    logger::init_panic_hook();
     apply_linux_webkit_compat_env();
 
     // Bench instrumentation: MD_PREVIEWER_BENCH=1 makes the app print

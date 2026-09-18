@@ -48,49 +48,180 @@
 	  <div class="settings-control" id="settings-control">
 	    <button id="btn-settings" title="{{btn_settings}}" aria-label="{{btn_settings}}"></button>
 	    <div class="settings-popover" role="group" aria-label="{{btn_settings}}">
-	      <div class="settings-row">
-	        <span class="settings-label">{{set_open_mode}}</span>
-	        <div class="settings-seg">
-	          <button type="button" data-setting="open-mode" data-value="new-tab" aria-pressed="false">{{set_open_tab}}</button>
-	          <button type="button" data-setting="open-mode" data-value="new-window" aria-pressed="false">{{set_open_window}}</button>
+	      <div class="settings-header">
+	        <span class="settings-title">{{set_title}}</span>
+	        <div class="settings-tabs">
+	          <button type="button" class="settings-tab-btn active" data-settings-tab="general">{{set_tab_general}}</button>
+	          <button type="button" class="settings-tab-btn" data-settings-tab="shortcuts">{{set_tab_shortcuts}}</button>
 	        </div>
 	      </div>
-	      <div class="settings-row">
-	        <span class="settings-label">{{set_author_mode}}<span class="settings-help" title="{{author_help}}" aria-label="{{author_help}}" role="img">?</span></span>
-	        <div class="settings-seg">
-	          <button type="button" data-setting="author-mode" data-value="off" aria-pressed="false">{{set_author_off}}</button>
-	          <button type="button" data-setting="author-mode" data-value="on" aria-pressed="false">{{set_author_on}}</button>
+	      <div class="settings-body">
+	        <div class="settings-tab-content active" id="settings-tab-general">
+	          <div class="settings-row">
+	            <span class="settings-label">{{set_open_mode}}</span>
+	            <div class="settings-seg">
+	              <button type="button" data-setting="open-mode" data-value="new-tab" aria-pressed="false">{{set_open_tab}}</button>
+	              <button type="button" data-setting="open-mode" data-value="new-window" aria-pressed="false">{{set_open_window}}</button>
+	            </div>
+	          </div>
+	          <div class="settings-row">
+	            <span class="settings-label">{{set_author_mode}}<span class="settings-help" title="{{author_help}}" aria-label="{{author_help}}" role="img">?</span></span>
+	            <div class="settings-seg">
+	              <button type="button" data-setting="author-mode" data-value="off" aria-pressed="false">{{set_author_off}}</button>
+	              <button type="button" data-setting="author-mode" data-value="on" aria-pressed="false">{{set_author_on}}</button>
+	            </div>
+	          </div>
+	          <div class="settings-row">
+	            <span class="settings-label">{{set_tab_mode}}</span>
+	            <div class="settings-seg">
+	              <button type="button" data-setting="tab-mode" data-value="accumulate" aria-pressed="false">{{set_tab_keep}}</button>
+	              <button type="button" data-setting="tab-mode" data-value="single" aria-pressed="false">{{set_tab_single}}</button>
+	            </div>
+	          </div>
+	          <div class="settings-row">
+	            <span class="settings-label">{{set_word_wrap}}</span>
+	            <div class="settings-seg">
+	              <button type="button" data-setting="word-wrap" data-value="on" aria-pressed="true">{{set_wrap_on}}</button>
+	              <button type="button" data-setting="word-wrap" data-value="off" aria-pressed="false">{{set_wrap_off}}</button>
+	            </div>
+	          </div>
+	          <div class="settings-row">
+	            <span class="settings-label">{{set_theme}}</span>
+	            <div class="settings-seg">
+	              <button type="button" data-setting="theme" data-value="system" aria-pressed="true">{{set_theme_system}}</button>
+	              <button type="button" data-setting="theme" data-value="light" aria-pressed="false">{{set_theme_light}}</button>
+	              <button type="button" data-setting="theme" data-value="dark" aria-pressed="false">{{set_theme_dark}}</button>
+	            </div>
+	          </div>
+	          <div class="settings-sep"></div>
+	          <div class="settings-row">
+	            <div class="settings-label" style="justify-content: space-between;">
+	              <span>{{set_version_label}}: v{{cargo_version}}</span>
+	              <span id="update-status-msg" class="update-status-msg"></span>
+	            </div>
+	            <button type="button" id="btn-check-update" class="settings-action-btn">{{btn_check_update}}</button>
+	          </div>
+	          <div class="settings-sep"></div>
+	          <div class="settings-row">
+	            <div class="settings-label" style="justify-content: space-between;">
+	              <span>{{set_log_label}} (≤5KB)</span>
+	            </div>
+	            <div class="settings-action-row">
+	              <button type="button" id="btn-open-log" class="settings-action-btn">{{btn_open_log}}</button>
+	              <button type="button" id="btn-clear-log" class="settings-action-btn">{{btn_clear_log}}</button>
+	            </div>
+	          </div>
 	        </div>
-	      </div>
-	      <div class="settings-row">
-	        <span class="settings-label">{{set_tab_mode}}</span>
-	        <div class="settings-seg">
-	          <button type="button" data-setting="tab-mode" data-value="accumulate" aria-pressed="false">{{set_tab_keep}}</button>
-	          <button type="button" data-setting="tab-mode" data-value="single" aria-pressed="false">{{set_tab_single}}</button>
+	        <div class="settings-tab-content" id="settings-tab-shortcuts">
+	          <div class="settings-row shortcuts-master-row">
+	            <span class="settings-label">{{set_all_shortcuts}}</span>
+	            <div class="settings-seg">
+	              <button type="button" data-setting="disable-all-shortcuts" data-value="off" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	              <button type="button" data-setting="disable-all-shortcuts" data-value="on" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	            </div>
+	          </div>
+	          <div class="settings-sep"></div>
+	          <div class="shortcuts-list" id="shortcuts-list">
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_close_tab}}</span><kbd class="shortcut-key">Ctrl+W</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="close-tab" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="close-tab" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_new_file}}</span><kbd class="shortcut-key">Ctrl+N</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="new-file" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="new-file" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_open_file}}</span><kbd class="shortcut-key">Ctrl+O</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="open-file" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="open-file" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_save}}</span><kbd class="shortcut-key">Ctrl+S</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="save" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="save" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_save_as}}</span><kbd class="shortcut-key">Ctrl+Shift+S</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="save-as" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="save-as" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_toggle_edit}}</span><kbd class="shortcut-key">Ctrl+E</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="toggle-edit" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="toggle-edit" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_split_view}}</span><kbd class="shortcut-key">Ctrl+\</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="split-view" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="split-view" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_find}}</span><kbd class="shortcut-key">Ctrl+F</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="find" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="find" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_refresh}}</span><kbd class="shortcut-key">Ctrl+R</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="refresh" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="refresh" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_zoom_in}}</span><kbd class="shortcut-key">Ctrl+=</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="zoom-in" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="zoom-in" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_zoom_out}}</span><kbd class="shortcut-key">Ctrl+-</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="zoom-out" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="zoom-out" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_zoom_reset}}</span><kbd class="shortcut-key">Ctrl+0</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="zoom-reset" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="zoom-reset" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_print}}</span><kbd class="shortcut-key">Ctrl+P</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="print" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="print" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_escape}}</span><kbd class="shortcut-key">Esc</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="escape" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="escape" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	          </div>
 	        </div>
-	      </div>
-	      <div class="settings-row">
-	        <span class="settings-label">{{set_word_wrap}}</span>
-	        <div class="settings-seg">
-	          <button type="button" data-setting="word-wrap" data-value="on" aria-pressed="true">{{set_wrap_on}}</button>
-	          <button type="button" data-setting="word-wrap" data-value="off" aria-pressed="false">{{set_wrap_off}}</button>
-	        </div>
-	      </div>
-	      <div class="settings-row">
-	        <span class="settings-label">{{set_theme}}</span>
-	        <div class="settings-seg">
-	          <button type="button" data-setting="theme" data-value="system" aria-pressed="true">{{set_theme_system}}</button>
-	          <button type="button" data-setting="theme" data-value="light" aria-pressed="false">{{set_theme_light}}</button>
-	          <button type="button" data-setting="theme" data-value="dark" aria-pressed="false">{{set_theme_dark}}</button>
-	        </div>
-	      </div>
-	      <div class="settings-sep"></div>
-	      <div class="settings-row">
-	        <div class="settings-label" style="justify-content: space-between;">
-	          <span>{{set_version_label}}: v{{cargo_version}}</span>
-	          <span id="update-status-msg" class="update-status-msg"></span>
-	        </div>
-	        <button type="button" id="btn-check-update" class="settings-action-btn">{{btn_check_update}}</button>
 	      </div>
 	    </div>
 	  </div>

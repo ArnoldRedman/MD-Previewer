@@ -68,6 +68,9 @@ pub(crate) enum IpcMessage {
     Refresh,
     SetEncoding(String),
     SelfUpdate(String),
+    LogError(String),
+    OpenLog,
+    ClearLog,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +93,8 @@ pub(crate) fn parse_ipc_message(body: &str) -> Option<IpcMessage> {
         "ready" => Some(IpcMessage::Ready),
         "refresh" => Some(IpcMessage::Refresh),
         "save-skipped" => Some(IpcMessage::SaveSkipped),
+        "open-log" => Some(IpcMessage::OpenLog),
+        "clear-log" => Some(IpcMessage::ClearLog),
         _ => None,
     };
     if exact.is_some() {
@@ -100,6 +105,7 @@ pub(crate) fn parse_ipc_message(body: &str) -> Option<IpcMessage> {
     }
     let (prefix, rest) = body.split_once(':')?;
     let message = match prefix {
+        "log-error" => IpcMessage::LogError(rest.to_string()),
         "open-recent" => IpcMessage::OpenRecent(rest.parse().ok()?),
         "open-doc" => IpcMessage::OpenDoc(PathBuf::from(rest)),
         "forget-recent" => IpcMessage::ForgetRecent(PathBuf::from(rest)),
