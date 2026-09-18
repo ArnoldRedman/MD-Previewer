@@ -51,7 +51,7 @@ const DEFAULT_CONFIG = {
   copyTitleJs: 'Copy title',
   copyBodyJs: 'Copy body',
   copiedJs: 'Copied',
-  cargoVersion: '1.4.2',
+  cargoVersion: '1.4.3',
   updateStatusCheckingJs: 'Checking...',
   updateStatusLatestJs: 'Up to date',
   updateStatusFailedJs: 'Check failed',

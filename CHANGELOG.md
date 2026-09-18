@@ -2,6 +2,19 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.4.3
+
+- **输入法与编辑模式防闪退保护 (IME & Hotkey Guard)**:
+  - 解决编辑模式打字过程中页面突然消失、退回预览的偶发问题。
+  - 在全局键盘事件中严格拦截输入法组合态（`e.isComposing` 与 `keyCode: 229`），用户按 `Escape` 放弃候选词时不再触发退出编辑。
+- **设置面板独立与快捷键分级配置 (Shortcut Preferences)**:
+  - 设置面板全新重构为多选项卡布局（常规 / 快捷键）。
+  - 支持一键禁用所有快捷键（Master Toggle），并提供 14 项独立快捷键的单独开关控制与双向状态同步。
+- **轻量运行与崩溃日志系统 (Crash & Error Logger <= 5KB)**:
+  - 新增本地日志记录，严格约束文件大小不超过 5KB，超出自动按安全字符边界截断清理旧日志。
+  - 自动捕获 Rust panic 崩溃调用栈、WebView 异常及前端未捕获报错。
+  - 设置面板提供一键「查看日志」与「清理日志」操作。
+
 ## 1.4.2
 
 - In-app update download with progress: "Update Now" now downloads the release asset inside the app and shows a progress bar (bytes and percentage) in the update dialog, with a retryable error state. Only the final swap-and-relaunch step still runs a helper script, and it is started without any console window, so no PowerShell window appears.
