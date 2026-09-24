@@ -112,6 +112,35 @@ if (heavy.elapsed > 5000) {
   throw new Error(`Dollar-heavy document took ${heavy.elapsed}ms to render: ${JSON.stringify(heavy)}`);
 }
 
+// 表格要自适应到屏幕宽度：五列表格不能顶出可视范围，也不能靠整页横滑才看得到
+await page.evaluate(() => {
+  const rows = [
+    ['模块', '说明', '负责人', '状态', '备注'],
+    ['预览渲染', '把 Markdown 转成 HTML 并做消毒，标题要生成锚点', '张三', '已完成', '需要回归大文档与表格'],
+    ['侧边栏', '文件树、最近文件、目录大纲三段折叠面板', '李四', '进行中', '移动端隐藏']
+  ];
+  const [head, ...body] = rows;
+  const table = `<table><thead><tr>${head.map((cell) => `<th>${cell}</th>`).join('')}</tr></thead>` +
+    `<tbody>${body.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  window.MDPreviewer.render({ name: 'table.md', markdown: `表格自适应\n\n${table}` });
+});
+await page.waitForFunction(() => document.querySelector('#preview .mdp-table-wrap'), null, { timeout: 5000 });
+const tableFit = await page.evaluate(() => {
+  const table = document.querySelector('#preview table');
+  const wrap = table.closest('.mdp-table-wrap');
+  const cells = [...table.querySelectorAll('td, th')];
+  return {
+    viewport: document.documentElement.clientWidth,
+    pageScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    beyondViewport: Math.round(table.getBoundingClientRect().right - document.documentElement.clientWidth),
+    wrapScroll: Math.round(wrap.scrollWidth - wrap.clientWidth),
+    clippedCells: cells.filter((cell) => cell.scrollWidth > cell.clientWidth + 1).length
+  };
+});
+if (tableFit.pageScroll > 0 || tableFit.beyondViewport > 1 || tableFit.wrapScroll > 1 || tableFit.clippedCells > 0) {
+  throw new Error(`五列表格在手机上顶出了屏幕：${JSON.stringify(tableFit)}`);
+}
+
 await page.evaluate(() => {
   window.MDPreviewer.render({
     name: 'mobile-fixture.md',

@@ -108,10 +108,12 @@ body.has-tabs { --chrome-top: 50px; --bar-top: 40px; }
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-#preview .mdp-table-wrap table { width: max-content; min-width: 100%; }
+#preview .mdp-table-wrap table { width: 100%; }
 #preview table th, #preview table td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
-#preview table th { background: #f6f8fa; font-weight: 600; color: #1a1a1a; white-space: nowrap; }
-#preview table td { min-width: 64px; max-width: 360px; vertical-align: top; overflow-wrap: break-word; }
+/* 表头不再强制不换行，单元格允许任意位置换行：宽表要能自适应到可视宽度，
+   不能撑出阅读区再靠拖窗口才看得全 */
+#preview table th { background: #f6f8fa; font-weight: 600; color: #1a1a1a; white-space: normal; }
+#preview table td { min-width: 64px; max-width: 360px; vertical-align: top; overflow-wrap: anywhere; }
 #preview img { max-width: 100%; cursor: zoom-in; }
 #preview .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.15em 0; }
 #preview .mdp-mermaid { margin: 1.2em 0; overflow-x: auto; text-align: center; }
