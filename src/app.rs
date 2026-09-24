@@ -114,9 +114,6 @@ pub(crate) struct App {
     pub(crate) last_self_write: Arc<Mutex<Option<SelfWriteRecord>>>,
     /// hljs 不进首屏 HTML，页面报告就绪后再注入，缩短冷启动首屏解析路径
     pub(crate) hljs_bootstrap: String,
-    /// 首屏文档的标签 id 和原文：页面由 with_html 一次成型，不经过 __setContent，
-    /// 作者模式要的标题和正文得在页面就绪后单独推一次
-    pub(crate) initial_author: Option<(u64, String)>,
     pub(crate) pending_window_close: bool,
     pub(crate) warned_external_change: Option<PathBuf>,
     pub(crate) pending_external_change: Option<PathBuf>,
@@ -185,16 +182,11 @@ impl App {
         self.loaded_enhancers.mermaid |= flags.mermaid;
     }
 
-    /// 页面就绪前 evaluate_script 不一定生效，首屏需要的状态在构建后和 ready 时各推一遍
+    /// 首屏不含文档内容，页面就绪后由 render_active 统一推入
     pub(crate) fn push_ui_state(&self) {
         self.refresh_tabs();
         self.refresh_sidebar();
         update_settings_ui(&self.webview, &self.settings);
-        if let Some((id, raw)) = &self.initial_author {
-            if let Some(tab) = self.session.active().filter(|tab| tab.id == *id) {
-                self.push_author_doc(&tab.path, raw);
-            }
-        }
     }
 
     /// 切换活动文档后的固定流程：落盘会话、重绘、把文件监听挪到新文档上
@@ -715,21 +707,10 @@ impl App {
         if !hljs.is_empty() {
             self.eval(&hljs);
         }
-        let flags = self.enhance_flags;
-        self.bootstrap_enhancers(flags);
         self.push_ui_state();
-        // 命令行 --edit 与新建文件都要求首屏直接进入编辑，只有页面就绪后这条脚本才可靠
-        let enter_edit = self
-            .session
-            .active()
-            .map(|tab| tab.edit_on_open && !tab.missing)
-            .unwrap_or(false);
-        if enter_edit {
-            if let Some(tab) = self.session.active_mut() {
-                tab.edit_on_open = false;
-            }
-            self.eval("if(window.__mdPreviewerEnterEdit)window.__mdPreviewerEnterEdit();");
-        }
+        // 首屏文档也走 __setContent：它不能进 with_html 那份 HTML，否则大文档会顶穿 WebView2 的 2MiB 上限
+        // 作者模式原文、增强脚本和 --edit 的首屏进入编辑都在 render_active 里一起处理
+        self.render_active();
         if let Some(started) = self.bench_started {
             eprintln!("[bench] +{}ms ready", started.elapsed().as_millis());
             *control_flow = ControlFlow::Exit;

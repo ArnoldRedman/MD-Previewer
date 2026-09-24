@@ -12,8 +12,8 @@ use crate::document::decode_windows_codepage;
 use crate::finder::{create_finder_file, normalize_new_markdown_path};
 use crate::i18n::{Lang, Strings};
 use crate::ipc::{parse_finder_action, parse_ipc_message, FinderAction, IpcMessage, TabAction};
-use crate::markdown::{md_to_html, md_to_html_with_base, EnhanceFlags};
-use crate::page::{build_page, build_page_with_encoding, empty_preview_html};
+use crate::markdown::{enhance_flags_for, md_to_html, md_to_html_with_base, EnhanceFlags};
+use crate::page::{build_page, build_page_with_encoding, empty_preview_html, startup_page};
 use crate::paths::{
     is_listed_document, is_markdown_document, is_supported_document, local_document_path_from_url,
     supported_dialog_extensions,
@@ -1303,4 +1303,164 @@ pub(crate) fn page_config_covers_every_frontend_key() {
         checked > 20,
         "只检查到 {checked} 个前端配置项，page.js 大概没被读到"
     );
+}
+
+/// 首屏页不能带任何文档内容：WebView2 的 NavigateToString 上限是 2MiB，
+/// 大文档一旦塞回首屏 HTML 就会连 webview 一起建不出来，表现就是双击文件没反应
+#[test]
+pub(crate) fn startup_page_stays_small_even_for_a_huge_document() {
+    let dir = temp_test_dir("startup-page");
+    let file = dir.join("大文件.md");
+    let raw = format!(
+        "# 标记头\n\n{}\n标记尾\n",
+        "正文段落，用来把文件撑过 2MiB。\n".repeat(45_000)
+    );
+    fs::write(&file, &raw).unwrap();
+
+    let strings = Strings::for_lang(Lang::Zh);
+    let page = startup_page(&strings, &[]);
+    assert!(
+        page.len() < 2 * 1024 * 1024,
+        "首屏 HTML 有 {} 字节",
+        page.len()
+    );
+    assert!(!page.contains("标记尾"), "首屏页里混进了文档正文");
+
+    // 同一份文档走「正文进首屏」的老路子就会顶穿上限，这就是首屏必须延后加载的根据
+    let (html, flags, _) = document_to_html(&file, &raw);
+    let document_page = build_page(&html, &raw, None, flags, &strings, false);
+    assert!(
+        document_page.len() > 2 * 1024 * 1024,
+        "样本文档只有 {} 字节，撑不到限制值，这个用例已经失去意义",
+        document_page.len()
+    );
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+// 公式探测的老实现（O(n²)）留在这里当语义基准：它决定过用户看到的行为（要不要加载 KaTeX），
+// 改写后必须逐个输入对得上
+fn reference_has_unescaped_at(s: &str, index: usize, needle: &str) -> bool {
+    if !s[index..].starts_with(needle) {
+        return false;
+    }
+    let mut backslashes = 0;
+    for b in s[..index].bytes().rev() {
+        if b == b'\\' {
+            backslashes += 1;
+        } else {
+            break;
+        }
+    }
+    backslashes % 2 == 0
+}
+
+fn reference_has_unescaped_pair(s: &str, open: &str, close: &str) -> bool {
+    let mut pos = 0;
+    while let Some(rel) = s[pos..].find(open) {
+        let start = pos + rel;
+        if !reference_has_unescaped_at(s, start, open) {
+            pos = start + open.len();
+            continue;
+        }
+        let body_start = start + open.len();
+        let mut search = body_start;
+        while let Some(close_rel) = s[search..].find(close) {
+            let close_at = search + close_rel;
+            if reference_has_unescaped_at(s, close_at, close) {
+                return true;
+            }
+            search = close_at + close.len();
+        }
+        pos = body_start;
+    }
+    false
+}
+
+fn reference_has_inline_dollar_math(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'$' || !reference_has_unescaped_at(s, i, "$") {
+            i += 1;
+            continue;
+        }
+        if bytes.get(i + 1).copied() == Some(b'$')
+            || bytes
+                .get(i + 1)
+                .map(|b| b.is_ascii_whitespace())
+                .unwrap_or(true)
+        {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < bytes.len() {
+            if bytes[j] == b'$'
+                && reference_has_unescaped_at(s, j, "$")
+                && bytes
+                    .get(j.wrapping_sub(1))
+                    .map(|b| !b.is_ascii_whitespace())
+                    .unwrap_or(false)
+            {
+                return true;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    false
+}
+
+fn reference_math(md: &str) -> bool {
+    reference_has_unescaped_pair(md, "$$", "$$")
+        || reference_has_unescaped_pair(md, r"\[", r"\]")
+        || reference_has_unescaped_pair(md, r"\(", r"\)")
+        || reference_has_inline_dollar_math(md)
+}
+
+/// 穷举小字母表上的全部短输入，确认改写后的探测结果和老实现逐字一致
+#[test]
+pub(crate) fn math_flags_match_the_reference_scan() {
+    let alphabet = ["$", "\\", " ", "a", "[", "]", "(", ")", "\n", "\t", "x"];
+    for len in 0..=6usize {
+        let total = alphabet.len().pow(len as u32);
+        for code in 0..total {
+            let mut n = code;
+            let mut text = String::new();
+            for _ in 0..len {
+                text.push_str(alphabet[n % alphabet.len()]);
+                n /= alphabet.len();
+            }
+            assert_eq!(
+                reference_math(&text),
+                enhance_flags_for(&text).math,
+                "公式探测结果和基准实现在 {text:?} 上不一致"
+            );
+        }
+    }
+}
+
+/// `$` 密集的大文档不能把打开文件卡住：老实现是 O(n²)，这个输入在 debug 下要几十秒
+#[test]
+pub(crate) fn math_flag_scan_handles_a_dollar_heavy_document() {
+    use std::time::{Duration, Instant};
+
+    let heavy = "$x ".repeat(60_000);
+    let start = Instant::now();
+    let flags = enhance_flags_for(&heavy);
+    let elapsed = start.elapsed();
+    assert!(!flags.math, "这份文档里没有成对的 $");
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "180KB 的 $ 密集文档扫了 {elapsed:?}，退回二次复杂度了"
+    );
+
+    // 快不等于漏判：真公式照样要认出来
+    assert!(enhance_flags_for("行内公式 $a$ 结尾").math);
+    assert!(enhance_flags_for("块级公式 $$x$$ 结尾").math);
+    assert!(enhance_flags_for(r"方括号公式 \[x\] 结尾").math);
+    assert!(enhance_flags_for(r"圆括号公式 \(x\) 结尾").math);
+    assert!(!enhance_flags_for("价格 $ 空格结尾").math);
+    assert!(!enhance_flags_for("转义过的 \\$a$ 不算公式").math);
 }

@@ -69,6 +69,20 @@ fn render_template(template: &str, vars: &[(&str, String)]) -> String {
     out
 }
 
+/// 首屏只送一个不含文档内容的空壳页
+/// WebView2 的 NavigateToString 有 2MiB 上限，文档正文和原文一律等页面就绪后走 __setContent 推入，
+/// 否则大文档会让 webview 创建失败，应用直接打不开
+pub(crate) fn startup_page(s: &Strings, recent_files: &[PathBuf]) -> String {
+    build_page(
+        &empty_preview_html(s, recent_files),
+        "",
+        None,
+        EnhanceFlags::default(),
+        s,
+        true,
+    )
+}
+
 pub(crate) fn build_page_with_encoding(
     preview_html: &str,
     raw_md: &str,

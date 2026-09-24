@@ -20,6 +20,7 @@ pub(crate) fn detect_lang() -> Lang {
 pub(crate) struct Strings {
     pub(crate) drop_hint: &'static str,
     pub(crate) cannot_read: &'static str,
+    pub(crate) webview_failed: &'static str,
     pub(crate) open_file: &'static str,
     pub(crate) recent_title: &'static str,
     pub(crate) missing_title: &'static str,
@@ -135,6 +136,7 @@ impl Strings {
             Lang::Zh => Strings {
                 drop_hint: "把 Markdown 或文本文件拖到这里，或按 Cmd/Ctrl+O 打开",
                 cannot_read: "无法读取文件",
+                webview_failed: "无法创建预览窗口",
                 open_file: "打开文件",
                 recent_title: "最近打开",
                 missing_title: "文件已移动或删除",
@@ -246,6 +248,7 @@ impl Strings {
             Lang::En => Strings {
                 drop_hint: "Drop a Markdown or text file here or press Cmd/Ctrl+O to open",
                 cannot_read: "Cannot read file",
+                webview_failed: "Could not create the preview window",
                 open_file: "Open File",
                 recent_title: "Recent",
                 missing_title: "File Moved or Deleted",

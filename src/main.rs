@@ -33,23 +33,20 @@ mod tests;
 
 use crate::app::App;
 use crate::assets::{HLJS_EXTRA_LANGS, HLJS_JS};
-use crate::document::{document_to_html, read_document_with_encoding};
-use crate::escape::html_escape_text;
 use crate::finder::register_finder_extension;
 use crate::i18n::{detect_lang, Strings};
 use crate::macos_menu::install_macos_menu;
 use crate::markdown::EnhanceFlags;
-use crate::page::{build_page, build_page_with_encoding, empty_preview_html};
+use crate::page::startup_page;
 use crate::paths::{config_dir, is_supported_document, recent_files_path, session_path};
 use crate::platform::{apply_linux_webkit_compat_env, register_as_default};
 use crate::recent::RecentFiles;
 use crate::session::DocumentSession;
 use crate::settings::{OpenMode, Settings, TabMode, ThemeChoice};
-use crate::sidebar::missing_preview_html;
 use crate::webview::{navigation_decision, Navigation};
 use crate::window::{
     centered_geom, geom_visible, load_window_geom, load_window_icon, migrate_theme_file,
-    settings_path,
+    settings_path, show_warning_dialog,
 };
 use std::env;
 use std::path::PathBuf;
@@ -206,69 +203,9 @@ fn main() {
         .build(&event_loop)
         .expect("failed to build window");
     bench_log("window_built");
-    let mut recent = RecentFiles::load(recent_files_path());
+    let recent = RecentFiles::load(recent_files_path());
 
-    let mut initial_flags = EnhanceFlags::default();
-    let mut initial_author = None;
-    let initial_page = match session.active().cloned() {
-        Some(tab) => match read_document_with_encoding(&tab.path, tab.encoding.as_deref()) {
-            Ok((raw, resolved_encoding)) => {
-                if let Some(active) = session.active_mut() {
-                    if active.encoding.is_none() {
-                        active.encoding = Some(resolved_encoding.to_string());
-                    }
-                }
-                recent.remember(&tab.path);
-                let (html_body, doc_flags, base_href) = document_to_html(&tab.path, &raw);
-                initial_flags = doc_flags;
-                let page = build_page_with_encoding(
-                    &html_body,
-                    &raw,
-                    base_href.as_deref(),
-                    initial_flags,
-                    &strings,
-                    false,
-                    resolved_encoding,
-                );
-                initial_author = Some((tab.id, raw));
-                page
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if let Some(active) = session.active_mut() {
-                    active.missing = true;
-                }
-                build_page(
-                    &missing_preview_html(tab.id, &tab.path, &strings),
-                    "",
-                    None,
-                    EnhanceFlags::default(),
-                    &strings,
-                    false,
-                )
-            }
-            Err(error) => build_page(
-                &format!(
-                    r#"<div class="empty"><div class="icon">#</div><div>{}: {}</div><button class="empty-open" type="button" data-open-file>{}</button></div>"#,
-                    html_escape_text(strings.cannot_read),
-                    html_escape_text(&error.to_string()),
-                    html_escape_text(strings.open_file)
-                ),
-                "",
-                None,
-                EnhanceFlags::default(),
-                &strings,
-                true,
-            ),
-        },
-        None => build_page(
-            &empty_preview_html(&strings, recent.paths()),
-            "",
-            None,
-            EnhanceFlags::default(),
-            &strings,
-            true,
-        ),
-    };
+    let initial_page = startup_page(&strings, recent.paths());
 
     // Windows: steer WebView2's cache/cookie tree into %LOCALAPPDATA% instead of
     // letting it drop next to the exe. Other platforms: use default (None).
@@ -334,17 +271,25 @@ fn main() {
     };
 
     #[cfg(target_os = "linux")]
-    let webview = {
+    let built_webview = {
         use tao::platform::unix::WindowExtUnix;
         use wry::WebViewBuilderExtUnix;
 
         let vbox = window
             .default_vbox()
             .expect("failed to get default GTK container");
-        builder.build_gtk(vbox).expect("failed to build webview")
+        builder.build_gtk(vbox).map_err(|error| error.to_string())
     };
     #[cfg(not(target_os = "linux"))]
-    let webview = builder.build(&window).expect("failed to build webview");
+    let built_webview = builder.build(&window).map_err(|error| error.to_string());
+    // 建不出 webview 时给个明确报错：release 构建没有控制台，静默退出就等于「双击打不开」
+    let webview = match built_webview {
+        Ok(webview) => webview,
+        Err(error) => {
+            show_warning_dialog(strings.webview_failed, &error);
+            return;
+        }
+    };
     bench_log("webview_built");
 
     // hljs + extra language packs aren't part of first-paint HTML anymore.
@@ -367,12 +312,11 @@ fn main() {
         settings,
         session,
         recent,
-        enhance_flags: initial_flags,
+        enhance_flags: EnhanceFlags::default(),
         loaded_enhancers: EnhanceFlags::default(),
         watcher: None,
         last_self_write: Arc::new(Mutex::new(None)),
         hljs_bootstrap,
-        initial_author,
         pending_window_close: false,
         warned_external_change: None,
         pending_external_change: None,

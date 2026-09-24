@@ -57,13 +57,37 @@
     if (mq.addEventListener) mq.addEventListener('change', applyTheme);
   }
 
+  // 逐次只找「下一个开符号」，命中条件就是它后面那个闭符号在开符号结尾之后：
+  // 一次成功搜索就会结束循环，一次失败搜索只花 O(1)（闭符号就在结尾位置上），
+  // 所以整体是线性的；老的写法在尾巴上一遍遍重扫，大文档会退化成 O(n²)
   function hasUnescapedPair(text, open, close) {
     var pos = 0;
-    while ((pos = text.indexOf(open, pos)) >= 0) {
-      var body = pos + open.length;
+    while (true) {
+      var start = text.indexOf(open, pos);
+      if (start < 0) return false;
+      var body = start + open.length;
       var end = text.indexOf(close, body);
       if (end > body) return true;
+      // end < 0：后面已经没有闭符号了，更靠后的开符号也找不到
+      if (end < 0) return false;
       pos = body;
+    }
+  }
+
+  // 等价于 /\(^|[^\\])\$[^\s$][\s\S]*?[^\s\\]\$/（老正则在大文档上是 O(n²)，
+  // 因为每个 `$` 都会让惰性量词一直扩到串尾），但不能改判定口径
+  function hasInlineDollarMath(markdown) {
+    for (var i = markdown.indexOf('$'); i >= 0; i = markdown.indexOf('$', i + 1)) {
+      if (i > 0 && markdown.charAt(i - 1) === '\\') continue;
+      var next = markdown.charAt(i + 1);
+      if (!next || next === '$' || /\s/.test(next)) continue;
+      // 开符号后面至少还要有「一个非空白非反斜杠字符 + 一个 $」，所以从 i+3 开始找
+      for (var j = markdown.indexOf('$', i + 3); j > 0; j = markdown.indexOf('$', j + 1)) {
+        var before = markdown.charAt(j - 1);
+        if (before !== '\\' && !/\s/.test(before)) return true;
+      }
+      // 第一个合法开符号都找不到闭符号时，后面更靠右的开符号只会有更小的候选范围
+      return false;
     }
     return false;
   }
@@ -73,7 +97,7 @@
       math: hasUnescapedPair(markdown, '$$', '$$') ||
         hasUnescapedPair(markdown, '\\[', '\\]') ||
         hasUnescapedPair(markdown, '\\(', '\\)') ||
-        /(^|[^\\])\$[^\s$][\s\S]*?[^\s\\]\$/.test(markdown),
+        hasInlineDollarMath(markdown),
       mermaid: /(^|\n)\s*(```|~~~)\s*mermaid(\s|\n|$)/i.test(markdown)
     };
   }

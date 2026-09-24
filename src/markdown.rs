@@ -406,61 +406,62 @@ fn has_unescaped_at(s: &str, index: usize, needle: &str) -> bool {
     backslashes % 2 == 0
 }
 
+/// 找 `from` 之后第一个没有被反斜杠转义的 needle
+fn find_unescaped(s: &str, needle: &str, from: usize) -> Option<usize> {
+    s[from..]
+        .match_indices(needle)
+        .find(|(index, _)| has_unescaped_at(s, from + index, needle))
+        .map(|(index, _)| from + index)
+}
+
 fn has_unescaped_pair(s: &str, open: &str, close: &str) -> bool {
-    let mut pos = 0;
-    while let Some(rel) = s[pos..].find(open) {
-        let start = pos + rel;
-        if !has_unescaped_at(s, start, open) {
-            pos = start + open.len();
-            continue;
-        }
-        let body_start = start + open.len();
-        let mut search = body_start;
-        while let Some(close_rel) = s[search..].find(close) {
-            let close_at = search + close_rel;
-            if has_unescaped_at(s, close_at, close) {
-                return true;
-            }
-            search = close_at + close.len();
-        }
-        pos = body_start;
+    // 命中条件只看「第一个没被转义的开符号之后有没有没被转义的闭符号」：
+    // 更靠后的开符号不会带来新的闭符号位置。逐个开符号去扫尾巴在大文档上是 O(n²)，
+    // 一千多行的 PowerShell/LaTeX 文档就能把打开文件卡住几十秒
+    let Some(start) = find_unescaped(s, open, 0) else {
+        return false;
+    };
+    find_unescaped(s, close, start + open.len()).is_some()
+}
+
+/// 行内 `$...$` 的开符号：`$` 本身没被转义，后面既不能是空白也不能是另一个 `$`
+fn is_inline_dollar_open(s: &str, bytes: &[u8], i: usize) -> bool {
+    if bytes[i] != b'$' || !has_unescaped_at(s, i, "$") {
+        return false;
     }
-    false
+    match bytes.get(i + 1) {
+        Some(b'$') | None => false,
+        Some(b) => !b.is_ascii_whitespace(),
+    }
+}
+
+/// 行内 `$...$` 的闭符号：`$` 没被转义，且前一个字符不是空白
+fn is_inline_dollar_close(s: &str, bytes: &[u8], i: usize) -> bool {
+    bytes[i] == b'$'
+        && has_unescaped_at(s, i, "$")
+        && bytes
+            .get(i.wrapping_sub(1))
+            .map(|b| !b.is_ascii_whitespace())
+            .unwrap_or(false)
 }
 
 fn has_inline_dollar_math(s: &str) -> bool {
     let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'$' || !has_unescaped_at(s, i, "$") {
-            i += 1;
-            continue;
-        }
-        if bytes.get(i + 1).copied() == Some(b'$')
-            || bytes
-                .get(i + 1)
-                .map(|b| b.is_ascii_whitespace())
-                .unwrap_or(true)
-        {
-            i += 1;
-            continue;
-        }
-        let mut j = i + 1;
-        while j < bytes.len() {
-            if bytes[j] == b'$'
-                && has_unescaped_at(s, j, "$")
-                && bytes
-                    .get(j.wrapping_sub(1))
-                    .map(|b| !b.is_ascii_whitespace())
-                    .unwrap_or(false)
-            {
-                return true;
-            }
-            j += 1;
-        }
-        i += 1;
-    }
-    false
+    // 闭符号合不合法只和它前一个字符有关，跟开符号无关：
+    // 第一个合法开符号找不到闭符号，更靠后的开符号也一样找不到。
+    // 原来的写法对每个 `$` 都往尾巴扫一遍，是 O(n²)。
+    // 两轮都只在 `$` 位置上做事（match_indices 走 memchr）
+    let Some(open) = s
+        .match_indices('$')
+        .map(|(index, _)| index)
+        .find(|&index| is_inline_dollar_open(s, bytes, index))
+    else {
+        return false;
+    };
+    s[open + 1..]
+        .match_indices('$')
+        .map(|(index, _)| open + 1 + index)
+        .any(|index| is_inline_dollar_close(s, bytes, index))
 }
 
 pub(crate) fn enhance_flags_for(md: &str) -> EnhanceFlags {

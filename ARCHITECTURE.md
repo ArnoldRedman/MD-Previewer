@@ -59,6 +59,7 @@
 | 外部改动不能覆盖未保存内容；自己的写入不能触发自我重载 | 会丢用户数据 / 无限重载循环 | `document.rs` 的 `SelfWriteRecord` + `self_write_still_matches_disk` + `should_protect_external_change` |
 | 发布资产名不带版本号（`MD-Previewer-*.exe/.apk/.deb/.tar.gz`） | 下载页用 `releases/latest/download/<名>` 直链，带版本号就失效 | `scripts/verify-landing-page.mjs` 与各构建脚本交叉校验 |
 | 应用是单实例；第二次打开同一文件要转发给已有窗口 | Windows 上双击文档的常见路径 | `single_instance.rs` + `scripts/verify-windows-single-instance.ps1` |
+| 首屏 HTML 不带文档正文，正文一律等页面就绪后走 `__setContent` 推入 | WebView2 的 `NavigateToString` 上限 2MiB，超了连 webview 都建不出来，双击大文档直接闪退 | `tests::startup_page_stays_small_even_for_a_huge_document` + `scripts/verify-windows-large-document-startup.ps1` |
 
 ---
 
@@ -70,7 +71,7 @@
 |---|---|---|
 | 身份标记 | 品牌隔离：名称/包名/配置目录标识齐全，且上游更新通道的残留文件不存在 | 必跑，缺了直接失败 |
 | `bash -n` | shell 语法 | 必跑 |
-| `cargo fmt/check/test` | Rust 格式、编译、93 个单测 | 必跑 |
+| `cargo fmt/check/test` | Rust 格式、编译、98 个单测 | 必跑 |
 | ESLint | `frontend/`、`mobile/shared/`、验证脚本 | 没有 `node_modules/.bin/eslint` 时跳过 |
 | 9 个 Playwright 检查 | 前端行为：目录跳转、搜索、阅读工具、编辑顶栏、UX、自动更新、编码转换、落地页、手机渲染层 | Playwright 不可用时跳过 |
 | Android 构建 | `:app:assembleDebug`（走 wrapper） | 没有 SDK 位置时跳过 |
