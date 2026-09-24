@@ -746,7 +746,19 @@ pub(crate) fn page_expands_multi_column_tables() {
     );
 
     assert!(page.contains("mdp-table-wrap"));
-    assert!(page.contains("width: min(calc(100vw - 64px), 1280px)"));
+    // 宽表容器必须跟正文栏宽度走：用 vw 的话侧栏和编辑分栏会把它顶出窗口右边缘
+    let wrap_rule = page
+        .split("#preview .mdp-table-wrap {")
+        .nth(1)
+        .expect("页面里找不到宽表容器规则");
+    let wrap_rule = &wrap_rule[..wrap_rule.find('}').expect("宽表容器规则没闭合")];
+    assert!(wrap_rule.contains("width: 100%"), "{wrap_rule}");
+    assert!(
+        !wrap_rule
+            .lines()
+            .any(|line| line.contains("width:") && line.contains("vw")),
+        "宽表容器不能用 vw 算宽度：{wrap_rule}"
+    );
     assert!(page.contains("if(window.__enhancePreview)window.__enhancePreview();"));
 }
 

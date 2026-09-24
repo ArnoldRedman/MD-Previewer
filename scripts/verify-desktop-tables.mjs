@@ -44,17 +44,36 @@ const huge = table([
 
 const preview = `<p>表格自适应检查</p>${fiveColumns}<p>超长链接</p>${longLink}<p>十列</p>${huge}`;
 
-const browser = await chromium.launch();
+// 侧栏和编辑分栏都会挤掉正文宽度：表格容器如果按 100vw 算宽度就会从窗口右边溢出去
+const layouts = [
+  { name: 'default', apply: null },
+  {
+    name: 'sidebar',
+    apply: () => {
+      document.body.classList.remove('empty');
+      document.body.classList.add('sidebar-open');
+    },
+  },
+  {
+    name: 'split',
+    apply: () => {
+      document.body.classList.add('editing', 'split-view');
+    },
+  },
+];
 const viewports = [
   { name: 'wide', width: 1180, height: 900 },
   { name: 'default', width: 900, height: 700 },
   { name: 'narrow', width: 680, height: 700 },
 ];
+
+const browser = await chromium.launch();
 const report = [];
 try {
   for (const viewport of viewports) {
-    const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
-    await page.setContent(`<!doctype html>
+    for (const layout of layouts) {
+      const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
+      await page.setContent(`<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
@@ -71,6 +90,7 @@ try {
       <button id="btn-search"></button>
       <button id="btn-toggle"></button>
       <button id="btn-print"></button>
+      <button id="btn-split"></button>
       <div id="zoom-control" class="zoom-control">
         <button id="btn-zoom"></button>
         <div class="zoom-popover">
@@ -106,65 +126,81 @@ try {
     <script>${enhanceJs}</script>
   </body>
 </html>`);
-    await page.evaluate(() => window.__setContent(
-      document.getElementById('preview').innerHTML,
-      'x',
-      '',
-      false,
-      false,
-    ));
-    await page.evaluate(() => window.__enhancePreview());
-    // 增强层把宽表（≥4 列）包进 .mdp-table-wrap 是 idle 回调里做的，要等它落地再量
-    await page.waitForFunction(
-      () => document.querySelectorAll('#preview .mdp-table-wrap').length >= 2,
-      null,
-      { timeout: 5000 }
-    );
+      await page.evaluate(() => window.__setContent(
+        document.getElementById('preview').innerHTML,
+        'x',
+        '',
+        false,
+        false,
+      ));
+      await page.evaluate(() => window.__enhancePreview());
+      // 增强层把宽表（≥4 列）包进 .mdp-table-wrap 是 idle 回调里做的，要等它落地再量
+      await page.waitForFunction(
+        () => document.querySelectorAll('#preview .mdp-table-wrap').length >= 2,
+        null,
+        { timeout: 5000 },
+      );
+      if (layout.apply) {
+        await page.evaluate(layout.apply);
+        await page.waitForTimeout(200);
+      }
 
-    const measured = await page.evaluate(() => {
-      const tables = [...document.querySelectorAll('#preview table')];
-      return {
-        pageScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        tables: tables.map((element) => {
+      const measured = await page.evaluate(() => {
+        const viewportWidth = document.documentElement.clientWidth;
+        const tables = [...document.querySelectorAll('#preview table')].map((element) => {
           const wrap = element.closest('.mdp-table-wrap');
+          const container = (wrap || element.parentElement).getBoundingClientRect();
           const cells = [...element.querySelectorAll('td, th')];
-          const box = element.getBoundingClientRect();
-          const limit = (wrap || document.getElementById('app')).getBoundingClientRect();
           return {
             cols: element.querySelector('tr').children.length,
-            width: Math.round(box.width),
-            beyondLimit: Math.round(box.right - limit.right),
-            clippedCells: cells.filter((cell) => cell.scrollWidth > cell.clientWidth + 1).length,
+            containerLeft: Math.round(container.left),
+            containerWidth: Math.round(container.width),
+            beyondViewport: Math.round(container.right - viewportWidth),
             wrapScroll: wrap ? Math.round(wrap.scrollWidth - wrap.clientWidth) : null,
+            clippedCells: cells.filter((cell) => cell.scrollWidth > cell.clientWidth + 1).length,
           };
-        }),
-      };
-    });
+        });
+        return {
+          pageScroll: document.documentElement.scrollWidth - viewportWidth,
+          tables,
+        };
+      });
 
-    const problems = [];
-    if (measured.pageScroll > 0) {
-      problems.push(`页面被表格顶出横向滚动：${measured.pageScroll}px`);
-    }
-    if (measured.tables.length !== 3) {
-      problems.push(`表格数量不对：${measured.tables.length}`);
-    }
-    for (const item of measured.tables) {
-      if (item.clippedCells > 0) {
-        problems.push(`${item.cols} 列表格有 ${item.clippedCells} 个单元格内容溢出被裁`);
+      const problems = [];
+      // 单元格宽度下限（min-width 64 + 左右 padding 24 + 边框 2）：列数 × 这个值放不进容器时，
+      // 才允许表格在容器里横向滚；能放下就必须自适应，不能留横向拖动
+      const minimumColumn = 90;
+      if (measured.pageScroll > 0) {
+        problems.push(`页面被表格顶出横向滚动：${measured.pageScroll}px`);
       }
-      // 五列表格在阅读宽度内必须自适应到可视宽度，不能逼用户拖动
-      if (item.cols === 5 && (item.wrapScroll ?? 0) > 0) {
-        problems.push(`五列表格放不下可视宽度，还要横向拖 ${item.wrapScroll}px`);
+      if (measured.tables.length !== 3) {
+        problems.push(`表格数量不对：${measured.tables.length}`);
       }
-      // 十列表格允许自己滚，但不能顶出容器
-      if (item.cols === 10 && item.wrapScroll === null) {
-        problems.push('十列表格没有横向滚动容器');
+      for (const item of measured.tables) {
+        if (item.clippedCells > 0) {
+          problems.push(`${item.cols} 列表格有 ${item.clippedCells} 个单元格内容溢出被裁`);
+        }
+        if (item.beyondViewport > 1 || item.containerLeft < -1) {
+          problems.push(`${item.cols} 列表格容器顶出窗口：右超 ${item.beyondViewport}px，左 ${item.containerLeft}px`);
+        }
+        if ((item.wrapScroll ?? 0) > 0 && item.cols * minimumColumn <= item.containerWidth) {
+          problems.push(
+            `${item.cols} 列表格在 ${item.containerWidth}px 里还多出 ${item.wrapScroll}px 横向滚动，本来自适应就放得下`,
+          );
+        }
       }
+      if (problems.length > 0) {
+        throw new Error(
+          `${viewport.name}/${layout.name}(${viewport.width}px) 表格自适应失败：${problems.join('；')}\n${JSON.stringify(measured)}`,
+        );
+      }
+      report.push(
+        `${viewport.name}/${layout.name}=${measured.tables
+          .map((item) => `${item.cols}列滚${item.wrapScroll ?? '-'}`)
+          .join(',')}`,
+      );
+      await page.close();
     }
-    if (problems.length > 0) {
-      throw new Error(`${viewport.name}(${viewport.width}px) 表格自适应失败：${problems.join('；')}\n${JSON.stringify(measured)}`);
-    }
-    report.push(`${viewport.name}=${JSON.stringify(measured.tables.map((item) => `${item.cols}列/${item.width}px/滚动${item.wrapScroll}`))}`);
   }
 } finally {
   await browser.close();

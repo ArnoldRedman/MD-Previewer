@@ -102,9 +102,10 @@ body.has-tabs { --chrome-top: 50px; --bar-top: 40px; }
 #preview mark.search-hit.current { background: #ffcc4d; color: #1a1a1a; }
 #preview table { border-collapse: collapse; width: 100%; }
 #preview .mdp-table-wrap {
-  width: min(calc(100vw - 64px), 1280px);
-  margin: 1em 0 1em 50%;
-  transform: translateX(-50%);
+  /* 宽度跟着阅读栏走，不能用 100vw：侧栏和编辑分栏下 vw 不知道正文还剩多少宽度，
+     表格会从窗口右边溢出去（侧栏 260px 时正好多出约 98px）而顶出横向滚动 */
+  width: 100%;
+  margin: 1em 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
