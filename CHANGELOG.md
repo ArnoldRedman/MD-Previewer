@@ -2,6 +2,16 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.4.4
+
+- **大文档打开不再闪退或卡死 (Large Document Startup)**:
+  - 修复打开较大 Markdown 时应用直接退出的问题：首屏页面以前会把文档正文一起交给 WebView2，超过 2 MiB 上限就建不出 webview；现在正文等页面就绪后再注入，和手动打开文档走同一条路。
+  - webview 建不出来时会弹出明确的错误提示，不再静默退出。
+  - 修复 `$`、`\(` 这类符号密集的文档卡在打开阶段的问题：公式探测从 O(n²) 改成单次线性扫描（180 KB 样例从 6 秒多降到毫秒级），移动端同一处逻辑同步修复。
+- **表格自适应可视宽度 (Table Fitting)**:
+  - 宽表格不再按内容宽度撑开，也不会在侧栏 / 编辑分栏下溢出窗口右边缘：表格跟随正文栏宽度换行，列多到放不下时才由表格自己横向滚动，任何布局下都不会超出可视范围。
+  - 表头、单元格与超长链接都允许在必要位置换行，不再被裁切。
+
 ## 1.4.3
 
 - **输入法与编辑模式防闪退保护 (IME & Hotkey Guard)**:
