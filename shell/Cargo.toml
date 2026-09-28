@@ -1,0 +1,20 @@
+[package]
+name = "md-previewer-shell"
+version = "1.4.4"
+edition = "2021"
+publish = false
+description = "Explorer context-menu handler for MD Previewer"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+windows-core = "0.61.2"
+windows = { version = "0.61.3", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    "Win32_System_SystemServices",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

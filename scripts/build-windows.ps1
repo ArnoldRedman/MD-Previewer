@@ -60,8 +60,16 @@ function Wait-ForExit([Diagnostics.Process]$Process, [string]$Description) {
 Write-Host "[build] Running Rust tests"
 Invoke-Cargo @("test", "--locked")
 
+Write-Host "[build] Building shell extension"
+Invoke-Cargo @("build", "--release", "--locked", "-p", "md-previewer-shell")
+$shellDll = Join-Path $root "target\release\md_previewer_shell.dll"
+if (-not (Test-Path -LiteralPath $shellDll)) {
+    throw "Shell extension was not created: $shellDll"
+}
+$env:MD_PREVIEWER_SHELL_DLL = $shellDll
 Write-Host "[build] Building release executable"
-Invoke-Cargo @("build", "--release", "--locked")
+Invoke-Cargo @("build", "--release", "--locked", "-p", "md-previewer")
+Remove-Item Env:MD_PREVIEWER_SHELL_DLL
 if (-not (Test-Path -LiteralPath $releaseExe)) {
     throw "Release executable was not created: $releaseExe"
 }
@@ -83,6 +91,7 @@ if (Test-Path -LiteralPath $payload) {
 New-Item -ItemType Directory -Path $payload -Force | Out-Null
 Copy-Item -LiteralPath $releaseExe -Destination $portableExe
 Copy-Item -LiteralPath $releaseExe -Destination (Join-Path $payload "md-previewer.exe")
+Copy-Item -LiteralPath $shellDll -Destination (Join-Path $payload "md-previewer-shell.dll")
 foreach ($file in @("LICENSE", "NOTICE", "install-windows.cmd", "install-windows.ps1", "uninstall-windows.ps1")) {
     $source = if ($file -in @("LICENSE", "NOTICE")) {
         Join-Path $root $file
@@ -133,6 +142,7 @@ FILE2=NOTICE
 FILE3=install-windows.cmd
 FILE4=install-windows.ps1
 FILE5=uninstall-windows.ps1
+FILE6=md-previewer-shell.dll
 [SourceFiles]
 SourceFiles0=$payload\
 [SourceFiles0]
@@ -142,6 +152,7 @@ SourceFiles0=$payload\
 %FILE3%=
 %FILE4%=
 %FILE5%=
+%FILE6%=
 "@
 # IExpress parses .sed as ANSI, and Encoding::Default means ANSI on PowerShell 5.1 but UTF-8 on 7.
 # Pin ASCII and require ASCII-representable paths instead of emitting a silently corrupt installer.
@@ -190,6 +201,20 @@ if (-not $SkipInstallerTest) {
         if ((Get-Item -LiteralPath $testOpenCommand).GetValue("") -notlike "*$installedExe*") {
             throw "Installer test registered an unexpected Markdown open command"
         }
+        $testShell = Join-Path $testClassesRoot "*\shell\MDPreviewer"
+        $testHandler = (Get-Item -LiteralPath $testShell).GetValue("ExplorerCommandHandler")
+        if ($testHandler -ne "{7E2A9C14-5B6D-4E83-9F10-A1C3D5E7B902}") {
+            throw "Installer test did not register the Edit with MD Previewer command"
+        }
+        $installedDll = Join-Path $testInstall "md-previewer-shell.dll"
+        $testInProc = Join-Path $testClassesRoot "CLSID\{7E2A9C14-5B6D-4E83-9F10-A1C3D5E7B902}\InProcServer32"
+        if ((Get-Item -LiteralPath $testInProc).GetValue("") -ne $installedDll) {
+            throw "Installer test registered an unexpected shell extension path"
+        }
+        $testEnvOpen = Join-Path $testClassesRoot ".env\OpenWithProgids"
+        if ((Get-Item -LiteralPath $testEnvOpen).GetValueNames() -notcontains "MDPreviewer.md") {
+            throw "Installer test did not advertise MD Previewer for .env"
+        }
         if (-not (Test-Path -LiteralPath (Join-Path $testStartMenu "MD Previewer.lnk"))) {
             throw "Installer test did not create the Start Menu shortcut"
         }
@@ -210,6 +235,8 @@ if (-not $SkipInstallerTest) {
             Start-Sleep -Milliseconds 200
         }
         if ((Test-Path -LiteralPath $testOpenCommand) -or
+            (Test-Path -LiteralPath $testShell) -or
+            (Test-Path -LiteralPath $testInProc) -or
             (Test-Path -LiteralPath $testStartMenu) -or
             (Test-Path -LiteralPath $testUninstallRoot)) {
             throw "Uninstaller test left shell integration behind"

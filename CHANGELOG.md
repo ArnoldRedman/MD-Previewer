@@ -2,6 +2,10 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## Unreleased
+
+- Windows 文件右键增加「以 MD Previewer 编辑」（经典菜单，所有文件）。`.env`、`.txt`、`.json`、`.log` 等可在「打开方式」里直接选为默认，不必再去浏览 exe。系统不允许程序偷偷改掉默认应用，勾选「始终使用」这一步仍要用户自己点。
+
 ## 1.4.4
 
 - **大文档打开不再闪退或卡死 (Large Document Startup)**:

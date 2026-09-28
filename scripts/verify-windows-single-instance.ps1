@@ -4,7 +4,7 @@ $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $exe = (Resolve-Path -LiteralPath (Join-Path $root "target\release\md-previewer.exe")).Path
 $config = Join-Path ([IO.Path]::GetTempPath()) ("md-previewer-single-instance-" + [guid]::NewGuid())
 [IO.Directory]::CreateDirectory($config) | Out-Null
-[IO.File]::WriteAllText((Join-Path $config ".md-previewer-registered"), "")
+[IO.File]::WriteAllText((Join-Path $config ".md-previewer-shell-registered"), "")
 $firstDoc = Join-Path $config "first.md"
 $secondDoc = Join-Path $config "second.md"
 [IO.File]::WriteAllText($firstDoc, "# first", [Text.UTF8Encoding]::new($false))

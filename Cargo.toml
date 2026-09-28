@@ -7,6 +7,11 @@ description = "A lightweight, local-first Markdown reader"
 license = "MIT"
 repository = "https://github.com/ArnoldRedman/md-preview"
 
+[workspace]
+members = [".", "shell"]
+default-members = ["."]
+resolver = "2"
+
 [dependencies]
 wry = "0.50"
 tao = "0.33"

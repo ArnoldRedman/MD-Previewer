@@ -15,6 +15,8 @@ if ([string]::IsNullOrWhiteSpace($startMenu)) {
     $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\MD Previewer"
 }
 $progid = "MDPreviewer.md"
+$shellClsid = "{7E2A9C14-5B6D-4E83-9F10-A1C3D5E7B902}"
+$extensions = @('.md', '.markdown', '.mdown', '.mkd', '.txt', '.json', '.toml', '.yaml', '.yml', '.log', '.env')
 
 $runningInstalled = Get-Process -Name "md-previewer" -ErrorAction SilentlyContinue | Where-Object {
     try {
@@ -32,9 +34,18 @@ Remove-Item -LiteralPath $startMenu -Recurse -Force -ErrorAction SilentlyContinu
 Remove-Item -LiteralPath $uninstallRoot -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $classesRoot $progid) -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $classesRoot "Applications\md-previewer.exe") -Recurse -Force -ErrorAction SilentlyContinue
-foreach ($extension in @('.md', '.markdown', '.mdown', '.mkd', '.txt')) {
+Remove-Item -LiteralPath (Join-Path $classesRoot "*\shell\MDPreviewer") -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $classesRoot "CLSID\$shellClsid") -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($extension in $extensions) {
     $openWith = Join-Path $classesRoot "$extension\OpenWithProgids"
     Remove-ItemProperty -LiteralPath $openWith -Name $progid -ErrorAction SilentlyContinue
+}
+if ($classesRoot -eq "HKCU:\Software\Classes") {
+    foreach ($extension in $extensions) {
+        $openWith = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$extension\OpenWithProgids"
+        Remove-ItemProperty -LiteralPath $openWith -Name $progid -ErrorAction SilentlyContinue
+    }
+    Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA "md-previewer\md-previewer-shell.dll") -Force -ErrorAction SilentlyContinue
 }
 
 $escapedInstallRoot = $installRoot.Replace("'", "''")

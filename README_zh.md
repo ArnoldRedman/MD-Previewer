@@ -59,7 +59,7 @@ dist\MD-Previewer-Setup.exe         当前用户安装包
 dist\SHA256SUMS.txt                 SHA-256 校验值
 ```
 
-安装包不需要管理员权限，默认安装到 `%LOCALAPPDATA%\Programs\MD Previewer`，并创建开始菜单入口、卸载入口和 Markdown“打开方式”。它依赖系统 WebView2，不会把 WebView2 打进安装包。命令行或 CI 可用 `build-windows.cmd --no-pause` 跳过结束暂停。
+安装包不需要管理员权限，默认安装到 `%LOCALAPPDATA%\Programs\MD Previewer`，并创建开始菜单入口、卸载入口、文件右键「以 MD Previewer 编辑」，以及 Markdown 和常见文本（含 `.env`）的“打开方式”。它依赖系统 WebView2，不会把 WebView2 打进安装包。命令行或 CI 可用 `build-windows.cmd --no-pause` 跳过结束暂停。
 
 ## 构建
 

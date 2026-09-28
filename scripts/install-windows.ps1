@@ -20,6 +20,8 @@ $programExe = Join-Path $installRoot "md-previewer.exe"
 $uninstaller = Join-Path $installRoot "uninstall-windows.ps1"
 $uninstallCmd = Join-Path $installRoot "uninstall.cmd"
 $progid = "MDPreviewer.md"
+$shellClsid = "{7E2A9C14-5B6D-4E83-9F10-A1C3D5E7B902}"
+$extensions = @('.md', '.markdown', '.mdown', '.mkd', '.txt', '.json', '.toml', '.yaml', '.yml', '.log', '.env')
 
 $runningInstalled = Get-Process -Name "md-previewer" -ErrorAction SilentlyContinue | Where-Object {
     try {
@@ -64,16 +66,47 @@ New-Item -Path (Join-Path $progidRoot "shell\open\command") -Force | Out-Null
 Set-Item -Path $progidRoot -Value "MD Previewer Markdown Document"
 Set-Item -Path (Join-Path $progidRoot "DefaultIcon") -Value "`"$programExe`",0"
 Set-Item -Path (Join-Path $progidRoot "shell\open\command") -Value "`"$programExe`" `"%1`""
-foreach ($extension in @('.md', '.markdown', '.mdown', '.mkd', '.txt')) {
+foreach ($extension in $extensions) {
     $openWith = Join-Path $classesRoot "$extension\OpenWithProgids"
     New-Item -Path $openWith -Force | Out-Null
     New-ItemProperty -Path $openWith -Name $progid -Value '' -PropertyType String -Force | Out-Null
 }
+if ($classesRoot -eq "HKCU:\Software\Classes") {
+    foreach ($extension in $extensions) {
+        $openWith = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$extension\OpenWithProgids"
+        New-Item -Path $openWith -Force | Out-Null
+        New-ItemProperty -Path $openWith -Name $progid -Value '' -PropertyType String -Force | Out-Null
+    }
+}
 
 $applicationRoot = Join-Path $classesRoot "Applications\md-previewer.exe"
 New-Item -Path (Join-Path $applicationRoot "shell\open\command") -Force | Out-Null
+New-Item -Path (Join-Path $applicationRoot "SupportedTypes") -Force | Out-Null
 New-ItemProperty -Path $applicationRoot -Name 'FriendlyAppName' -Value 'MD Previewer' -PropertyType String -Force | Out-Null
 Set-Item -Path (Join-Path $applicationRoot "shell\open\command") -Value "`"$programExe`" `"%1`""
+foreach ($extension in $extensions) {
+    New-ItemProperty -Path (Join-Path $applicationRoot "SupportedTypes") -Name $extension -Value '' -PropertyType String -Force | Out-Null
+}
+
+$shellDll = Join-Path $installRoot "md-previewer-shell.dll"
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "md-previewer-shell.dll") -Destination $shellDll -Force
+$menuTitle = "Edit with MD Previewer"
+if ([Globalization.CultureInfo]::CurrentUICulture.Name -like "zh*") {
+    $menuTitle = "{0} MD Previewer {1}{2}" -f [char]0x4EE5, [char]0x7F16, [char]0x8F91
+}
+$shellVerb = Join-Path $classesRoot "*\shell\MDPreviewer"
+New-Item -Path $shellVerb -Force | Out-Null
+Set-Item -LiteralPath $shellVerb -Value $menuTitle
+New-ItemProperty -LiteralPath $shellVerb -Name 'NeverDefault' -Value '' -PropertyType String -Force | Out-Null
+New-ItemProperty -LiteralPath $shellVerb -Name 'Icon' -Value "`"$programExe`",0" -PropertyType String -Force | Out-Null
+New-ItemProperty -LiteralPath $shellVerb -Name 'ExplorerCommandHandler' -Value $shellClsid -PropertyType String -Force | Out-Null
+$clsidRoot = Join-Path $classesRoot "CLSID\$shellClsid"
+New-Item -Path (Join-Path $clsidRoot "InProcServer32") -Force | Out-Null
+Set-Item -LiteralPath $clsidRoot -Value "MD Previewer"
+New-ItemProperty -LiteralPath $clsidRoot -Name 'Exe' -Value $programExe -PropertyType String -Force | Out-Null
+New-ItemProperty -LiteralPath $clsidRoot -Name 'Title' -Value $menuTitle -PropertyType String -Force | Out-Null
+Set-Item -LiteralPath (Join-Path $clsidRoot "InProcServer32") -Value $shellDll
+New-ItemProperty -LiteralPath (Join-Path $clsidRoot "InProcServer32") -Name 'ThreadingModel' -Value 'Apartment' -PropertyType String -Force | Out-Null
 
 $version = (Get-Item -LiteralPath $programExe).VersionInfo.ProductVersion
 New-Item -Path $uninstallRoot -Force | Out-Null

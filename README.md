@@ -59,7 +59,7 @@ dist\MD-Previewer-Setup.exe         per-user installer
 dist\SHA256SUMS.txt                 SHA-256 checksums
 ```
 
-The installer does not require administrator rights. It installs to `%LOCALAPPDATA%\Programs\MD Previewer`, creates Start Menu and uninstall entries, and registers Markdown in the “Open with” list. It uses the system WebView2 runtime and does not bundle WebView2. Use `build-windows.cmd --no-pause` from a terminal or CI.
+The installer does not require administrator rights. It installs to `%LOCALAPPDATA%\Programs\MD Previewer`, creates Start Menu and uninstall entries, adds “Edit with MD Previewer” to the classic file context menu, and registers Markdown and common text files (including `.env`) in the “Open with” list. It uses the system WebView2 runtime and does not bundle WebView2. Use `build-windows.cmd --no-pause` from a terminal or CI.
 
 ## Build
 
