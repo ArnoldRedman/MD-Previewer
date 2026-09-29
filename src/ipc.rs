@@ -60,6 +60,8 @@ pub(crate) enum IpcMessage {
     /// 关窗前请求页面保存，页面发现没有脏内容时回这条，事件循环据此继续退出
     SaveSkipped,
     DirtyChanged(bool),
+    /// 页面手动切换预览/编辑模式；按标签记住，切回来时恢复
+    EditMode(bool),
     ExternalChangeResolved {
         dirty: bool,
     },
@@ -87,6 +89,8 @@ pub(crate) fn parse_ipc_message(body: &str) -> Option<IpcMessage> {
         "clear-recent" => Some(IpcMessage::ClearRecent),
         "dirty:1" => Some(IpcMessage::DirtyChanged(true)),
         "dirty:0" => Some(IpcMessage::DirtyChanged(false)),
+        "edit-mode:1" => Some(IpcMessage::EditMode(true)),
+        "edit-mode:0" => Some(IpcMessage::EditMode(false)),
         "external-change:dirty" => Some(IpcMessage::ExternalChangeResolved { dirty: true }),
         "external-change:clean" => Some(IpcMessage::ExternalChangeResolved { dirty: false }),
         "print" => Some(IpcMessage::Print),

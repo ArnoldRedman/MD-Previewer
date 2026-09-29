@@ -485,6 +485,18 @@ if (await page.evaluate(() => document.body.classList.contains('finding'))) thro
 await page.keyboard.press('Escape');
 if (await page.evaluate(() => document.body.classList.contains('editing'))) throw new Error('A single Escape should leave edit mode');
 
+// 手动切换预览/编辑要回报给 Rust（切标签时按标签恢复）；切到别的文档后 Rust 用 __mdPreviewerExitEdit 收回预览
+await page.evaluate(() => {
+  window.__setContent('<h1>Doc</h1>', '# Doc', '', false, false);
+  window.ipcMessages = [];
+});
+await page.evaluate(() => window.__mdPreviewerToggleEdit());
+const modeMsg = await page.evaluate(() => window.ipcMessages[window.ipcMessages.length - 1]);
+if (modeMsg !== 'edit-mode:1') throw new Error(`Expected 'edit-mode:1' after toggling edit on, got '${modeMsg}'`);
+if (!(await page.evaluate(() => document.body.classList.contains('editing')))) throw new Error('Toggle should enter edit mode');
+await page.evaluate(() => window.__mdPreviewerExitEdit());
+if (await page.evaluate(() => document.body.classList.contains('editing'))) throw new Error('__mdPreviewerExitEdit should restore preview mode');
+
 // __setPreview 后搜索命中重建
 await page.evaluate(() => {
   window.__setPreview('<h1 id="s1">Alpha</h1><p>Alpha beta</p>', false, false);

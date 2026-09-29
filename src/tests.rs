@@ -1072,6 +1072,15 @@ pub(crate) fn ipc_messages_parse_into_typed_commands() {
         Some(IpcMessage::DirtyChanged(true))
     );
     assert_eq!(
+        parse_ipc_message("edit-mode:1"),
+        Some(IpcMessage::EditMode(true))
+    );
+    assert_eq!(
+        parse_ipc_message("edit-mode:0"),
+        Some(IpcMessage::EditMode(false))
+    );
+    assert_eq!(parse_ipc_message("edit-mode:2"), None);
+    assert_eq!(
         parse_ipc_message("external-change:clean"),
         Some(IpcMessage::ExternalChangeResolved { dirty: false })
     );

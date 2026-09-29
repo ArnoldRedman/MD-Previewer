@@ -458,6 +458,12 @@
     cancelLiveRender();
     restoreScrollProgress(progress);
   }
+  // 用户手动切换预览/编辑后回报给 Rust：切标签时按这个标签记住的模式恢复；
+  // 打开/新建文件前的收尾退出不算用户选择，那些地方不回报
+  function reportEditModeChange(wasEditing) {
+    if (inEdit() === wasEditing) return;
+    window.ipc.postMessage('edit-mode:' + (inEdit() ? '1' : '0'));
+  }
   function toggleSplitView() {
     var split = !document.body.classList.contains('split-view');
     document.body.classList.toggle('split-view', split);
@@ -493,10 +499,17 @@
     if (sidebarSection === 'outline') renderSidebar();
   };
   window.__mdPreviewerToggleEdit = function() {
-    if (inEdit()) leaveEdit(); else enterEdit();
+    var wasEditing = inEdit();
+    if (wasEditing) leaveEdit(); else enterEdit();
+    reportEditModeChange(wasEditing);
   };
 	window.__mdPreviewerEnterEdit = function() {
 	  if (!inEdit()) enterEdit();
+	};
+	// Rust 切到别的文档后按那个标签记住的模式恢复视图；有未保存内容时保持编辑，
+	// 免得编辑器里旧文档的正文被写进新文档
+	window.__mdPreviewerExitEdit = function() {
+	  if (inEdit() && !dirty) leaveEdit();
 	};
 	window.__mdPreviewerCloseActiveTab = function() {
 	  if (activeTabId) requestTabAction('close', activeTabId);
@@ -1255,7 +1268,7 @@
     if ((e.metaKey || e.ctrlKey) && (e.key === 'e' || e.key === 'E')) {
       if (!isShortcutEnabled('toggle-edit')) return;
       e.preventDefault();
-      if (inEdit()) leaveEdit(); else enterEdit();
+      window.__mdPreviewerToggleEdit();
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
@@ -1272,14 +1285,20 @@
     if ((e.metaKey || e.ctrlKey) && (e.key === 'p' || e.key === 'P')) {
       if (!isShortcutEnabled('print')) return;
       e.preventDefault();
-      if (inEdit()) leaveEdit();
+      if (inEdit()) {
+        leaveEdit();
+        reportEditModeChange(true);
+      }
       setTimeout(function(){ window.ipc.postMessage('print'); }, 0);
       return;
     }
 	    if ((e.metaKey || e.ctrlKey) && (e.key === '\\' || e.code === 'Backslash')) {
 	      if (!isShortcutEnabled('split-view')) return;
 	      e.preventDefault();
-	      if (!inEdit()) enterEdit();
+	      if (!inEdit()) {
+	        enterEdit();
+	        reportEditModeChange(false);
+	      }
 	      toggleSplitView();
 	      return;
 	    }
@@ -1287,7 +1306,10 @@
 	      if (!isShortcutEnabled('escape')) return;
 	      if (closeAllOverlays()) return;
 	      if (document.body.classList.contains('finding')) { hideFind(); return; }
-	      if (inEdit()) leaveEdit();
+	      if (inEdit()) {
+	        leaveEdit();
+	        reportEditModeChange(true);
+	      }
 	    }
   });
 

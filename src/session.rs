@@ -1,3 +1,4 @@
+use crate::paths::is_markdown_document;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -9,7 +10,9 @@ pub struct DocumentTab {
     pub path: PathBuf,
     pub dirty: bool,
     pub missing: bool,
-    pub edit_on_open: bool,
+    /// 预览/编辑模式：打开时按扩展名定默认值（非 Markdown 进编辑器），
+    /// 用户手动切换后由页面回报覆盖，切标签时按这个值恢复
+    pub edit_mode: bool,
     pub encoding: Option<String>,
 }
 
@@ -60,9 +63,13 @@ impl DocumentSession {
 
     pub fn open(&mut self, path: PathBuf, edit_on_open: bool) -> u64 {
         let path = normalize_path(path);
+        // 非 Markdown 文件默认直接进编辑器，Markdown 默认看渲染结果；
+        // edit_on_open 是显式请求（--edit、右键「以 MD Previewer 编辑」、新建文件）
+        let default_edit_mode = edit_on_open || !is_markdown_document(&path);
         if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.path == path) {
             tab.missing = !tab.path.exists();
-            tab.edit_on_open |= edit_on_open;
+            // 已存在的标签只接受显式编辑请求，不覆盖用户手动选过的模式
+            tab.edit_mode |= edit_on_open;
             self.active_id = Some(tab.id);
             return tab.id;
         }
@@ -80,7 +87,7 @@ impl DocumentSession {
             missing: !path.exists(),
             path,
             dirty: false,
-            edit_on_open,
+            edit_mode: default_edit_mode,
             encoding: None,
         });
         self.active_id = Some(id);
@@ -291,7 +298,48 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(session.tabs.len(), 1);
         assert_eq!(session.active_id, Some(first));
-        assert!(session.tabs[0].edit_on_open);
+        assert!(session.tabs[0].edit_mode);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn text_files_open_in_edit_mode_and_markdown_in_preview() {
+        let dir = temp_dir("default-mode");
+        let note = dir.join("note.md");
+        let log = dir.join("build.log");
+        fs::write(&note, "# Note").unwrap();
+        fs::write(&log, "line").unwrap();
+        let mut session = DocumentSession::default();
+
+        let markdown = session.open(note.clone(), false);
+        let text = session.open(log, false);
+
+        assert!(
+            !session
+                .tabs
+                .iter()
+                .find(|tab| tab.id == markdown)
+                .unwrap()
+                .edit_mode
+        );
+        assert!(
+            session
+                .tabs
+                .iter()
+                .find(|tab| tab.id == text)
+                .unwrap()
+                .edit_mode
+        );
+        // 显式编辑请求（--edit、右键「以 MD Previewer 编辑」）对 Markdown 也生效
+        session.open(note, true);
+        assert!(
+            session
+                .tabs
+                .iter()
+                .find(|tab| tab.id == markdown)
+                .unwrap()
+                .edit_mode
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

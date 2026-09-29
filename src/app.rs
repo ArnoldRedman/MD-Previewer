@@ -265,11 +265,12 @@ impl App {
                 ));
                 self.push_author_doc(&active.path, &raw);
                 self.bootstrap_enhancers(flags);
-                if active.edit_on_open {
-                    if let Some(tab) = self.session.get_mut(active.id) {
-                        tab.edit_on_open = false;
-                    }
+                // 预览/编辑按标签自己记住的模式恢复：非 Markdown 默认编辑、Markdown 默认预览，
+                // 用户手动切过就按他选的来，所以同一个窗口里切标签也能各归各位
+                if active.edit_mode {
                     self.eval("if(window.__mdPreviewerEnterEdit)window.__mdPreviewerEnterEdit();");
+                } else {
+                    self.eval("if(window.__mdPreviewerExitEdit)window.__mdPreviewerExitEdit();");
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -811,6 +812,12 @@ impl App {
             IpcMessage::DirtyChanged(dirty) => {
                 if self.session.set_active_dirty(dirty) {
                     self.refresh_tabs();
+                }
+            }
+            // 页面手动切换预览/编辑：记在当前标签上，切回来时恢复到同一个模式
+            IpcMessage::EditMode(edit_mode) => {
+                if let Some(tab) = self.session.active_mut() {
+                    tab.edit_mode = edit_mode;
                 }
             }
             IpcMessage::ExternalChangeResolved { dirty } => self.on_external_change_resolved(dirty),
