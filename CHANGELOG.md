@@ -2,11 +2,19 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
-## Unreleased
+## 1.5.0
 
-- Windows 文件右键增加「以 MD Previewer 编辑」（经典菜单，所有文件）。`.env`、`.txt`、`.json`、`.log` 等可在「打开方式」里直接选为默认，不必再去浏览 exe。系统不允许程序偷偷改掉默认应用，勾选「始终使用」这一步仍要用户自己点。
-- **打开默认模式按文件类型 (Default Open Mode)**: Markdown 打开即预览，其它文本（`.txt`、`.json`、`.log`、`.ini`、`.env`、源码等）打开即编辑；预览 / 编辑模式按标签记住，切标签各归各位，手动切换也会记在该标签上。`--edit`、右键「以 MD Previewer 编辑」与新建文件仍强制编辑。
-- **预览排布修复 (Preview Layout)**: 非 Markdown 正文不再套 Markdown 的 820px 阅读栏，窗口多宽就用多宽，一条配置 / 日志记录不再在窗口还空着的时候被折成两行；侧栏按钮与工具按钮改为独占一行并吸顶，正文从它下面开始，不再用悬浮层压住正文行首。Markdown 的正文栏宽度与阅读居中保持不变。
+- **打开默认模式按文件类型 (Default Open Mode)**:
+  - Markdown 打开即预览，其它文本（`.txt`、`.json`、`.log`、`.ini`、`.env`、源码等）打开即编辑，不用再先点一次编辑按钮。
+  - 预览 / 编辑模式按标签记住：切到别的标签再切回来，还是你上次在这个标签上选的那个模式；手动切换也会记在该标签上。
+  - `--edit`、右键「以 MD Previewer 编辑」与新建文件仍然强制进编辑。
+- **预览排布修复 (Preview Layout)**:
+  - 非 Markdown 正文不再套 Markdown 的 820px 阅读栏：窗口多宽就用多宽，一行配置 / 日志记录不会再在窗口还空着一大半的时候被折成两行（95 字符的配置行在 1030px 宽窗口下现在整行显示）；Markdown 的阅读栏宽度与阅读居中保持不变。
+  - 侧栏按钮与工具按钮改为独占一行并吸顶，正文从它下面开始，滚到哪都不会被悬浮层压住行首。
+  - 顺带的可见变化：预览模式这条控件行现在常显（原来是鼠标悬停才出现），用一点常驻高度换「永不遮挡正文」。
+- **Windows 右键「以 MD Previewer 编辑」(Explorer Context Menu)**:
+  - 经典菜单，所有文件都能用。`.env`、`.txt`、`.json`、`.log` 等可在「打开方式」里直接选为默认，不必再去浏览 exe。
+  - 系统不允许程序偷偷改掉默认应用，勾选「始终使用」这一步仍要用户自己点。
 
 ## 1.4.4
 

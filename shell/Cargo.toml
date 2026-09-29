@@ -1,6 +1,6 @@
 [package]
 name = "md-previewer-shell"
-version = "1.4.4"
+version = "1.5.0"
 edition = "2021"
 publish = false
 description = "Explorer context-menu handler for MD Previewer"
