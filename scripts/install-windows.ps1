@@ -38,6 +38,8 @@ if ($runningInstalled) {
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "md-previewer.exe") -Destination $programExe -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "uninstall-windows.ps1") -Destination $uninstaller -Force
+# The uninstaller dot-sources this, so it has to sit next to it in the install dir
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "association-prune.ps1") -Destination (Join-Path $installRoot "association-prune.ps1") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "NOTICE") -Destination (Join-Path $installRoot "NOTICE") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "LICENSE") -Destination (Join-Path $installRoot "LICENSE") -Force
 
@@ -61,6 +63,16 @@ $uninstallShortcut.Description = "Uninstall MD Previewer"
 $uninstallShortcut.Save()
 
 $progidRoot = Join-Path $classesRoot $progid
+$fileExtsRoot = $env:MD_PREVIEWER_FILE_EXTS_ROOT
+if ([string]::IsNullOrWhiteSpace($fileExtsRoot)) {
+    $fileExtsRoot = $null
+}
+# Sweep legacy Open With entries before writing the fresh ones: older builds
+# registered one Applications entry per exe file name and Windows keeps every
+# name it ever used in FileExts\<ext>\OpenWithList
+. (Join-Path $PSScriptRoot "association-prune.ps1")
+Remove-LegacyPreviewerEntries -ClassesRoot $classesRoot -Extensions $extensions -FileExtsRoot $fileExtsRoot
+
 New-Item -Path (Join-Path $progidRoot "DefaultIcon") -Force | Out-Null
 New-Item -Path (Join-Path $progidRoot "shell\open\command") -Force | Out-Null
 Set-Item -Path $progidRoot -Value "MD Previewer Markdown Document"
@@ -71,9 +83,15 @@ foreach ($extension in $extensions) {
     New-Item -Path $openWith -Force | Out-Null
     New-ItemProperty -Path $openWith -Name $progid -Value '' -PropertyType String -Force | Out-Null
 }
-if ($classesRoot -eq "HKCU:\Software\Classes") {
+if ($classesRoot -eq "HKCU:\Software\Classes" -or -not [string]::IsNullOrWhiteSpace($fileExtsRoot)) {
+    $feRoot = if ([string]::IsNullOrWhiteSpace($fileExtsRoot)) {
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts"
+    }
+    else {
+        $fileExtsRoot
+    }
     foreach ($extension in $extensions) {
-        $openWith = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$extension\OpenWithProgids"
+        $openWith = "$feRoot\$extension\OpenWithProgids"
         New-Item -Path $openWith -Force | Out-Null
         New-ItemProperty -Path $openWith -Name $progid -Value '' -PropertyType String -Force | Out-Null
     }

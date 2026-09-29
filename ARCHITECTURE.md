@@ -58,6 +58,7 @@
 | 表格必须自适应可视宽度，放不下才让表格自己横向滚 | 表格顶出可视范围会逼用户拖窗口，手机上还会把整页顶宽 | `scripts/verify-desktop-tables.mjs` + `mobile/scripts/verify-mobile-renderer.mjs` 的表格断言 |
 | 非 Markdown 纯文本正文不套 Markdown 的 820px 正文栏，用满可用宽度 | 配置/日志/源码是行导向内容，限宽会在窗口还有空位时把一条记录折成两行 | `scripts/verify-desktop-plain-text.mjs`（Markdown 仍必须保持正文栏） |
 | 侧栏按钮和工具按钮必须独占一行占位，不能用悬浮层压住正文 | 正文用满窗口宽度时，浮层会盖住每一行开头或结尾的字 | `scripts/verify-desktop-edit-topbar.mjs` + `scripts/verify-desktop-plain-text.mjs` 的重叠断言 |
+| 「打开方式」里只能有一份 MD Previewer | 历史版本按 exe 文件名各注册一份 Applications 项，Windows 又记住每个用过的 exe 名，堆起来就是好几行同名项 | `build-windows.ps1` 的安装测试（先造历史遗留再断言只剩一份）+ `src/platform.rs` 的 `prune_legacy_associations` |
 | 打开文档不发任何网络请求；安卓包不声明网络权限 | 对外的隐私承诺，写在下载页和 README 里 | `mobile/scripts/verify-release-readiness.sh`（断言 APK 无 INTERNET 权限） |
 | 外部改动不能覆盖未保存内容；自己的写入不能触发自我重载 | 会丢用户数据 / 无限重载循环 | `document.rs` 的 `SelfWriteRecord` + `self_write_still_matches_disk` + `should_protect_external_change` |
 | 发布资产名不带版本号（`MD-Previewer-*.exe/.apk/.deb/.tar.gz`） | 下载页用 `releases/latest/download/<名>` 直链，带版本号就失效 | `scripts/verify-landing-page.mjs` 与各构建脚本交叉校验 |

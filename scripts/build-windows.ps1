@@ -17,6 +17,7 @@ $installer = Join-Path $dist "MD-Previewer-Setup.exe"
 $testInstall = Join-Path $dist "installer-test"
 $testRegistryRoot = "HKCU:\Software\MDPreviewerBuildTest"
 $testClassesRoot = Join-Path $testRegistryRoot "Classes"
+$testFileExtsRoot = Join-Path $testRegistryRoot "FileExts"
 $testUninstallRoot = Join-Path $testRegistryRoot "Uninstall"
 $testStartMenu = Join-Path $dist "start-menu-test"
 
@@ -92,7 +93,7 @@ New-Item -ItemType Directory -Path $payload -Force | Out-Null
 Copy-Item -LiteralPath $releaseExe -Destination $portableExe
 Copy-Item -LiteralPath $releaseExe -Destination (Join-Path $payload "md-previewer.exe")
 Copy-Item -LiteralPath $shellDll -Destination (Join-Path $payload "md-previewer-shell.dll")
-foreach ($file in @("LICENSE", "NOTICE", "install-windows.cmd", "install-windows.ps1", "uninstall-windows.ps1")) {
+foreach ($file in @("LICENSE", "NOTICE", "install-windows.cmd", "install-windows.ps1", "uninstall-windows.ps1", "association-prune.ps1")) {
     $source = if ($file -in @("LICENSE", "NOTICE")) {
         Join-Path $root $file
     }
@@ -143,6 +144,7 @@ FILE3=install-windows.cmd
 FILE4=install-windows.ps1
 FILE5=uninstall-windows.ps1
 FILE6=md-previewer-shell.dll
+FILE7=association-prune.ps1
 [SourceFiles]
 SourceFiles0=$payload\
 [SourceFiles0]
@@ -153,6 +155,7 @@ SourceFiles0=$payload\
 %FILE4%=
 %FILE5%=
 %FILE6%=
+%FILE7%=
 "@
 # IExpress parses .sed as ANSI, and Encoding::Default means ANSI on PowerShell 5.1 but UTF-8 on 7.
 # Pin ASCII and require ASCII-representable paths instead of emitting a silently corrupt installer.
@@ -181,9 +184,27 @@ if (-not $SkipInstallerTest) {
         MD_PREVIEWER_CLASSES_ROOT = $testClassesRoot
         MD_PREVIEWER_UNINSTALL_ROOT = $testUninstallRoot
         MD_PREVIEWER_START_MENU_DIR = $testStartMenu
+        MD_PREVIEWER_FILE_EXTS_ROOT = $testFileExtsRoot
         MD_PREVIEWER_INSTALL_QUIET = "1"
     }
     try {
+        # Seed the legacy mess first: an entry under another exe name, an old
+        # ProgID, and stale exe names in the OpenWithList candidate list
+        $legacyApp = Join-Path $testClassesRoot "Applications\MD-Previewer-windows-x64.exe"
+        New-Item -Path (Join-Path $legacyApp "shell\open\command") -Force | Out-Null
+        New-ItemProperty -Path $legacyApp -Name 'FriendlyAppName' -Value 'MD Previewer' -PropertyType String -Force | Out-Null
+        $legacyProgId = Join-Path $testClassesRoot "MDPreviewer.txt"
+        New-Item -Path $legacyProgId -Force | Out-Null
+        $legacyProgIdRef = Join-Path $testClassesRoot ".txt\OpenWithProgids"
+        New-Item -Path $legacyProgIdRef -Force | Out-Null
+        New-ItemProperty -Path $legacyProgIdRef -Name 'MDPreviewer.txt' -Value '' -PropertyType String -Force | Out-Null
+        $legacyList = Join-Path $testFileExtsRoot ".md\OpenWithList"
+        New-Item -Path $legacyList -Force | Out-Null
+        New-ItemProperty -Path $legacyList -Name 'a' -Value 'rider64.exe' -PropertyType String -Force | Out-Null
+        New-ItemProperty -Path $legacyList -Name 'b' -Value 'md-previewer.exe' -PropertyType String -Force | Out-Null
+        New-ItemProperty -Path $legacyList -Name 'c' -Value 'MD-Previewer-windows-x64.exe' -PropertyType String -Force | Out-Null
+        New-ItemProperty -Path $legacyList -Name 'MRUList' -Value 'bca' -PropertyType String -Force | Out-Null
+
         $installProcess = Start-WithEnvironment $installer "/Q" $testEnvironment
         Wait-ForExit $installProcess "installer test"
         $installedExe = Join-Path $testInstall "md-previewer.exe"
@@ -215,6 +236,24 @@ if (-not $SkipInstallerTest) {
         if ((Get-Item -LiteralPath $testEnvOpen).GetValueNames() -notcontains "MDPreviewer.md") {
             throw "Installer test did not advertise MD Previewer for .env"
         }
+        # Only one MD Previewer entry may survive: the legacy ones must be gone
+        $previewerApps = @(Get-ChildItem -LiteralPath (Join-Path $testClassesRoot "Applications") | Where-Object {
+                (Get-ItemProperty -LiteralPath $_.PSPath -Name 'FriendlyAppName' -ErrorAction SilentlyContinue).FriendlyAppName -eq 'MD Previewer'
+            })
+        if ($previewerApps.Count -ne 1 -or $previewerApps[0].PSChildName -ne 'md-previewer.exe') {
+            throw "Expected exactly one MD Previewer app entry, got: $(($previewerApps | ForEach-Object { $_.PSChildName }) -join ', ')"
+        }
+        if (Test-Path -LiteralPath $legacyProgId) {
+            throw "Installer test did not remove the legacy ProgID"
+        }
+        if ((Get-Item -LiteralPath $legacyProgIdRef).GetValueNames() -contains 'MDPreviewer.txt') {
+            throw "Installer test left the legacy ProgID in .txt OpenWithProgids"
+        }
+        $list = Get-Item -LiteralPath $legacyList
+        if ($list.GetValue('MRUList') -ne 'ab' -or $list.GetValue('a') -ne 'md-previewer.exe' -or
+            $list.GetValue('b') -ne 'rider64.exe') {
+            throw "Installer test pruned the OpenWithList wrong: MRUList=$($list.GetValue('MRUList')) a=$($list.GetValue('a')) b=$($list.GetValue('b'))"
+        }
         if (-not (Test-Path -LiteralPath (Join-Path $testStartMenu "MD Previewer.lnk"))) {
             throw "Installer test did not create the Start Menu shortcut"
         }
@@ -240,6 +279,28 @@ if (-not $SkipInstallerTest) {
             (Test-Path -LiteralPath $testStartMenu) -or
             (Test-Path -LiteralPath $testUninstallRoot)) {
             throw "Uninstaller test left shell integration behind"
+        }
+        # Uninstall must not leave our names behind in the candidate list or in
+        # Applications, or the Open With dialog still lists a row. The list itself
+        # may legitimately survive for other apps.
+        $leftoverNames = @()
+        if (Test-Path -LiteralPath $legacyList) {
+            $listKey = Get-Item -LiteralPath $legacyList
+            $leftoverNames = @($listKey.GetValueNames() | Where-Object { $_.Length -eq 1 } |
+                ForEach-Object { [string]$listKey.GetValue($_) })
+        }
+        if ($leftoverNames -contains 'md-previewer.exe') {
+            throw "Uninstaller test left MD Previewer in the OpenWithList: $($leftoverNames -join ', ')"
+        }
+        $appsLeft = @()
+        $appsRoot = Join-Path $testClassesRoot "Applications"
+        if (Test-Path -LiteralPath $appsRoot) {
+            $appsLeft = @(Get-ChildItem -LiteralPath $appsRoot | Where-Object {
+                    (Get-ItemProperty -LiteralPath $_.PSPath -Name 'FriendlyAppName' -ErrorAction SilentlyContinue).FriendlyAppName -eq 'MD Previewer'
+                } | ForEach-Object { $_.PSChildName })
+        }
+        if ($appsLeft.Count -gt 0) {
+            throw "Uninstaller test left MD Previewer app entries: $($appsLeft -join ', ')"
         }
     }
     finally {

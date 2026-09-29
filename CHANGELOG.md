@@ -2,6 +2,13 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## Unreleased
+
+- **文件关联只保留一个入口 (Single Open With Entry)**:
+  - 右键属性 →「更改默认打开方式」里以前会堆出好几行同名 MD Previewer：Applications 的注册项早期跟着当前运行的 exe 文件名走，安装版、免安装版、开发构建各算一个应用；Windows 又把每个用过的 exe 名记进 `FileExts\<ext>\OpenWithList`，两边都从不清理，卸载也带不走。
+  - 现在只注册一份固定的应用项（key 名固定为 `md-previewer.exe`，不再跟随实际文件名）；安装、卸载与应用启动时都会把历史遗留的其它注册项、候选列表里的旧名字、以及指向已删除文件的注册（含右键菜单与 ProgID）收干净。
+  - 顺带修好一个会让菜单永远卡在旧路径的场景：旧的右键菜单 DLL 被资源管理器加载着时无法覆盖写入，原先这会让整个重新注册被静默跳过。
+
 ## 1.5.0
 
 - **打开默认模式按文件类型 (Default Open Mode)**:

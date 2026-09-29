@@ -33,9 +33,16 @@ if ($runningInstalled) {
 Remove-Item -LiteralPath $startMenu -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $uninstallRoot -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $classesRoot $progid) -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $classesRoot "Applications\md-previewer.exe") -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $classesRoot "*\shell\MDPreviewer") -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $classesRoot "CLSID\$shellClsid") -Recurse -Force -ErrorAction SilentlyContinue
+# Remove our own Applications entries and the stale exe names in the FileExts
+# candidate list: older versions could register more than one
+$fileExtsRoot = $env:MD_PREVIEWER_FILE_EXTS_ROOT
+if ([string]::IsNullOrWhiteSpace($fileExtsRoot)) {
+    $fileExtsRoot = $null
+}
+. (Join-Path $PSScriptRoot "association-prune.ps1")
+Remove-LegacyPreviewerEntries -ClassesRoot $classesRoot -Extensions $extensions -FileExtsRoot $fileExtsRoot -IncludeCanonical
 foreach ($extension in $extensions) {
     $openWith = Join-Path $classesRoot "$extension\OpenWithProgids"
     Remove-ItemProperty -LiteralPath $openWith -Name $progid -ErrorAction SilentlyContinue
