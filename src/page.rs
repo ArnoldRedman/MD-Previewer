@@ -140,7 +140,6 @@ pub(crate) fn build_page_with_encoding(
         ("css_light", HLJS_LIGHT.to_string()),
         ("css_dark", HLJS_DARK.to_string()),
         ("sidebar_width", SIDEBAR_WIDTH.to_string()),
-        ("sidebar_toggle_left", (SIDEBAR_WIDTH + 12.0).to_string()),
         ("css", PAGE_CSS.to_string()),
         ("body_class", body_class.to_string()),
         ("encoding_title", s.encoding_title.to_string()),

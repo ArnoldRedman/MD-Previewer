@@ -5,6 +5,8 @@ This file tracks MD Previewer releases. The upstream MD Preview history remains 
 ## Unreleased
 
 - Windows 文件右键增加「以 MD Previewer 编辑」（经典菜单，所有文件）。`.env`、`.txt`、`.json`、`.log` 等可在「打开方式」里直接选为默认，不必再去浏览 exe。系统不允许程序偷偷改掉默认应用，勾选「始终使用」这一步仍要用户自己点。
+- **打开默认模式按文件类型 (Default Open Mode)**: Markdown 打开即预览，其它文本（`.txt`、`.json`、`.log`、`.ini`、`.env`、源码等）打开即编辑；预览 / 编辑模式按标签记住，切标签各归各位，手动切换也会记在该标签上。`--edit`、右键「以 MD Previewer 编辑」与新建文件仍强制编辑。
+- **预览排布修复 (Preview Layout)**: 非 Markdown 正文不再套 Markdown 的 820px 阅读栏，窗口多宽就用多宽，一条配置 / 日志记录不再在窗口还空着的时候被折成两行；侧栏按钮与工具按钮改为独占一行并吸顶，正文从它下面开始，不再用悬浮层压住正文行首。Markdown 的正文栏宽度与阅读居中保持不变。
 
 ## 1.4.4
 

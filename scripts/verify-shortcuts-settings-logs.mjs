@@ -44,8 +44,8 @@ console.log('Verifying 2: In-browser settings, shortcuts and logging UI & behavi
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1000, height: 750 } });
 
-// Inject styles for headless testing: make toolbar interactable without hover
-const testExtraCss = '\n.toolbar { opacity: 1 !important; pointer-events: auto !important; }\n';
+// Inject styles for headless testing: the topbar is a real row in the flow
+const testExtraCss = '';
 
 // Assemble HTML from pageHtml template
 let html = pageHtml
@@ -53,7 +53,6 @@ let html = pageHtml
   .replace('{{css_light}}', '')
   .replace('{{css_dark}}', '')
   .replace('{{sidebar_width}}', '260')
-  .replace('{{sidebar_toggle_left}}', '272')
   .replace('{{css}}', desktopCss + testExtraCss)
   .replace('{{body_class}}', 'has-tabs')
   .replace('{{config_json}}', configJson())

@@ -611,8 +611,12 @@ pub(crate) fn page_blocks_native_preview_reload_paths() {
     assert!(page.contains("body.editing #btn-open"));
     assert!(page.contains("id=\"topbar\""));
     assert!(page.contains("top: var(--bar-top); z-index: 110;"));
-    assert!(page
-        .contains("body.editing .toolbar { position: static; opacity: 1; pointer-events: auto; }"));
+    // 控件行独占一行并吸顶（预览、编辑共用），不再用 float/fixed 浮层压住正文
+    assert!(page.contains("#topbar {\n  display: flex; justify-content: space-between"));
+    assert!(page.contains(".toolbar { display: flex; gap: 6px; }"));
+    assert!(page.contains("body.empty #topbar { display: none; }"));
+    assert!(!page.contains("position: fixed; top: var(--chrome-top); right: 12px;"));
+    assert!(!page.contains(".toolbar { opacity: 0; pointer-events: none; }"));
     assert!(page.contains("body.editing .findbar { display: none !important; }"));
     assert!(page.contains("ta.focus({ preventScroll: true })"));
     assert!(page.contains("window.__setEmptyPreview"));
@@ -631,7 +635,7 @@ pub(crate) fn page_blocks_native_preview_reload_paths() {
     assert!(page.contains("#preview mark.search-hit.current"));
     assert!(page.contains("restoreFindInput(selectionStart, selectionEnd)"));
     assert!(page.contains("findInput.setSelectionRange(selectionStart, selectionEnd)"));
-    assert!(page.contains("body.empty .toolbar"));
+    assert!(page.contains("body.empty #topbar"));
     assert!(page.contains("bindAnchorNavigation"));
     assert!(page.contains("event.target.closest('#preview a[href]')"));
     assert!(page.contains("window.ipc.postMessage('open-local-link:' + resolved)"));

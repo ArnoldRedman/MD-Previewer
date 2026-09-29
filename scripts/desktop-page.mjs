@@ -33,7 +33,7 @@ export const desktopCss = await readFile(join(root, FRONTEND, 'page.css'), 'utf8
 export const appSource = `${rustSource}\n${pageHtml}\n${desktopScript}`;
 
 // 测试页样式：真实页面里侧栏宽度由 Rust 注入，测试页补固定值
-export const desktopStyle = `<style>:root { --sidebar-width: 260px; --sidebar-toggle-left: 272px; }</style>
+export const desktopStyle = `<style>:root { --sidebar-width: 260px; }</style>
 <style>
 ${desktopCss}</style>`;
 

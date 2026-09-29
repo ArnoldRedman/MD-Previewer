@@ -1,5 +1,5 @@
-:root { color-scheme: light dark; --chrome-top: 10px; --bar-top: 0px; --content-scale: 1; }
-/* Reserve scrollbar space permanently so the fixed toolbar doesn't shift
+:root { color-scheme: light dark; --bar-top: 0px; --topbar-h: 46px; --content-scale: 1; }
+/* Reserve scrollbar space permanently so the content doesn't shift
    between modes (one with scrollbar, one without). */
 html { overflow-y: scroll; scrollbar-gutter: stable; }
 body {
@@ -8,8 +8,12 @@ body {
   line-height: 1.6; font-size: 15px;
   color: #1a1a1a; background: #fff;
 }
-body.has-tabs { --chrome-top: 50px; --bar-top: 40px; }
+body.has-tabs { --bar-top: 40px; }
 #app { max-width: 820px; margin: 0 auto; padding: 24px; }
+/* 非 Markdown 文档整篇是 .mdp-plain-text（配置 / 日志 / 源码这类行导向内容），
+   不套 Markdown 的正文栏宽度：用满可用宽度，长行只在真的超出窗口时才折。
+   侧栏展开时 body 已有 padding-left 占位，max-width:none 不会顶出右边缘 */
+#app:has(#preview .mdp-plain-text) { max-width: none; }
 #preview { font-size: calc(15px * var(--content-scale)); }
 #preview .front-matter {
   margin: 0 0 1.5em;
@@ -241,15 +245,18 @@ body.has-tabs { --chrome-top: 50px; --bar-top: 40px; }
 	.missing-actions button { min-height: 36px; padding: 0 13px; border: 1px solid #d8d8d8; border-radius: 7px; background: #fff; color: #333; cursor: pointer; font: inherit; }
 	.missing-actions button:hover { background: #f4f4f4; }
 
-/* Floating toolbar (top-right) — hover-reveal, hidden in empty state */
-.toolbar {
-  position: fixed; top: var(--chrome-top); right: 12px;
-  display: flex; gap: 6px; z-index: 100;
-  opacity: 0; pointer-events: none;
-  transition: opacity 0.18s ease;
+/* 控件行：左侧侧栏按钮 + 右侧工具按钮。独占一行并吸顶，正文从它下面开始，
+   预览和编辑共用同一套；空状态（没打开文件）不占位 */
+#topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  position: sticky; top: var(--bar-top); z-index: 110;
+  box-sizing: border-box; min-height: var(--topbar-h); padding: 6px 12px;
+  border-bottom: 1px solid #e6e6e6;
+  background: rgba(248,248,248,0.96);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
 }
-html:hover .toolbar { opacity: 1; pointer-events: auto; }
-body.empty .toolbar { display: none !important; }
+body.empty #topbar { display: none; }
+.toolbar { display: flex; gap: 6px; }
 .toolbar button {
   width: 34px; height: 34px; padding: 0;
   background: rgba(255,255,255,0.8);
@@ -493,8 +500,6 @@ body.empty .toolbar { display: none !important; }
 	  padding: 7px 10px; border: 0; background: transparent; color: #888; font-size: 12px; cursor: pointer;
 	}
 	.update-btn-text:hover { color: #333; }
-	.sidebar-toggle { right: auto; left: 12px; }
-	body.sidebar-open .sidebar-toggle { left: var(--sidebar-toggle-left); opacity: 1; pointer-events: auto; }
 	.sidebar {
 	  position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-width); z-index: 105;
 	  display: none; flex-direction: column; box-sizing: border-box;
@@ -552,7 +557,7 @@ body.empty .toolbar { display: none !important; }
 	.author-copy:hover { border-color: #1a73e8; color: #1a73e8; }
 	.author-copy.done { border-color: #1a9e5c; color: #1a9e5c; }
 	.findbar {
-	  position: fixed; top: var(--chrome-top); left: 50%; transform: translateX(-50%);
+	  position: fixed; top: calc(var(--bar-top) + var(--topbar-h) + 1px); left: 50%; transform: translateX(-50%);
 	  display: none; align-items: center; gap: 6px; z-index: 101;
 	  padding: 6px; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px;
 	  background: rgba(255,255,255,0.96); box-shadow: 0 8px 24px rgba(0,0,0,0.12);
@@ -732,7 +737,7 @@ body.empty .toolbar { display: none !important; }
 	  .findbar { background: rgba(34,34,34,0.96); border-color: rgba(255,255,255,0.1); }
 	  .findbar button:hover { background: #333; color: #fff; }
 	  .tabbar { background: rgba(28,28,28,.96); border-color: #363636; }
-	  body.editing #topbar { background: rgba(28,28,28,.96); border-color: #363636; }
+	  #topbar { background: rgba(28,28,28,.96); border-color: #363636; }
 	  .tab { color: #aaa; }
 	  .tab:hover { background: rgba(255,255,255,.07); }
 	  .tab.active { color: #eee; background: #2c2c2c; border-color: #444; }
@@ -817,15 +822,6 @@ body.editing #app { max-width: none; padding: 0; }
 body.editing #btn-open,
 body.editing #btn-search,
 body.editing #btn-print { display: none; }
-/* 编辑模式：悬浮控件改为独占顶栏，不再遮挡正文源码 */
-body.editing #topbar {
-  display: flex; justify-content: space-between; align-items: center;
-  position: sticky; top: var(--bar-top); z-index: 110;
-  padding: 6px 12px; border-bottom: 1px solid #e6e6e6;
-  background: rgba(248,248,248,0.96);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-}
-body.editing .toolbar { position: static; opacity: 1; pointer-events: auto; }
 body.editing .findbar { display: none !important; }
 
 @page {

@@ -55,7 +55,10 @@
 | 模板里每个 `{{name}}` 都必须被替换成真实值 | 漏替换会让页面上出现字面量 `{{...}}`，用户直接看到 | `tests::page_template_fills_every_placeholder` |
 | `page.js` 里读的每个 `CFG.xxx`，Rust 注入的 JSON 必须有同名键 | 键名不一致前端只会静默拿到 `undefined`，功能静默失效 | `tests::page_config_covers_every_frontend_key`（会扫描 `page.js` 反查） |
 | 原始 HTML 必须过白名单消毒 | `sanitize.rs` 是安全边界；文档可能来自任何地方 | `sanitize.rs` + `tests.rs` 里的 XSS 用例 |
-| 表格必须自适应可视宽度，放不下才让表格自己横向滚 | 表格顶出可视范围会逼用户拖窗口，手机上还会把整页顶宽 | `scripts/verify-desktop-tables.mjs` + `mobile/scripts/verify-mobile-renderer.mjs` 的表格断言 || 打开文档不发任何网络请求；安卓包不声明网络权限 | 对外的隐私承诺，写在下载页和 README 里 | `mobile/scripts/verify-release-readiness.sh`（断言 APK 无 INTERNET 权限） |
+| 表格必须自适应可视宽度，放不下才让表格自己横向滚 | 表格顶出可视范围会逼用户拖窗口，手机上还会把整页顶宽 | `scripts/verify-desktop-tables.mjs` + `mobile/scripts/verify-mobile-renderer.mjs` 的表格断言 |
+| 非 Markdown 纯文本正文不套 Markdown 的 820px 正文栏，用满可用宽度 | 配置/日志/源码是行导向内容，限宽会在窗口还有空位时把一条记录折成两行 | `scripts/verify-desktop-plain-text.mjs`（Markdown 仍必须保持正文栏） |
+| 侧栏按钮和工具按钮必须独占一行占位，不能用悬浮层压住正文 | 正文用满窗口宽度时，浮层会盖住每一行开头或结尾的字 | `scripts/verify-desktop-edit-topbar.mjs` + `scripts/verify-desktop-plain-text.mjs` 的重叠断言 |
+| 打开文档不发任何网络请求；安卓包不声明网络权限 | 对外的隐私承诺，写在下载页和 README 里 | `mobile/scripts/verify-release-readiness.sh`（断言 APK 无 INTERNET 权限） |
 | 外部改动不能覆盖未保存内容；自己的写入不能触发自我重载 | 会丢用户数据 / 无限重载循环 | `document.rs` 的 `SelfWriteRecord` + `self_write_still_matches_disk` + `should_protect_external_change` |
 | 发布资产名不带版本号（`MD-Previewer-*.exe/.apk/.deb/.tar.gz`） | 下载页用 `releases/latest/download/<名>` 直链，带版本号就失效 | `scripts/verify-landing-page.mjs` 与各构建脚本交叉校验 |
 | 应用是单实例；第二次打开同一文件要转发给已有窗口 | Windows 上双击文档的常见路径 | `single_instance.rs` + `scripts/verify-windows-single-instance.ps1` |

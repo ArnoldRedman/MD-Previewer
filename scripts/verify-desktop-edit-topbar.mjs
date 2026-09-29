@@ -175,26 +175,57 @@ if (!scrolled.stickyStillTop) {
   throw new Error(`topbar did not stay pinned on scroll: ${JSON.stringify(scrolled)}`);
 }
 
-// 退出编辑模式后顶栏消失，工具栏恢复悬浮
+// 退出编辑模式后顶栏仍是独占一行（预览、编辑共用同一套），不再回到悬浮遮挡正文
 await page.evaluate(() => scrollTo(0, 0));
-await page.locator('body').hover();
 await page.locator('#btn-toggle').click();
 await page.waitForTimeout(50);
 const previewMode = await page.evaluate(() => {
   const topbar = document.getElementById('topbar');
   const toolbar = document.getElementById('btn-settings').closest('.toolbar');
+  const sidebarBtn = document.getElementById('btn-sidebar');
+  const preview = document.getElementById('preview');
+  const topbarRect = topbar.getBoundingClientRect();
+  // 正文第一行用 Range 量字形位置，和顶栏、侧栏按钮做重叠判断
+  const paragraph = preview.querySelector('p');
+  const range = document.createRange();
+  range.selectNodeContents(paragraph);
+  const firstLine = range.getClientRects()[0];
+  const sidebarRect = sidebarBtn.getBoundingClientRect();
+  const hit = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
   return {
     editing: document.body.classList.contains('editing'),
     topbarDisplay: getComputedStyle(topbar).display,
+    topbarPosition: getComputedStyle(topbar).position,
     toolbarPosition: getComputedStyle(toolbar).position,
+    topbarBottom: topbarRect.bottom,
+    firstLineTop: firstLine ? firstLine.top : null,
+    firstLineLeft: firstLine ? firstLine.left : null,
+    sidebarBtnVisible: !!sidebarBtn.offsetParent,
+    overlapsTopbar: firstLine ? hit(firstLine, topbarRect) : true,
+    overlapsSidebarBtn: firstLine ? hit(firstLine, sidebarRect) : true,
   };
 });
 if (previewMode.editing) throw new Error('did not leave editing mode');
-if (previewMode.topbarDisplay !== 'block') {
-  throw new Error(`topbar visible in preview mode: ${JSON.stringify(previewMode)}`);
+if (previewMode.topbarDisplay !== 'flex') {
+  throw new Error(`topbar not a reserved row in preview mode: ${JSON.stringify(previewMode)}`);
 }
-if (previewMode.toolbarPosition !== 'fixed') {
-  throw new Error(`toolbar not floating in preview mode: ${previewMode.toolbarPosition}`);
+if (previewMode.topbarPosition !== 'sticky') {
+  throw new Error(`topbar not sticky in preview mode: ${previewMode.topbarPosition}`);
+}
+if (previewMode.toolbarPosition !== 'static') {
+  throw new Error(`toolbar still floating in preview mode: ${previewMode.toolbarPosition}`);
+}
+if (!previewMode.sidebarBtnVisible) {
+  throw new Error('sidebar toggle hidden in preview mode');
+}
+if (previewMode.firstLineTop === null || previewMode.firstLineLeft === null) {
+  throw new Error('could not measure first preview line');
+}
+if (previewMode.firstLineTop < previewMode.topbarBottom - 1) {
+  throw new Error(`topbar covers first preview line: ${JSON.stringify(previewMode)}`);
+}
+if (previewMode.overlapsTopbar || previewMode.overlapsSidebarBtn) {
+  throw new Error(`preview chrome covers body text: ${JSON.stringify(previewMode)}`);
 }
 
 await browser.close();
