@@ -2,7 +2,7 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
-## Unreleased
+## 1.5.1
 
 - **文件关联只保留一个入口 (Single Open With Entry)**:
   - 右键属性 →「更改默认打开方式」里以前会堆出好几行同名 MD Previewer：Applications 的注册项早期跟着当前运行的 exe 文件名走，安装版、免安装版、开发构建各算一个应用；Windows 又把每个用过的 exe 名记进 `FileExts\<ext>\OpenWithList`，两边都从不清理，卸载也带不走。
