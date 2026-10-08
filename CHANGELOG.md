@@ -9,6 +9,7 @@ This file tracks MD Previewer releases. The upstream MD Preview history remains 
   - 拖到最窄时，三个分区标签会折行并自己撑高按钮，不再从写死的 28px 框里溢出去。
   - 拖拽条能 Tab 聚焦：←/→ 微调 16px（按住 Shift 64px）、双击回到默认宽度，并带 separator 的 aria 数值供读屏播报。
   - 侧栏开合有了快捷键 **Ctrl+B**（原来只能点工具条上的按钮），进了设置面板的快捷键页，可单独或随“禁用全部快捷键”一起关掉；拖拽条移到侧栏 DOM 最前，Tab 不再隔着整个文件/大纲列表。
+  - Ctrl+B 展开侧栏后焦点直接落在拖拽条上，接着按 ←/→ 就能调宽度，不用先去 Tab 顺序里找它；正在输入框里打字时不动焦点。
   - 配置文件被手工改成越界值时按区间夹回：读取、拖动、回显三处都夹，坏值不会把窗口拉到屏幕外（`resize_for_sidebar` 按这个宽度加减窗口）。
 - **取词高亮 (Word Highlight)**:
   - 双击正文里的一个词，或自己拖拽选中三五个字，同一个词在文中其它出现位置会一起标成绿色（Notepad++ 的 smart highlight），长文里不必再反复搜索确认；点别处 / 按 Esc / 切文档即清除。

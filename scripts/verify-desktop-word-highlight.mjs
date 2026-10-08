@@ -349,6 +349,46 @@ try {
       reOpened.open && reOpened.message === 'set-setting:sidebar=1',
       JSON.stringify(reOpened),
     );
+    // Ctrl+B 展开后焦点直接落到拖拽条，接着按方向键就该能调宽度（不用先 Tab）
+    await page.evaluate(() => window.__setSettings({ sidebarOpen: false, sidebarWidth: 300 }));
+    await page.keyboard.press('Control+b');
+    const focusedAfterOpen = await page.evaluate(() => ({
+      open: document.body.classList.contains('sidebar-open'),
+      focused: document.activeElement.id,
+      width: Math.round(document.getElementById('sidebar').getBoundingClientRect().width),
+    }));
+    check(
+      'Ctrl+B 展开侧栏后焦点落在拖拽条上',
+      focusedAfterOpen.open && focusedAfterOpen.focused === 'sidebar-resizer' && focusedAfterOpen.width === 300,
+      JSON.stringify(focusedAfterOpen),
+    );
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    check(
+      '紧接着按方向键就能调宽',
+      (await sidebarWidth(page)) === 332,
+      `宽度=${await sidebarWidth(page)}`,
+    );
+
+    // 在编辑框里打字时 Ctrl+B 不该把光标抢走
+    await page.evaluate(() => {
+      window.__setSettings({ sidebarOpen: false });
+      document.body.classList.add('editing');
+      const editor = document.getElementById('editor');
+      editor.value = 'typing';
+      editor.focus();
+    });
+    await page.keyboard.press('Control+b');
+    const whileTyping = await page.evaluate(() => ({
+      open: document.body.classList.contains('sidebar-open'),
+      focused: document.activeElement.id,
+    }));
+    check(
+      '编辑框里按 Ctrl+B 展开但不抢焦点',
+      whileTyping.open && whileTyping.focused === 'editor',
+      JSON.stringify(whileTyping),
+    );
+
     // 关闭全部快捷键后 Ctrl+B 不应再有任何作用
     await page.evaluate(() =>
       window.__setSettings({ sidebarOpen: true, disableAllShortcuts: true }),

@@ -1460,7 +1460,13 @@
 	    if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
 	      if (!isShortcutEnabled('toggle-sidebar')) return;
 	      e.preventDefault();
+	      var wasOpen = document.body.classList.contains('sidebar-open');
 	      toggleSidebar();
+	      // 刚展开时把焦点直接放到拖拽条上，接着按 ←/→ 就能调宽度，不用先去 Tab 顺序里找它。
+	      // 正在输入框里打字时不动焦点，免得把光标挪走
+	      var active = document.activeElement;
+	      var typing = active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT');
+	      if (!wasOpen && !typing && sidebarResizer) sidebarResizer.focus();
 	      return;
 	    }
 	    if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
