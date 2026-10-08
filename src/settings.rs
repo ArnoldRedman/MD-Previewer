@@ -106,10 +106,14 @@ impl Default for Settings {
 impl Settings {
     /// 读不到或解析失败都退回默认值：偏好文件损坏不该让应用起不来
     pub fn load(path: &Path) -> Self {
-        fs::read(path)
+        let mut settings: Self = fs::read(path)
             .ok()
             .and_then(|raw| serde_json::from_slice(&raw).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // settings.json 是外部输入，可以被手工改坏：宽度越界会让开合侧栏时
+        // 按这个宽度加减窗口，把窗口拉到屏幕外。读取时就夹回可用区间
+        settings.sidebar_width = clamp_sidebar_width(settings.sidebar_width);
+        settings
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
@@ -372,6 +376,29 @@ mod tests {
         assert!(settings.disabled_shortcuts.is_empty());
         assert!(!settings.disable_all_shortcuts);
         assert!(!settings.apply("reset-shortcuts", ""));
+    }
+
+    #[test]
+    fn hand_edited_width_is_clamped_on_load() {
+        // settings.json 是外部输入，能被手工改坏；越界宽度会让开合侧栏时
+        // 按这个值加减窗口尺寸，所以读取时就夹回可用区间
+        let dir = std::env::temp_dir().join(format!(
+            "md-previewer-sidebar-width-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+
+        fs::write(&path, "{\"sidebarWidth\": 100000}").unwrap();
+        assert_eq!(Settings::load(&path).sidebar_width, SIDEBAR_WIDTH_MAX);
+        fs::write(&path, "{\"sidebarWidth\": 0}").unwrap();
+        assert_eq!(Settings::load(&path).sidebar_width, SIDEBAR_WIDTH_MIN);
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
