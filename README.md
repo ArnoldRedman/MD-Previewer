@@ -107,6 +107,8 @@ npm run lint    # static checks for the WebView and mobile scripts
 
 `./scripts/verify.sh` runs that lint step when `node_modules/.bin/eslint` exists, and runs the Playwright checks when Playwright is importable.
 
+To check features by hand: open [`samples/manual-check.md`](samples/manual-check.md) in the app. It lists the steps and the expected result for each interaction.
+
 ## Privacy and security
 
 MD Previewer has no accounts, telemetry, analytics, or background update requests. Web links open only after user interaction; Markdown, diagrams, formulas, and code highlighting render locally. Documents can still reference remote images or other web resources, which the system WebView may request when rendering them.

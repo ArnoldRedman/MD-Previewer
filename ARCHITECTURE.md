@@ -85,6 +85,10 @@
 **加检查的规矩**：能用脚本断言的就别靠人自觉。前端行为加 `scripts/verify-*.mjs`（用 `scripts/desktop-page.mjs`
 读资源和源码，别各自解析 `src/main.rs`），Rust 不变量加 `src/tests.rs` 用例，然后挂进 `verify.sh`。
 
+**脚本盖不到的观感**：`samples/manual-check.md` 是给应用打开的手动验收清单（重复词、公式、
+Mermaid、8 列宽表、多级标题都在里面，兼做渲染压力样例）。它和 `scripts/verify-*.mjs` 一样
+属于待维护的验收资产：改交互或渲染后，两边都要同步更新。
+
 **改渲染输出的安全做法**：改 `page.rs`/`frontend/` 前先存一份渲染结果当基准，改完逐字节对比，
 确认差异只有你预期的那几处。这套做法在模板外置重构时用过，抓出过两个真问题。
 

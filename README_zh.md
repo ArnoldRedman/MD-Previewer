@@ -107,6 +107,8 @@ npm run lint    # 检查 WebView 与手机端脚本
 
 `./scripts/verify.sh` 会在 `node_modules/.bin/eslint` 存在时跑 lint，在 Playwright 可用时跑浏览器验证。
 
+动手验功能：用应用打开 [`samples/manual-check.md`](samples/manual-check.md)，里面按功能列了操作步骤和期望结果。
+
 ## 隐私与安全
 
 MD Previewer 没有账号、遥测、分析统计或后台更新请求。网页链接只在用户主动点击后交给系统打开；Markdown、图表、公式和代码高亮都在本机渲染。文档仍可能引用远程图片或其他网络资源，系统 WebView 在渲染时可能请求这些资源。

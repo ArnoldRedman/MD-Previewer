@@ -359,6 +359,28 @@ pub(crate) fn release_notes_render_with_document_renderer() {
 }
 
 #[test]
+pub(crate) fn manual_check_sample_still_exercises_what_it_claims() {
+    // samples/manual-check.md 是给人手动过功能用的样例，同时兼做渲染压力样例。
+    // 它容易被当成普通文档改掉，这里钉住它必须盖住的东西
+    let md = include_str!("../samples/manual-check.md");
+    let flags = enhance_flags_for(md);
+    assert!(flags.math, "样例里要保留行内和块级公式");
+    assert!(flags.mermaid, "样例里要保留 mermaid 代码块");
+
+    let html = md_to_html(md);
+    // 取词那段靠同一个词在一条文本里出现多次，删了就测不出"其它出现位置"
+    assert!(
+        html.matches("sidebarWidth").count() >= 4,
+        "样例要保持 sidebarWidth 至少 4 次出现"
+    );
+    assert!(html.contains("<table>"), "样例要保留宽表");
+    assert!(html.contains("mdp-mark"), "样例要保留 ==高亮== 语法");
+    assert!(
+        html.contains("class=\"mermaid\"") || html.contains("<code class=\"language-mermaid\"")
+    );
+}
+
+#[test]
 pub(crate) fn author_doc_skips_hashes_that_are_not_headings() {
     let doc = author_doc("#不是标题，井号后面没空格\n\n## 第一章 开始\n\n正文");
 
