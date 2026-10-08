@@ -2,7 +2,7 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
-## Unreleased
+## 1.5.2
 
 - **侧栏宽度可拖动 (Resizable Sidebar)**:
   - 侧栏右缘可以按住拖动改宽度（180–560px），松手记住跨启动；开合侧栏时窗口按实际宽度增减，正文可视宽度不再跟着宽度设置跳变。
