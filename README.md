@@ -28,7 +28,7 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 - Side-by-side split view: source editor on the left, live preview on the right, with a clean Rider-style divider line and centered split button.
 - Keeps multiple documents in tabs and restores the previous session; opening another file from Windows Explorer reuses the running window.
 - Tab context menu: close other tabs, copy path, and reveal the file in Explorer or Finder.
-- Offers a collapsible left sidebar listing the current document's folder, recent files, and a Table of Contents (TOC Outline) for quick anchor navigation.
+- Offers a collapsible left sidebar listing the current document's folder, recent files, and a Table of Contents (TOC Outline) for quick anchor navigation; drag its right edge to resize (180–560px), and the width is remembered across launches.
 - One-click copy buttons on code blocks across desktop and mobile previews.
 - Image lightbox viewer with click-to-zoom, mouse drag panning, and zoom controls.
 - Settings panel for appearance (System / Light / Dark), window reuse, tab accumulation mode, word wrap toggle, and manual check for updates.
@@ -36,7 +36,7 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 - Includes an author mode that adds copy buttons for the chapter heading line, the title without its chapter number, and the whole body.
 - Reloads previews when another editor changes the file.
 - Supports tables, task lists, syntax highlighting, GitHub alerts, KaTeX, Mermaid, local images, and local document links.
-- Includes preview search, content zoom, print, source editing, and reliable autosave.
+- Includes preview search, word highlighting (select or double-click a word and every other occurrence is marked), content zoom, print, source editing, and reliable autosave.
 - Uses native iOS and Android shells for read-only mobile previews.
 
 All rendering assets are bundled locally. Automatic update checks are routed through GitHub Releases.

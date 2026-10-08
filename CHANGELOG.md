@@ -2,6 +2,20 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## Unreleased
+
+- **侧栏宽度可拖动 (Resizable Sidebar)**:
+  - 侧栏右缘可以按住拖动改宽度（180–560px），松手记住跨启动；开合侧栏时窗口按实际宽度增减，正文可视宽度不再跟着宽度设置跳变。
+  - 拖到最窄时，三个分区标签会折行并自己撑高按钮，不再从写死的 28px 框里溢出去。
+  - 配置文件被手工改成越界值时按区间夹回，坏值不会把正文挤没。
+- **取词高亮 (Word Highlight)**:
+  - 双击正文里的一个词，或自己拖拽选中三五个字，同一个词在文中其它出现位置会一起标成绿色（Notepad++ 的 smart highlight），长文里不必再反复搜索确认；点别处 / 按 Esc / 切文档即清除。
+  - 自己划的那段保留原生选中色，只标别处的出现；改写标记后把选区按字符位置放回，选区不会因重新切分文本节点而消失，Ctrl+C 也只拿到那个词、不带多余空格。
+  - 公式、图表、搜索结果标记内部不会被改写，清除后正文 HTML 与取词前逐字节一致。
+  - 显式定义选中底色（`::selection`）：选中底色在浅色、深色主题下都有明确颜色，不再依赖 WebView 默认值。
+- **安装包体积从 6.2MB 降到约 3.5MB (Smaller Binary)**:
+  - Mermaid / KaTeX / highlight.js 三份前端资源以前按原文内嵌，合计约 3.7MB，占 exe 一半以上；现在由 `build.rs` 压缩后再内嵌，真正用到时解压一次。仓库里仍然只保留未压缩原文，不提交压缩产物，也就不会出现两份不同步的资源。
+
 ## 1.5.1
 
 - **文件关联只保留一个入口 (Single Open With Entry)**:

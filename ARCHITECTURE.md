@@ -18,7 +18,7 @@
 │  sanitize.rs    HTML 白名单消毒（安全边界）                                      │
 │  escape.rs      HTML/JS 转义                                                     │
 │  page.rs        把模板 + 文案 + 正文拼成一份完整 HTML                            │
-│  assets.rs      include_str! 内嵌前端资源与模板                                  │
+│  assets.rs      内嵌前端资源与模板（Mermaid/KaTeX/hljs 存的是 build.rs 压过的 gzip）                                  │
 │  其余            paths / sidebar / ipc / window / theme / i18n / platform /      │
 │                  finder / macos_menu / updater / watch / webview                 │
 │  tests.rs       1286 行单元测试，93 个用例                                       │
@@ -64,6 +64,7 @@
 | 发布资产名不带版本号（`MD-Previewer-*.exe/.apk/.deb/.tar.gz`） | 下载页用 `releases/latest/download/<名>` 直链，带版本号就失效 | `scripts/verify-landing-page.mjs` 与各构建脚本交叉校验 |
 | 应用是单实例；第二次打开同一文件要转发给已有窗口 | Windows 上双击文档的常见路径 | `single_instance.rs` + `scripts/verify-windows-single-instance.ps1` |
 | 首屏 HTML 不带文档正文，正文一律等页面就绪后走 `__setContent` 推入 | WebView2 的 `NavigateToString` 上限 2MiB，超了连 webview 都建不出来，双击大文档直接闪退 | `tests::startup_page_stays_small_even_for_a_huge_document` + `scripts/verify-windows-large-document-startup.ps1` |
+| 体积大的前端资源（Mermaid/KaTeX/hljs）必须压缩后再内嵌 | 三份原文合计约 3.7MB，直接 `include_str!` 会把 exe 顶到 6MB 以上 | `build.rs` 的 `GZIP_ASSETS` + `tests::gzipped_assets_inflate_back_to_the_originals`（解压结果必须与仓库原文逐字节一致） |
 
 ---
 
@@ -75,9 +76,9 @@
 |---|---|---|
 | 身份标记 | 品牌隔离：名称/包名/配置目录标识齐全，且上游更新通道的残留文件不存在 | 必跑，缺了直接失败 |
 | `bash -n` | shell 语法 | 必跑 |
-| `cargo fmt/check/test` | Rust 格式、编译、98 个单测 | 必跑 |
+| `cargo fmt/check/test` | Rust 格式、编译、106 个单测 | 必跑 |
 | ESLint | `frontend/`、`mobile/shared/`、验证脚本 | 没有 `node_modules/.bin/eslint` 时跳过 |
-| 9 个 Playwright 检查 | 前端行为：目录跳转、搜索、阅读工具、编辑顶栏、UX、自动更新、编码转换、落地页、手机渲染层 | Playwright 不可用时跳过 |
+| 12 个 Playwright 检查 | 前端行为：目录跳转、搜索、取词高亮与侧栏拖拽、阅读工具、表格、纯文本、编辑顶栏、UX、自动更新、编码转换、落地页、快捷键设置、手机渲染层 | Playwright 不可用时跳过 |
 | Android 构建 | `:app:assembleDebug`（走 wrapper） | 没有 SDK 位置时跳过 |
 | iOS 构建 | xcodegen + xcodebuild | 非 macOS 跳过 |
 
