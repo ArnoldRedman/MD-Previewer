@@ -151,5 +151,36 @@ if (plainResult.hitCount !== 2 || !plainResult.inPlainText) {
   throw new Error(`desktop search on plain text failed: ${JSON.stringify(plainResult)}`);
 }
 
+// 命中数上限：大文档里搜常见词不能一次造出几万个 mark 节点
+const ROWS = 2100;
+await page.evaluate((rows) => {
+  const parts = [];
+  for (let i = 0; i < rows; i += 1) parts.push('<p>target payload</p>');
+  parts.push('<p>unique needle</p>');
+  window.__setContent(parts.join(''), 'target payload', '', false, false);
+}, ROWS);
+await page.locator('#btn-search').click();
+await page.locator('#find-input').fill('target');
+await page.waitForFunction(() => document.querySelectorAll('#preview mark.search-hit').length > 1000);
+const capped = await page.evaluate(() => ({
+  hitCount: document.querySelectorAll('#preview mark.search-hit').length,
+  state: document.getElementById('find-state').textContent,
+  targetCount: document.getElementById('preview').textContent.split('target').length - 1,
+}));
+if (capped.hitCount !== 2000 || capped.state !== '1/2000+' || capped.targetCount !== 2100) {
+  throw new Error(`desktop search hit cap failed: ${JSON.stringify(capped)}`);
+}
+
+// 换成命中很少的词，计数要回到精确值（上一轮的截断标记不能留着）
+await page.locator('#find-input').fill('needle');
+await page.waitForFunction(() => document.getElementById('find-state').textContent === '1/1');
+const afterCap = await page.evaluate(() => ({
+  hitCount: document.querySelectorAll('#preview mark.search-hit').length,
+  state: document.getElementById('find-state').textContent,
+}));
+if (afterCap.hitCount !== 1 || afterCap.state !== '1/1') {
+  throw new Error(`desktop search after cap failed: ${JSON.stringify(afterCap)}`);
+}
+
 await browser.close();
 console.log('[desktop-search-verify] OK');

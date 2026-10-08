@@ -99,7 +99,11 @@
 	  var composingFind = false;
 	  var pendingFindTimer = 0;
 	  var FIND_DEBOUNCE_MS = 300;
+	  // 每个命中都是一个真实 DOM 节点，大文档里搜一个常见字母能造出几万个，
+	  // 界面会卡住好几秒。超过上限就停下，计数上标个 + 说明后面还有
+	  var MAX_FIND_HITS = 2000;
 	  var findHits = [];
+	  var findHitsTruncated = false;
 	  var currentFindHit = -1;
 	  var lastFindQuery = '';
 	  var STAT_WORDS = CFG.statWordsJs;
@@ -308,7 +312,8 @@
 	    if (sel && sel.removeAllRanges) sel.removeAllRanges();
 	  }
 	  function updateFindState() {
-	    findState.textContent = findHits.length ? (currentFindHit + 1) + '/' + findHits.length : '';
+	    var total = findHits.length ? findHits.length + (findHitsTruncated ? '+' : '') : '';
+	    findState.textContent = findHits.length ? (currentFindHit + 1) + '/' + total : '';
 	  }
 	  function clearFindHits() {
 	    findHits.forEach(function(mark) {
@@ -318,6 +323,7 @@
 	      parent.normalize();
 	    });
 	    findHits = [];
+	    findHitsTruncated = false;
 	    currentFindHit = -1;
 	    lastFindQuery = '';
 	    updateFindState();
@@ -376,13 +382,19 @@
 	    });
 	    var nodes = [];
 	    while (walker.nextNode()) nodes.push(walker.currentNode);
+	    var truncated = false;
 	    nodes.forEach(function(node) {
+	      if (truncated) return;
 	      var text = node.nodeValue;
 	      var lower = text.toLowerCase();
 	      var fragment = document.createDocumentFragment();
 	      var start = 0;
 	      var index;
 	      while ((index = lower.indexOf(needle, start)) >= 0) {
+	        if (findHits.length >= MAX_FIND_HITS) {
+	          truncated = true;
+	          break;
+	        }
 	        if (index > start) fragment.appendChild(document.createTextNode(text.slice(start, index)));
 	        var mark = document.createElement('mark');
 	        mark.className = 'search-hit';
@@ -394,6 +406,7 @@
 	      if (start < text.length) fragment.appendChild(document.createTextNode(text.slice(start)));
 	      node.parentNode.replaceChild(fragment, node);
 	    });
+	    findHitsTruncated = truncated;
 	    selectFindHit(0);
 	  }
 	  function runFind(backward) {
