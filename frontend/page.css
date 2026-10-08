@@ -521,6 +521,8 @@ body.empty #topbar { display: none; }
 	  cursor: col-resize; background: transparent; transition: background 0.15s ease;
 	}
 	.sidebar-resizer:hover, .sidebar-resizer.dragging { background: rgba(0,0,0,.14); }
+	/* 键盘聚焦时也要看得见：拖拽条只有 6px 宽，用内收的描边避免被侧栏边缘截掉 */
+	.sidebar-resizer:focus-visible { background: rgba(0,0,0,.14); outline: 2px solid #1a73e8; outline-offset: -2px; }
 	/* 拖动中全局固定指针形状并禁掉文本划选，否则会一路选中底下的侧栏条目 */
 	body.sidebar-resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
 	.sidebar-sections { display: flex; gap: 4px; padding: 48px 8px 8px; }
@@ -656,6 +658,7 @@ body.empty #topbar { display: none; }
 	  ::selection { background: #2f5f9e; }
 	  #preview mark.mdp-word-hit { background: #2f4a2f; }
 	  .sidebar-resizer:hover, .sidebar-resizer.dragging { background: rgba(255,255,255,.2); }
+	  .sidebar-resizer:focus-visible { background: rgba(255,255,255,.2); }
 	  #preview a { color: #6cb6ff; }
 	  #preview h1, #preview h2 { border-color: #333; }
 	  #preview .front-matter { border-color: #333; color: #a9b1ba; }

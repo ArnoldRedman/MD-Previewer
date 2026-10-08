@@ -160,6 +160,7 @@ pub(crate) fn build_page_with_encoding(
         ("sidebar_folder", s.sidebar_folder.to_string()),
         ("sidebar_recent", s.sidebar_recent.to_string()),
         ("sidebar_outline", s.sidebar_outline.to_string()),
+        ("sidebar_resizer", s.sidebar_resizer.to_string()),
         ("recent_clear_all", s.recent_clear_all.to_string()),
         ("btn_open", s.btn_open.to_string()),
         ("btn_search", s.btn_search.to_string()),

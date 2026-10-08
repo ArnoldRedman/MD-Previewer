@@ -78,7 +78,7 @@ async function buildPage(browser) {
       </div>
       <div id="sidebar-list"></div>
       <div class="sidebar-footer" id="sidebar-footer" style="display:none;"></div>
-      <div class="sidebar-resizer" id="sidebar-resizer" role="separator"></div>
+      <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" tabindex="0"></div>
     </aside>
     <div class="findbar">
       <input id="find-input">
@@ -267,6 +267,61 @@ try {
     );
     await page.evaluate(() => window.__setSettings({ sidebarOpen: true, sidebarWidth: 320 }));
     check('设置回显生效', (await sidebarWidth(page)) === 320);
+
+    // 键盘入口：拖拽条能 Tab 聚焦，方向键微调（Shift 加大步长），双击回默认宽度
+    await page.evaluate(() => window.__setSettings({ sidebarOpen: true, sidebarWidth: 300 }));
+    await page.locator('#sidebar-resizer').focus();
+    const aria = await page.evaluate(() => {
+      const handle = document.getElementById('sidebar-resizer');
+      return {
+        focusedId: document.activeElement.id,
+        role: handle.getAttribute('role'),
+        min: handle.getAttribute('aria-valuemin'),
+        max: handle.getAttribute('aria-valuemax'),
+        now: handle.getAttribute('aria-valuenow'),
+        label: handle.getAttribute('aria-label'),
+      };
+    });
+    check(
+      '拖拽条是可聚焦的 separator 且带无障碍属性',
+      aria.focusedId === 'sidebar-resizer' &&
+        aria.role === 'separator' &&
+        aria.min === String(SIDEBAR_MIN_W) &&
+        aria.max === String(SIDEBAR_MAX_W) &&
+        aria.now === '300' &&
+        !!aria.label,
+      JSON.stringify(aria),
+    );
+
+    await page.keyboard.press('ArrowLeft');
+    check('左方向键减 16px', (await sidebarWidth(page)) === 284, `宽度=${await sidebarWidth(page)}`);
+    await page.keyboard.press('Shift+ArrowRight');
+    check('Shift+右方向键加 64px', (await sidebarWidth(page)) === 348, `宽度=${await sidebarWidth(page)}`);
+    const nudged = await page.evaluate(() => ({
+      now: document.getElementById('sidebar-resizer').getAttribute('aria-valuenow'),
+      message: window.__messages[window.__messages.length - 1],
+    }));
+    check('读屏播报的宽度跟着变', nudged.now === '348', JSON.stringify(nudged.now));
+    check(
+      '键盘微调同样落盘',
+      nudged.message === 'set-setting:sidebar-width=348',
+      JSON.stringify(nudged.message),
+    );
+
+    // 一直往左按不能越过最小值
+    for (let i = 0; i < 20; i += 1) await page.keyboard.press('Shift+ArrowLeft');
+    check(
+      `连续左方向键收在 ${SIDEBAR_MIN_W}px`,
+      (await sidebarWidth(page)) === SIDEBAR_MIN_W,
+      `宽度=${await sidebarWidth(page)}`,
+    );
+
+    await page.dblclick('#sidebar-resizer');
+    check(
+      '双击拖拽条恢复默认宽度',
+      (await sidebarWidth(page)) === DEFAULT_SIDEBAR_W,
+      `宽度=${await sidebarWidth(page)}`,
+    );
     await page.close();
   }
 

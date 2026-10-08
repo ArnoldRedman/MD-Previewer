@@ -757,14 +757,27 @@
 	  // 松手才把结果报给 Rust 落盘；这里的范围只为拖动手感，权威范围在 window.rs
 	  var SIDEBAR_MIN_W = 180;
 	  var SIDEBAR_MAX_W = 560;
+	  // 默认宽度不在前端写第二份：直接取页面初始的 --sidebar-width
+	  var SIDEBAR_DEFAULT_W = parseFloat(
+	    getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width'),
+	  );
 	  function applySidebarWidth(px) {
 	    var width = Math.round(Number(px));
 	    if (!isFinite(width)) return;
 	    width = Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, width));
 	    document.documentElement.style.setProperty('--sidebar-width', width + 'px');
+	    // 拖拽条是可聚焦的 separator，读屏靠 valuenow 播报当前宽度
+	    if (sidebarResizer) sidebarResizer.setAttribute('aria-valuenow', width);
+	  }
+	  function reportSidebarWidth() {
+	    window.ipc.postMessage(
+	      'set-setting:sidebar-width=' + Math.round(sidebarEl.getBoundingClientRect().width),
+	    );
 	  }
 	  var sidebarResizer = document.getElementById('sidebar-resizer');
 	  if (sidebarResizer) {
+	    sidebarResizer.setAttribute('aria-valuemin', SIDEBAR_MIN_W);
+	    sidebarResizer.setAttribute('aria-valuemax', SIDEBAR_MAX_W);
 	    sidebarResizer.addEventListener('mousedown', function(e) {
 	      if (e.button !== 0) return;
 	      e.preventDefault();
@@ -776,10 +789,23 @@
 	        window.removeEventListener('mouseup', onUp);
 	        sidebarResizer.classList.remove('dragging');
 	        document.body.classList.remove('sidebar-resizing');
-	        window.ipc.postMessage('set-setting:sidebar-width=' + Math.round(sidebarEl.getBoundingClientRect().width));
+	        reportSidebarWidth();
 	      }
 	      window.addEventListener('mousemove', onMove);
 	      window.addEventListener('mouseup', onUp);
+	    });
+	    // 键盘入口：拖拽条能 Tab 聚焦，方向键微调（Shift 加大步长），双击回默认宽度
+	    sidebarResizer.addEventListener('keydown', function(e) {
+	      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+	      e.preventDefault();
+	      var step = e.shiftKey ? 64 : 16;
+	      var current = sidebarEl.getBoundingClientRect().width;
+	      applySidebarWidth(current + (e.key === 'ArrowLeft' ? -step : step));
+	      reportSidebarWidth();
+	    });
+	    sidebarResizer.addEventListener('dblclick', function() {
+	      applySidebarWidth(SIDEBAR_DEFAULT_W);
+	      reportSidebarWidth();
 	    });
 	  }
 	  window.__setSidebar = function(data) {
