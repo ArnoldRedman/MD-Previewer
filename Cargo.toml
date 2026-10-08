@@ -24,6 +24,11 @@ sys-locale = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
+# 内嵌的前端资源按 gzip 存放，运行时解压一次（见 build.rs / assets.rs）
+flate2 = "1"
+
+[build-dependencies]
+flate2 = "1"
 
 [target.'cfg(windows)'.dependencies]
 ureq = { version = "3", default-features = false, features = ["native-tls"] }

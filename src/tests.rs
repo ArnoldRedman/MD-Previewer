@@ -329,6 +329,24 @@ pub(crate) fn document_to_html_disables_enhancers_for_txt() {
 }
 
 #[test]
+pub(crate) fn gzipped_assets_inflate_back_to_the_originals() {
+    // 三个大资源由 build.rs 压成 gzip 再内嵌，exe 里存的是压缩体；
+    // 解压结果必须和仓库里的原文逐字节一致，否则页面会拿到半截脚本
+    assert_eq!(
+        crate::assets::hljs_js(),
+        include_str!("../assets/hljs/highlight.min.js")
+    );
+    assert_eq!(
+        crate::assets::katex_js(),
+        include_str!("../assets/katex/katex.min.js")
+    );
+    assert_eq!(
+        crate::assets::mermaid_js(),
+        include_str!("../assets/mermaid/mermaid.min.js")
+    );
+}
+
+#[test]
 pub(crate) fn release_notes_render_with_document_renderer() {
     // 更新弹窗的发布说明走 md_to_html：加粗、行内代码要变成标签；
     // 标题会带 id，前端负责去掉，避免与正文锚点重名

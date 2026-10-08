@@ -32,7 +32,7 @@ mod window;
 mod tests;
 
 use crate::app::App;
-use crate::assets::{HLJS_EXTRA_LANGS, HLJS_JS};
+use crate::assets::{hljs_js, HLJS_EXTRA_LANGS};
 use crate::finder::register_finder_extension;
 use crate::i18n::{detect_lang, Strings};
 use crate::macos_menu::install_macos_menu;
@@ -298,7 +298,7 @@ fn main() {
     // path so the app window shows content faster on cold start.
     let hljs_bootstrap = format!(
         "(function(){{{hljs_js};{hljs_extra};try{{window.hljs=hljs;}}catch(e){{}}if(typeof hljs!=='undefined'&&hljs.highlightAll){{hljs.highlightAll();}}}})();",
-        hljs_js = HLJS_JS,
+        hljs_js = hljs_js(),
         hljs_extra = HLJS_EXTRA_LANGS,
     );
 

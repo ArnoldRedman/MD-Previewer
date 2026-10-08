@@ -1,5 +1,5 @@
 // Markdown 渲染：正文转 HTML、标题锚点、增强特性探测
-use crate::assets::{KATEX_CSS, KATEX_JS, MERMAID_JS};
+use crate::assets::{katex_js, mermaid_js, KATEX_CSS};
 use crate::escape::{escape_js, html_escape_text};
 use crate::sanitize::sanitize_raw_html;
 use pulldown_cmark::Event as MdEvent;
@@ -482,7 +482,7 @@ pub(crate) fn build_enhancer_bootstrap(flags: EnhanceFlags, loaded: EnhanceFlags
     let mut scripts = Vec::new();
     if flags.math && !loaded.math {
         let mut js = String::from("(function(){\nif(!window.katex){\n");
-        js.push_str(KATEX_JS);
+        js.push_str(katex_js());
         js.push_str("\n;try{window.katex=katex;}catch(e){}\n}\n");
         js.push_str("if(window.__setKatexCss)window.__setKatexCss('");
         js.push_str(&escape_js(KATEX_CSS));
@@ -492,8 +492,9 @@ pub(crate) fn build_enhancer_bootstrap(flags: EnhanceFlags, loaded: EnhanceFlags
     if flags.mermaid && !loaded.mermaid {
         // Mermaid's standalone bundle expects global script scope. Keep it
         // out of the function wrapper that is safe for KaTeX/highlight.js.
-        let mut js = String::with_capacity(MERMAID_JS.len() + 80);
-        js.push_str(MERMAID_JS);
+        let mermaid = mermaid_js();
+        let mut js = String::with_capacity(mermaid.len() + 80);
+        js.push_str(mermaid);
         js.push_str("\n;try{window.mermaid=mermaid;}catch(e){}\n");
         scripts.push(js);
     }
