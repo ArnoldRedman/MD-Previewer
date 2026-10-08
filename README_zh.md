@@ -5,7 +5,7 @@
 [![CI](https://github.com/ArnoldRedman/md-preview/actions/workflows/ci.yml/badge.svg)](https://github.com/ArnoldRedman/md-preview/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-MD Previewer 是一个体积小、本地优先的 Markdown 阅读器和快速编辑器，桌面端使用 Rust 与系统 WebView，不内置 Chromium，也不依赖 Electron。
+MD Previewer 是一个体积小、本地优先的 Markdown 阅读器和快速编辑器，桌面端使用 Rust 与系统 WebView，不内置 Chromium，也不依赖 Electron —— 免安装版约 3.5 MB、安装包约 2.3 MB。
 
 ![MD Previewer 图标](docs/icon.png)
 
@@ -23,25 +23,28 @@ MD Previewer 是一个体积小、本地优先的 Markdown 阅读器和快速编
 ## 当前功能
 
 - 从命令行、文件选择器、拖放或系统文件关联打开 Markdown 与任意文本文件（`.txt`、`.json`、`.toml`、`.yaml`、`.log`、源码、无扩展名文件等），二进制文件会被拒绝
-- 非 Markdown 文件按纯文本排版：等宽字体，完整保留换行与缩进，安全字符转义，不发生 Markdown 语法冲突
+- 非 Markdown 文件按纯文本排版：等宽字体，完整保留换行与缩进，安全字符转义，不发生 Markdown 语法冲突；打开模式按文件类型决定，`.md` 默认进预览、其他文本默认进源码编辑，可在设置里改回来
 - 文档编码识别、转码与另存为：右上角实时显示编码，支持按 UTF-8、UTF-8 BOM、GBK/ANSI、UTF-16 LE、UTF-16 BE 重新打开以纠正乱码，也能把文件原地转换为任一编码（会丢字符时先确认），Ctrl/Cmd+Shift+S 另存为
 - 双栏实时预览：左侧源码编辑、右侧实时渲染，配备 Rider 风格竖向清晰分界线与精准居中切换按钮
 - 多文档标签与会话恢复；在 Windows 资源管理器中再次打开文件会复用现有窗口
 - 标签右键快捷菜单：关闭其他标签、一键复制文件绝对路径、在系统文件管理器中快速定位
-- 可折叠的左侧栏：包含所在目录文件列表、最近打开历史，以及全新大纲目录（TOC Outline）与锚点跳转；右缘可拖动调整宽度（180–560px），宽度跨启动记住
+- 可折叠的左侧栏：包含所在目录文件列表、最近打开历史，以及全新大纲目录（TOC Outline）与锚点跳转；右缘可拖动调整宽度（180–560px，`Ctrl/Cmd+B` 开合），宽度跨启动记住
 - 代码块一键复制按钮（桌面与移动端均已原生适配）
 - 图片点击灯箱（Lightbox）放大查看，支持缩放控制与鼠标拖拽平移
-- 工具栏齿轮设置面板：支持外观主题切换（跟随系统 / 浅色 / 深色）、窗口复用偏好、标签累计模式、代码块/正文软换行（Word Wrap）开关以及手动检查更新
+- 工具栏齿轮设置面板：支持外观主题切换（跟随系统 / 浅色 / 深色）、窗口复用偏好、标签累计模式、代码块/正文软换行（Word Wrap）开关、快捷键逐条启用禁用、运行日志查看与清理，以及手动检查更新
 - 自动版本检测与一键更新：应用启动后延迟静默检测、后台每隔 4 小时轻量轮询 GitHub Releases，检测到新版后顶栏高亮徽标提醒；支持 Markdown 富文本更新日志展示，并在应用内后台下载显示实时进度，无黑框控制台平滑替换重启
 - 作者模式：在章节标题旁和正文上方加复制按钮，分别复制整行标题、去掉「第 N 章」序号的标题，以及全部正文
 - 外部编辑器写盘后自动刷新
 - 表格、任务列表、代码高亮、GitHub Alerts、KaTeX、Mermaid、本地图片和本地文档链接
 - 预览搜索、选中或双击取词后在正文里高亮同一个词的其它出现位置、正文缩放、打印、源码编辑和可靠自动保存
+- 大文档友好：首屏只渲染可见部分，几 MB 的 Markdown 也能直接打开；搜索命中过多时先标出前 2000 处，不会把界面拖住
 - iOS 与 Android 原生只读预览外壳
 
 渲染资源全部离线内置。自动更新检查通过 GitHub Releases API 安全校验与更新。
 
-对外发布的是 **Windows 安装包 / 免安装版** 和 **Android APK**。macOS 与 iOS 仍需从源码构建，因为本 fork 没有 Apple 签名身份。Linux 包（`tar.gz` 与 `.deb`）由 CI 构建，作为工作流产物提供，暂未挂到 release。
+对外发布的是 **Windows 安装包 / 免安装版**、**Android APK** 和 **Linux 包**。macOS 与 iOS 仍需从源码构建，因为本 fork 没有 Apple 签名身份。Linux 的 `tar.gz` 与 `.deb` 由 CI 构建后挂到对应的 Release。
+
+下载、截图与最近几版的更新要点：<https://arnoldredman.github.io/MD-Previewer/>。
 
 ## Windows 一键构建
 

@@ -5,7 +5,7 @@
 [![CI](https://github.com/ArnoldRedman/md-preview/actions/workflows/ci.yml/badge.svg)](https://github.com/ArnoldRedman/md-preview/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A small, local-first Markdown reader and quick editor built with Rust and the system WebView. It does not bundle Chromium or Electron.
+A small, local-first Markdown reader and quick editor built with Rust and the system WebView. It does not bundle Chromium or Electron: the portable build is about 3.5 MB and the installer about 2.3 MB.
 
 ![MD Previewer icon](docs/icon.png)
 
@@ -23,25 +23,28 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 ## What it does
 
 - Opens Markdown files and any text file (`.txt`, `.json`, `.toml`, `.yaml`, `.log`, source code, files without an extension) from the command line, file picker, drag and drop, or OS file associations; binary files are refused.
-- Dedicated plain text rendering for non-Markdown files: monospace, preserves line breaks and indentation, safe escaping without Markdown syntax collisions.
+- Dedicated plain text rendering for non-Markdown files: monospace, preserves line breaks and indentation, safe escaping without Markdown syntax collisions. The opening mode follows the file type: `.md` opens in preview, other text files in source editing, changeable in settings.
 - Document encoding detection, conversion, and Save As: displays the active encoding in the top-right, reopens the file as UTF-8, UTF-8 BOM, GBK / ANSI, UTF-16 LE, or UTF-16 BE to fix mojibake, converts the file to any of them in place (with a confirmation when characters would be lost), and saves a copy elsewhere with Ctrl/Cmd+Shift+S.
 - Side-by-side split view: source editor on the left, live preview on the right, with a clean Rider-style divider line and centered split button.
 - Keeps multiple documents in tabs and restores the previous session; opening another file from Windows Explorer reuses the running window.
 - Tab context menu: close other tabs, copy path, and reveal the file in Explorer or Finder.
-- Offers a collapsible left sidebar listing the current document's folder, recent files, and a Table of Contents (TOC Outline) for quick anchor navigation; drag its right edge to resize (180–560px), and the width is remembered across launches.
+- Offers a collapsible left sidebar listing the current document's folder, recent files, and a Table of Contents (TOC Outline) for quick anchor navigation; drag its right edge to resize (180–560px, `Ctrl/Cmd+B` toggles it), and the width is remembered across launches.
 - One-click copy buttons on code blocks across desktop and mobile previews.
 - Image lightbox viewer with click-to-zoom, mouse drag panning, and zoom controls.
-- Settings panel for appearance (System / Light / Dark), window reuse, tab accumulation mode, word wrap toggle, and manual check for updates.
+- Settings panel for appearance (System / Light / Dark), window reuse, tab accumulation mode, word wrap toggle, per-shortcut switches, run log viewing and clearing, and manual check for updates.
 - Automatic update checks: silent check after startup and periodic 4-hour background polling via GitHub Releases, with an update badge, release notes dialog, in-app background download with real-time progress, and seamless Windows one-click in-place update restart without console windows.
 - Includes an author mode that adds copy buttons for the chapter heading line, the title without its chapter number, and the whole body.
 - Reloads previews when another editor changes the file.
 - Supports tables, task lists, syntax highlighting, GitHub alerts, KaTeX, Mermaid, local images, and local document links.
 - Includes preview search, word highlighting (select or double-click a word and every other occurrence is marked), content zoom, print, source editing, and reliable autosave.
+- Big-document friendly: only the visible part renders on the first paint, so multi-megabyte Markdown opens straight away; a search with too many matches marks the first 2000 instead of freezing the UI.
 - Uses native iOS and Android shells for read-only mobile previews.
 
 All rendering assets are bundled locally. Automatic update checks are routed through GitHub Releases.
 
-Published downloads are the **Windows installer / portable build** and the **Android APK**. macOS and iOS still build from source, because this fork has no Apple signing identity. Linux packages (`tar.gz` and `.deb`) are built by CI and attached as workflow artifacts rather than release assets.
+Published downloads are the **Windows installer / portable build**, the **Android APK**, and the **Linux packages**. macOS and iOS still build from source, because this fork has no Apple signing identity. The Linux `tar.gz` and `.deb` are built by CI and attached to the matching release.
+
+Downloads, screenshots and recent release highlights: <https://arnoldredman.github.io/MD-Previewer/>.
 
 ## Windows one-click build
 
