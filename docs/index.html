@@ -28,6 +28,7 @@
     <nav class="links">
       <a href="#features">功能</a>
       <a href="#shots">截图</a>
+      <a href="#whats-new">更新</a>
       <a href="#shortcuts">快捷键</a>
       <a href="#mobile">移动端</a>
       <a href="#faq">常见问题</a>
@@ -47,7 +48,7 @@
     </p>
     <ul class="chips">
       <li>Windows 10/11 · Linux</li>
-      <li>安装包约 5 MB</li>
+      <li>安装包约 2 MB</li>
       <li>无 Electron</li>
       <li>无遥测、无账号</li>
       <li>离线渲染公式与图表</li>
@@ -99,7 +100,7 @@
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6.5A2.5 2.5 0 0 1 4 19.5Z"/><path d="M8 7h6M8 11h8"/></svg>
         <h3>打开就能读</h3>
-        <p>不只是 .md——任何后缀的纯文本（.txt、.json、.log、源码）都能直接打开阅读，8 KB 二进制嗅探会拦住误开的程序与压缩包。</p>
+        <p>不只是 .md——任何后缀的纯文本（.txt、.json、.log、源码）都能直接打开阅读，8 KB 二进制嗅探会拦住误开的程序与压缩包。打开时按文件类型选好模式：.md 直接进预览，其他文本进源码编辑。</p>
       </div>
 
       <div class="card">
@@ -111,7 +112,7 @@
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <h3>全文搜索与大纲</h3>
-        <p><kbd>Ctrl</kbd>+<kbd>F</kbd> 在正文里查找并高亮，回车逐个跳转；侧栏能从标题生成大纲，滚动时自动跟着高亮当前位置。选中或双击正文里的一个词（拖选三五个字也行），同一个词的其它出现位置会一起高亮；侧栏右缘可以直接拖动改宽度。</p>
+        <p><kbd>Ctrl</kbd>+<kbd>F</kbd> 在正文里查找并高亮，回车逐个跳转；侧栏能从标题生成大纲，滚动时自动跟着高亮当前位置。双击或拖选正文里的一个词（拖三五个字也行），同一个词在文中其它位置会一起标出来，点别处或按 <kbd>Esc</kbd> 清除。</p>
       </div>
 
       <div class="card">
@@ -140,8 +141,8 @@
 
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
-        <h3>深浅色与排版控制</h3>
-        <p>跟随系统深浅色，也可以强制浅色或深色；缩放比例会被记住，长表格和长代码行可以一键换行。</p>
+        <h3>排版、侧栏与缩放</h3>
+        <p>侧栏宽度直接拖右缘调整，<kbd>Ctrl</kbd>+<kbd>B</kbd> 开合，宽度跨启动记住；宽表不会顶出窗口，缩放比例也会记住，长表格和长代码行可以一键换行。跟随系统深浅色，也可以强制浅色或深色。</p>
       </div>
 
       <div class="card">
@@ -171,11 +172,45 @@
   </div>
 </section>
 
+<section id="whats-new">
+  <div class="wrap">
+    <p class="eyebrow">更新</p>
+    <h2>最近几个版本改了什么</h2>
+    <p class="intro">完整历史一直更新在 <a href="https://github.com/ArnoldRedman/MD-Previewer/releases">GitHub Releases</a>，这里只留最近几版的要点（截至 v1.5.2，2026-10-08）。</p>
+    <div class="grid">
+      <div class="card">
+        <h3>v1.5.2 · 侧栏可拖动、取词高亮</h3>
+        <ul>
+          <li>侧栏右缘可拖动调宽（180–560px），<kbd>Ctrl</kbd>+<kbd>B</kbd> 开合，宽度跨启动记住</li>
+          <li>键盘也能调：展开侧栏后焦点就在拖拽条上，<kbd>←</kbd>/<kbd>→</kbd> 微调，带读屏播报</li>
+          <li>双击或拖选一个词，它在文中的其它出现位置一起标绿</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>v1.5.2 · 本体小了 42%</h3>
+        <ul>
+          <li>免安装版 6.2 MB → 3.5 MB</li>
+          <li>公式、图表、代码高亮资源改为压缩内嵌，离线渲染能力不变</li>
+          <li>大文档搜索命中超过 2000 处时先标前 2000 处，不再拖慢界面</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>v1.5.0 / v1.4.4 · 打开方式与大表格</h3>
+        <ul>
+          <li>.md 默认进预览、其他文本默认进编辑</li>
+          <li>宽表按可视宽度自适应，不再顶出窗口</li>
+          <li>大文档首屏不塞正文，打开更稳</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="shortcuts">
   <div class="wrap">
     <p class="eyebrow">快捷键</p>
     <h2>常用操作都能只用键盘完成</h2>
-    <p class="intro">macOS 上把 Ctrl 换成 Cmd 即可，下面这些快捷键两边一致。</p>
+    <p class="intro">macOS 上把 Ctrl 换成 Cmd 即可，下面这些快捷键两边一致。设置面板里可以按需关掉任意一条，也可以整体关闭。</p>
     <table>
       <tbody>
         <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>打开文件</td></tr>
@@ -183,6 +218,7 @@
         <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>在正文里查找</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>预览 / 编辑模式切换</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>分栏对照编辑</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>开合左侧栏</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>保存</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>另存为</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>打印</td></tr>
@@ -264,6 +300,14 @@
     <details>
       <summary>老文档是 GBK 编码，打开是乱码怎么办？</summary>
       <p>点标题栏下方的编码标签，选「以指定编码重新打开」；要长期使用就选「转换为指定编码」，再用 <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存。</p>
+    </details>
+    <details>
+      <summary>为什么安装包这么小？</summary>
+      <p>桌面端不打包 Chromium，界面跑在系统自带的 WebView 上；1.5.2 起又把 Mermaid、KaTeX 和代码高亮这三份前端资源改成压缩内嵌、真正用到时才解压，免安装版从 6.2 MB 降到 3.5 MB，离线渲染能力一点没减。</p>
+    </details>
+    <details>
+      <summary>几 MB 的长文档能打开吗？</summary>
+      <p>能。首屏只渲染看得见的部分，解析和搜索都是流式的；搜索时命中太多（超过 2000 处）会先标出前 2000 处并显示 <code>1/2000+</code>，避免一次造出几万个标记把界面拖住。</p>
     </details>
     <details>
       <summary>和上游 MD Preview 是什么关系？</summary>

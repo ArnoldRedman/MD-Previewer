@@ -27,6 +27,7 @@
     <nav class="links">
       <a href="#features">Features</a>
       <a href="#shots">Screenshots</a>
+      <a href="#whats-new">What's new</a>
       <a href="#shortcuts">Shortcuts</a>
       <a href="#mobile">Mobile</a>
       <a href="#faq">FAQ</a>
@@ -46,7 +47,7 @@
     </p>
     <ul class="chips">
       <li>Windows 10/11 · Linux</li>
-      <li>~5 MB installer</li>
+      <li>~2 MB installer</li>
       <li>No Electron</li>
       <li>No telemetry, no account</li>
       <li>Offline math and diagrams</li>
@@ -98,7 +99,7 @@
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6.5A2.5 2.5 0 0 1 4 19.5Z"/><path d="M8 7h6M8 11h8"/></svg>
         <h3>Opens anything readable</h3>
-        <p>Not just .md: any plain-text file — .txt, .json, .log, source code — opens directly. An 8 KB binary sniff stops you from opening an executable or archive by accident.</p>
+        <p>Not just .md: any plain-text file — .txt, .json, .log, source code — opens directly. An 8 KB binary sniff stops you from opening an executable or archive by accident. The mode is picked from the file type: .md lands in preview, other text files land in source editing.</p>
       </div>
 
       <div class="card">
@@ -110,7 +111,7 @@
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <h3>Search and outline</h3>
-        <p><kbd>Ctrl</kbd>+<kbd>F</kbd> highlights matches in the document and steps through them; the sidebar builds an outline from your headings and follows the scroll position. Select or double-click a word to highlight its other occurrences, and drag the sidebar's right edge to resize it.</p>
+        <p><kbd>Ctrl</kbd>+<kbd>F</kbd> highlights matches in the document and steps through them; the sidebar builds an outline from your headings and follows the scroll position. Double-click or drag-select a word (three or four characters is enough) and its other occurrences in the document are marked too; click elsewhere or press <kbd>Esc</kbd> to clear them.</p>
       </div>
 
       <div class="card">
@@ -139,8 +140,8 @@
 
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
-        <h3>Light, dark, and typography</h3>
-        <p>Follows the system theme, or force light/dark. Zoom level is remembered, and long tables or code lines can be wrapped with one toggle.</p>
+        <h3>Layout, sidebar and zoom</h3>
+        <p>Drag the sidebar's right edge to resize it, <kbd>Ctrl</kbd>+<kbd>B</kbd> to collapse or expand it, and the width is remembered across launches. Wide tables follow the visible width instead of pushing out of the window, zoom level is remembered, and long tables or code lines can be wrapped with one toggle. Follows the system theme, or force light/dark.</p>
       </div>
 
       <div class="card">
@@ -170,11 +171,45 @@
   </div>
 </section>
 
+<section id="whats-new">
+  <div class="wrap">
+    <p class="eyebrow">What's new</p>
+    <h2>What changed in the last few releases</h2>
+    <p class="intro">The full history lives in <a href="https://github.com/ArnoldRedman/MD-Previewer/releases">GitHub Releases</a>. Only the highlights are kept here (as of v1.5.2, 2026-10-08).</p>
+    <div class="grid">
+      <div class="card">
+        <h3>v1.5.2 · resizable sidebar, word highlighting</h3>
+        <ul>
+          <li>Drag the sidebar's right edge (180–560px); <kbd>Ctrl</kbd>+<kbd>B</kbd> toggles it and the width is remembered</li>
+          <li>Keyboard too: the handle is focused on expand, <kbd>←</kbd>/<kbd>→</kbd> nudge it, and screen readers get the width</li>
+          <li>Double-click or drag-select a word to mark its other occurrences</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>v1.5.2 · 42% smaller</h3>
+        <ul>
+          <li>Portable build: 6.2 MB → 3.5 MB</li>
+          <li>Math, diagram and syntax-highlighting assets are now stored compressed, still fully offline</li>
+          <li>Searching a large document marks the first 2000 hits instead of freezing the UI</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>v1.5.0 / v1.4.4 · opening modes and wide tables</h3>
+        <ul>
+          <li>.md opens in preview, other text files in source editing</li>
+          <li>Wide tables fit the visible width instead of pushing out of the window</li>
+          <li>Large documents open more reliably (the first paint no longer carries the body text)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="shortcuts">
   <div class="wrap">
     <p class="eyebrow">Shortcuts</p>
     <h2>The common actions stay on the keyboard</h2>
-    <p class="intro">On macOS, replace Ctrl with Cmd — everything else behaves the same.</p>
+    <p class="intro">On macOS, replace Ctrl with Cmd — everything else behaves the same. Any single shortcut can be turned off in the settings panel, or all of them at once.</p>
     <table>
       <tbody>
         <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Open a file</td></tr>
@@ -182,6 +217,7 @@
         <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in the document</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Toggle preview / source</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Split source and preview</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Toggle the sidebar</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Save as</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Print</td></tr>
@@ -263,6 +299,14 @@
     <details>
       <summary>An old file is GBK-encoded and shows as garbage</summary>
       <p>Click the encoding label under the tab bar and pick "Reopen with" that encoding, or choose "Convert to" and save with <kbd>Ctrl</kbd>+<kbd>S</kbd>.</p>
+    </details>
+    <details>
+      <summary>Why is the installer so small?</summary>
+      <p>The desktop app does not ship Chromium — the interface runs on the WebView your OS already has. Since 1.5.2 the three largest front-end assets (Mermaid, KaTeX and the syntax highlighter) are stored compressed and only unpacked when a document actually needs them, which took the portable build from 6.2 MB down to 3.5 MB with no loss of offline rendering.</p>
+    </details>
+    <details>
+      <summary>Can it open a multi-megabyte document?</summary>
+      <p>Yes. Only the visible part is rendered on the first paint, and parsing plus search are streamed. When a search matches too many places (over 2000) it marks the first 2000 and shows <code>1/2000+</code> rather than building tens of thousands of markers at once.</p>
     </details>
     <details>
       <summary>How does this relate to upstream MD Preview?</summary>
