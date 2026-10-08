@@ -70,6 +70,7 @@ async function buildPage(browser) {
       </div>
     </div>
     <aside class="sidebar" id="sidebar">
+      <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" tabindex="0"></div>
       <div class="sidebar-sections">
         ${SIDEBAR_SECTIONS.map(
           ([section, label], index) =>
@@ -78,7 +79,6 @@ async function buildPage(browser) {
       </div>
       <div id="sidebar-list"></div>
       <div class="sidebar-footer" id="sidebar-footer" style="display:none;"></div>
-      <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" tabindex="0"></div>
     </aside>
     <div class="findbar">
       <input id="find-input">
@@ -269,6 +269,10 @@ try {
     check('设置回显生效', (await sidebarWidth(page)) === 320);
 
     // 键盘入口：拖拽条能 Tab 聚焦，方向键微调（Shift 加大步长），双击回默认宽度
+    const firstFocusable = await page.evaluate(
+      () => document.getElementById('sidebar').querySelector('button, [tabindex="0"]').id,
+    );
+    check('拖拽条是侧栏里第一个可聚焦元素', firstFocusable === 'sidebar-resizer', firstFocusable);
     await page.evaluate(() => window.__setSettings({ sidebarOpen: true, sidebarWidth: 300 }));
     await page.locator('#sidebar-resizer').focus();
     const aria = await page.evaluate(() => {
@@ -321,6 +325,57 @@ try {
       '双击拖拽条恢复默认宽度',
       (await sidebarWidth(page)) === DEFAULT_SIDEBAR_W,
       `宽度=${await sidebarWidth(page)}`,
+    );
+
+    // Ctrl+B 开合侧栏：和工具条按钮走同一条路，可单独禁用
+    await page.evaluate(() => window.__setSettings({ sidebarOpen: true, sidebarWidth: 300 }));
+    await page.keyboard.press('Control+b');
+    const toggled = await page.evaluate(() => ({
+      open: document.body.classList.contains('sidebar-open'),
+      message: window.__messages[window.__messages.length - 1],
+    }));
+    check(
+      'Ctrl+B 收起侧栏并落盘',
+      !toggled.open && toggled.message === 'set-setting:sidebar=0',
+      JSON.stringify(toggled),
+    );
+    await page.keyboard.press('Control+b');
+    const reOpened = await page.evaluate(() => ({
+      open: document.body.classList.contains('sidebar-open'),
+      message: window.__messages[window.__messages.length - 1],
+    }));
+    check(
+      'Ctrl+B 再按展开侧栏并落盘',
+      reOpened.open && reOpened.message === 'set-setting:sidebar=1',
+      JSON.stringify(reOpened),
+    );
+    // 关闭全部快捷键后 Ctrl+B 不应再有任何作用
+    await page.evaluate(() =>
+      window.__setSettings({ sidebarOpen: true, disableAllShortcuts: true }),
+    );
+    const beforeOff = await page.evaluate(() => ({
+      open: document.body.classList.contains('sidebar-open'),
+      messages: window.__messages.length,
+    }));
+    await page.keyboard.press('Control+b');
+    const afterOff = await page.evaluate(() => ({
+      open: document.body.classList.contains('sidebar-open'),
+      messages: window.__messages.length,
+    }));
+    check(
+      '设置里禁用全部快捷键后 Ctrl+B 失效',
+      beforeOff.open && afterOff.open && afterOff.messages === beforeOff.messages,
+      JSON.stringify({ beforeOff, afterOff }),
+    );
+
+    // 单项禁用同样要生效：设置面板写入的 id 必须和 keydown 里查的是同一个
+    await page.evaluate(() =>
+      window.__setSettings({ sidebarOpen: true, disableAllShortcuts: false, disabledShortcuts: ['toggle-sidebar'] }),
+    );
+    await page.keyboard.press('Control+b');
+    check(
+      '设置里单独禁用“侧栏开合”后 Ctrl+B 失效',
+      await page.evaluate(() => document.body.classList.contains('sidebar-open')),
     );
     await page.close();
   }

@@ -18,6 +18,7 @@
 	</style></head><body class="{{body_class}}">
 	<div class="tabbar" id="tabbar"><div class="tabs" id="tabs"></div><div class="doc-stats" id="doc-stats" aria-live="polite"></div><div class="encoding-control" id="encoding-control"><button class="encoding-btn" id="btn-encoding" type="button" title="{{encoding_title}}">{{initial_encoding}}</button><div class="encoding-popover" id="encoding-popover" style="display:none;" role="menu"><div class="encoding-popover-title">{{encoding_title}}</div><div class="encoding-group-title">{{encoding_reopen_group}}</div><button type="button" class="encoding-option{{opt_utf8}}" data-encoding="UTF-8">UTF-8</button><button type="button" class="encoding-option{{opt_utf8bom}}" data-encoding="UTF-8 BOM">UTF-8 BOM</button><button type="button" class="encoding-option{{opt_gbk}}" data-encoding="GBK">GBK / ANSI</button><button type="button" class="encoding-option{{opt_u16le}}" data-encoding="UTF-16 LE">UTF-16 LE</button><button type="button" class="encoding-option{{opt_u16be}}" data-encoding="UTF-16 BE">UTF-16 BE</button><div class="encoding-group-title">{{encoding_convert_group}}</div><button type="button" class="encoding-option" data-convert-encoding="UTF-8">UTF-8</button><button type="button" class="encoding-option" data-convert-encoding="UTF-8 BOM">UTF-8 BOM</button><button type="button" class="encoding-option" data-convert-encoding="GBK">GBK / ANSI</button><button type="button" class="encoding-option" data-convert-encoding="UTF-16 LE">UTF-16 LE</button><button type="button" class="encoding-option" data-convert-encoding="UTF-16 BE">UTF-16 BE</button><div class="encoding-sep"></div><button type="button" class="encoding-option" id="btn-save-as">{{btn_save_as}}</button></div></div><button class="tab-open" id="tab-open" type="button" title="{{btn_new}}" aria-label="{{btn_new}}">+</button></div>
 	<aside class="sidebar" id="sidebar" aria-label="{{btn_sidebar}}">
+	  <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="{{sidebar_resizer}}" tabindex="0"></div>
 	  <div class="sidebar-sections">
 	    <button type="button" data-sidebar-section="folder" aria-pressed="true">{{sidebar_folder}}</button>
 	    <button type="button" data-sidebar-section="recent" aria-pressed="false">{{sidebar_recent}}</button>
@@ -25,7 +26,6 @@
 	  </div>
 	  <div class="sidebar-list" id="sidebar-list"></div>
 	  <div class="sidebar-footer" id="sidebar-footer" style="display:none;"><button type="button" class="sidebar-clear" id="sidebar-clear-recent">{{recent_clear_all}}</button></div>
-	  <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="{{sidebar_resizer}}" tabindex="0"></div>
 	</aside>
 	<div id="topbar">
 	<div class="toolbar sidebar-toggle">
@@ -170,6 +170,13 @@
 	              <div class="settings-seg">
 	                <button type="button" data-shortcut-toggle="split-view" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
 	                <button type="button" data-shortcut-toggle="split-view" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_sidebar}}</span><kbd class="shortcut-key">Ctrl+B</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="toggle-sidebar" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="toggle-sidebar" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
 	              </div>
 	            </div>
 	            <div class="shortcut-row">

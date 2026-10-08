@@ -213,6 +213,7 @@ pub(crate) fn build_page_with_encoding(
         ("shortcut_save_as", s.shortcut_save_as.to_string()),
         ("shortcut_toggle_edit", s.shortcut_toggle_edit.to_string()),
         ("shortcut_split_view", s.shortcut_split_view.to_string()),
+        ("shortcut_sidebar", s.shortcut_sidebar.to_string()),
         ("shortcut_find", s.shortcut_find.to_string()),
         ("shortcut_refresh", s.shortcut_refresh.to_string()),
         ("shortcut_zoom_in", s.shortcut_zoom_in.to_string()),

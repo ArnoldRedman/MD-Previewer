@@ -825,12 +825,14 @@
 	    sidebarData = data || { folder: [], recent: [] };
 	    renderSidebar();
 	  };
-	  btnSidebar.addEventListener('click', function() {
-	    // 立刻切换视觉状态，落盘交给 Rust；回显时状态一致，不会来回跳
+	  // 侧栏开合：按钮和 Ctrl+B 走同一条路。
+	  // 立刻切换视觉状态，落盘交给 Rust；回显时状态一致，不会来回跳
+	  function toggleSidebar() {
 	    var open = !document.body.classList.contains('sidebar-open');
 	    document.body.classList.toggle('sidebar-open', open);
 	    window.ipc.postMessage('set-setting:sidebar=' + (open ? '1' : '0'));
-	  });
+	  }
+	  btnSidebar.addEventListener('click', toggleSidebar);
 	  sidebarEl.addEventListener('click', function(e) {
 	    var section = hit(e, '[data-sidebar-section]');
 	    if (section) {
@@ -1453,6 +1455,12 @@
 	      if (!isShortcutEnabled('open-file')) return;
 	      e.preventDefault();
 	      openFile();
+	      return;
+	    }
+	    if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+	      if (!isShortcutEnabled('toggle-sidebar')) return;
+	      e.preventDefault();
+	      toggleSidebar();
 	      return;
 	    }
 	    if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
