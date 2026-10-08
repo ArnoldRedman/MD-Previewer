@@ -368,7 +368,7 @@
 	          return NodeFilter.FILTER_REJECT;
 	        }
 	        var parent = node.parentElement;
-	        if (!parent || parent.closest('script,style,svg,mark.search-hit,.katex,.mdp-mermaid')) {
+	        if (!parent || parent.closest('script,style,svg,mark.search-hit,mark.mdp-word-hit,.katex,.mdp-mermaid')) {
 	          return NodeFilter.FILTER_REJECT;
 	        }
 	        return NodeFilter.FILTER_ACCEPT;
@@ -753,6 +753,35 @@
 	  window.addEventListener('scroll', function() {
 	    if (sidebarSection === 'outline') updateOutlineActive();
 	  }, { passive: true });
+	  // 侧栏宽度：默认值由 Rust 注入到 --sidebar-width，拖动只改这个 CSS 变量，
+	  // 松手才把结果报给 Rust 落盘；这里的范围只为拖动手感，权威范围在 window.rs
+	  var SIDEBAR_MIN_W = 180;
+	  var SIDEBAR_MAX_W = 560;
+	  function applySidebarWidth(px) {
+	    var width = Math.round(Number(px));
+	    if (!isFinite(width)) return;
+	    width = Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, width));
+	    document.documentElement.style.setProperty('--sidebar-width', width + 'px');
+	  }
+	  var sidebarResizer = document.getElementById('sidebar-resizer');
+	  if (sidebarResizer) {
+	    sidebarResizer.addEventListener('mousedown', function(e) {
+	      if (e.button !== 0) return;
+	      e.preventDefault();
+	      sidebarResizer.classList.add('dragging');
+	      document.body.classList.add('sidebar-resizing');
+	      function onMove(moveEvent) { applySidebarWidth(moveEvent.clientX); }
+	      function onUp() {
+	        window.removeEventListener('mousemove', onMove);
+	        window.removeEventListener('mouseup', onUp);
+	        sidebarResizer.classList.remove('dragging');
+	        document.body.classList.remove('sidebar-resizing');
+	        window.ipc.postMessage('set-setting:sidebar-width=' + Math.round(sidebarEl.getBoundingClientRect().width));
+	      }
+	      window.addEventListener('mousemove', onMove);
+	      window.addEventListener('mouseup', onUp);
+	    });
+	  }
 	  window.__setSidebar = function(data) {
 	    sidebarData = data || { folder: [], recent: [] };
 	    renderSidebar();
@@ -1134,6 +1163,7 @@
 	    authorMode = !!settings.authorMode;
 	    applyAuthorMode();
 	    document.body.classList.toggle('sidebar-open', !!settings.sidebarOpen);
+	    applySidebarWidth(settings.sidebarWidth);
 	    document.body.classList.toggle('no-wrap', settings.wordWrap === false);
 	    disableAllShortcuts = !!settings.disableAllShortcuts;
 	    disabledShortcuts = Array.isArray(settings.disabledShortcuts) ? settings.disabledShortcuts : [];
@@ -1204,9 +1234,137 @@
     if (tabContextMenu && !tabContextMenu.contains(target)) hideTabContextMenu();
     if (recentContextMenu && !recentContextMenu.contains(target)) hideRecentContextMenu();
   }
+  // 双击取词高亮（Notepad++ 的 smart highlight）：把选中词在正文里的其它出现位置一起标出来，
+  // 长文里就不用反复搜索去数它出现在哪。点别处、按 Esc、切文档都会清掉
+  var wordHits = [];
+  var WORD_HIT_MAX_LEN = 64;
+  function clearWordHits() {
+    wordHits.forEach(function(mark) {
+      var parent = mark.parentNode;
+      if (!parent) return;
+      parent.replaceChild(document.createTextNode(mark.textContent), mark);
+      parent.normalize();
+    });
+    wordHits = [];
+  }
+  // 标记要拆掉原来的文本节点，压在里面的选区会跟着散掉，所以先按"第几个字符"记住选区再放回。
+  // 标记不增删任何字符，改写前后正文的字符总数一致，按字符数就能重新定位
+  function textOffsetOf(node, offset) {
+    var walker = document.createTreeWalker(previewEl, NodeFilter.SHOW_TEXT);
+    var seen = 0;
+    while (walker.nextNode()) {
+      if (walker.currentNode === node) return seen + offset;
+      seen += walker.currentNode.nodeValue.length;
+    }
+    return -1;
+  }
+  function pointAtChar(index) {
+    var walker = document.createTreeWalker(previewEl, NodeFilter.SHOW_TEXT);
+    var seen = 0;
+    while (walker.nextNode()) {
+      var length = walker.currentNode.nodeValue.length;
+      if (seen + length >= index) return { node: walker.currentNode, offset: index - seen };
+      seen += length;
+    }
+    return null;
+  }
+  function currentSelectionOffsets() {
+    var sel = window.getSelection && window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    var range = sel.getRangeAt(0);
+    var start = textOffsetOf(range.startContainer, range.startOffset);
+    var end = textOffsetOf(range.endContainer, range.endOffset);
+    // 选区边界不在文本节点上（比如整段选中）时不折腾，留给浏览器自己处理
+    if (start < 0 || end < 0) return null;
+    // 双击选词常常把词前后的空白一起带上，收回去，让放回来的选区正好是那个词（Ctrl+C 不带多余空格）
+    var raw = String(sel);
+    var lead = raw.length - raw.replace(/^\s+/, '').length;
+    var trail = raw.length - raw.replace(/\s+$/, '').length;
+    return [start + lead, end - trail];
+  }
+  function restoreSelection(offsets) {
+    var from = pointAtChar(offsets[0]);
+    var to = pointAtChar(offsets[1]);
+    if (!from || !to) return;
+    var sel = window.getSelection && window.getSelection();
+    if (!sel) return;
+    var range = document.createRange();
+    range.setStart(from.node, from.offset);
+    range.setEnd(to.node, to.offset);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  function highlightWord(word, keepSelection) {
+    var offsets = keepSelection ? currentSelectionOffsets() : null;
+    clearWordHits();
+    var needle = word.toLowerCase();
+    var walker = document.createTreeWalker(previewEl, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(node) {
+        if (!node.nodeValue || node.nodeValue.toLowerCase().indexOf(needle) < 0) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        var parent = node.parentElement;
+        // 搜索命中的 mark 不能重复包一层，否则清搜索结果时会把取词标记一起抹掉；
+        // 公式和图表是渲染出来的画布，进去改写文本会破坏它们
+        if (!parent || parent.closest('script,style,svg,mark.search-hit,.katex,.mdp-mermaid')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function(node) {
+      var text = node.nodeValue;
+      var lower = text.toLowerCase();
+      var fragment = document.createDocumentFragment();
+      var start = 0;
+      var index;
+      while ((index = lower.indexOf(needle, start)) >= 0) {
+        if (index > start) fragment.appendChild(document.createTextNode(text.slice(start, index)));
+        var mark = document.createElement('mark');
+        mark.className = 'mdp-word-hit';
+        mark.textContent = text.slice(index, index + word.length);
+        wordHits.push(mark);
+        fragment.appendChild(mark);
+        start = index + word.length;
+      }
+      if (start < text.length) fragment.appendChild(document.createTextNode(text.slice(start)));
+      node.parentNode.replaceChild(fragment, node);
+    });
+    // 自己划的那段保留原生选中色，绿的只是其它出现位置
+    if (offsets) restoreSelection(offsets);
+  }
+  // 取词范围：双击选中的词，或自己拖拽划出来的几个字。
+  // 只要是一段不带空白的短文本就当"一个词"，返回空串表示这次不取词
+  function selectedWord() {
+    var sel = window.getSelection && window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return '';
+    // 只认落在正文预览里的选区：编辑框、侧栏、搜索框里的选中不参与
+    if (!previewEl.contains(sel.getRangeAt(0).commonAncestorContainer)) return '';
+    // Chromium 双击选词常常把词后面的空格一起带上，先去空白再判断
+    var word = String(sel).trim();
+    if (!word || word.length > WORD_HIT_MAX_LEN || /\s/.test(word)) return '';
+    return word;
+  }
+  // 松手时取词：拖拽划选（不管几个字）和双击都走这一条；
+  // 双击自带的两次 mousedown 先清后标，接着这次 mouseup 再标一遍，结果一致
+  document.addEventListener('mouseup', function(e) {
+    if (e.button !== 0) return;
+    var word = selectedWord();
+    if (word) highlightWord(word, true);
+  });
+  // 双击自带的两次 mousedown 先清后标，顺序天然正确；点侧栏条目时也要清掉旧词
+  document.addEventListener('mousedown', function() {
+    if (wordHits.length) clearWordHits();
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') clearWordHits();
+  });
   // 文档切换时所有与旧文档绑定的临时状态都要归零：搜索、浮层、菜单、悬浮框和待触发的实时渲染
   function resetTransientUi() {
     hideFind();
+    clearWordHits();
     closeAllOverlays();
     hideSidebarTooltip();
     cancelLiveRender();

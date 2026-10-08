@@ -675,7 +675,11 @@ impl App {
     pub(crate) fn on_settings_changed(&mut self) {
         let current = self.settings.clone();
         if current.sidebar_open != self.sidebar_open_applied {
-            resize_for_sidebar(&self.window, current.sidebar_open);
+            resize_for_sidebar(
+                &self.window,
+                current.sidebar_open,
+                current.sidebar_width as f64,
+            );
             self.sidebar_open_applied = current.sidebar_open;
         }
         if current.theme != self.theme_applied {

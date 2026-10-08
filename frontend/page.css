@@ -8,6 +8,9 @@ body {
   line-height: 1.6; font-size: 15px;
   color: #1a1a1a; background: #fff;
 }
+/* 双击取词、拖拽划选都靠这个底色体现。只换背景不换前景色，
+   以免盖掉代码块里语法高亮本身的颜色 */
+::selection { background: #b6d7ff; }
 body.has-tabs { --bar-top: 40px; }
 #app { max-width: 820px; margin: 0 auto; padding: 24px; }
 /* 非 Markdown 文档整篇是 .mdp-plain-text（配置 / 日志 / 源码这类行导向内容），
@@ -104,6 +107,9 @@ body.has-tabs { --bar-top: 40px; }
 #preview .mdp-mark { border-radius: 3px; padding: 0 0.12em; background: #fff2a8; color: inherit; }
 #preview mark.search-hit { border-radius: 3px; padding: 0 0.12em; background: #fff2a8; color: inherit; }
 #preview mark.search-hit.current { background: #ffcc4d; color: #1a1a1a; }
+/* 双击取词后，同一个词在正文里的其它出现位置（Notepad++ 的 smart highlight）。
+   用绿色和搜索命中的黄色区分开，两者可以同时存在 */
+#preview mark.mdp-word-hit { border-radius: 3px; padding: 0 0.12em; background: #c9f0c9; color: inherit; }
 #preview table { border-collapse: collapse; width: 100%; }
 #preview .mdp-table-wrap {
   /* 宽度跟着阅读栏走，不能用 100vw：侧栏和编辑分栏下 vw 不知道正文还剩多少宽度，
@@ -509,11 +515,21 @@ body.empty #topbar { display: none; }
 	body.sidebar-open .sidebar { display: flex; }
 	body.sidebar-open:not(.empty) { padding-left: var(--sidebar-width); }
 	body.empty .sidebar { display: none !important; }
+	/* 侧栏右缘的宽度拖拽条：贴着侧栏边缘，平时透明，只在指针靠近时显形 */
+	.sidebar-resizer {
+	  position: absolute; top: 0; right: 0; bottom: 0; width: 6px;
+	  cursor: col-resize; background: transparent; transition: background 0.15s ease;
+	}
+	.sidebar-resizer:hover, .sidebar-resizer.dragging { background: rgba(0,0,0,.14); }
+	/* 拖动中全局固定指针形状并禁掉文本划选，否则会一路选中底下的侧栏条目 */
+	body.sidebar-resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
 	.sidebar-sections { display: flex; gap: 4px; padding: 48px 8px 8px; }
 	.sidebar-sections button {
-	  flex: 1; height: 28px; padding: 0 6px; cursor: pointer;
+	  /* 高度不能再写死 28px："当前文件夹" 五个字在窄侧栏里会折成两行，
+	     固定高度装不下就会溢出框外。改成随内容涨，单行时还是 28px */
+	  flex: 1; height: auto; min-height: 28px; padding: 3px 6px; cursor: pointer;
 	  border: 1px solid transparent; border-radius: 6px;
-	  background: transparent; font: inherit; font-size: 12px; color: #666;
+	  background: transparent; font: inherit; font-size: 12px; line-height: 1.25; color: #666;
 	}
 	.sidebar-sections button:hover { background: rgba(0,0,0,.05); }
 	.sidebar-sections button[aria-pressed="true"] { background: #fff; color: #111; border-color: #dcdcdc; }
@@ -637,6 +653,9 @@ body.empty #topbar { display: none; }
 	}
 	@media (prefers-color-scheme: dark) {
 	  body { color: #d4d4d4; background: #1e1e1e; }
+	  ::selection { background: #2f5f9e; }
+	  #preview mark.mdp-word-hit { background: #2f4a2f; }
+	  .sidebar-resizer:hover, .sidebar-resizer.dragging { background: rgba(255,255,255,.2); }
 	  #preview a { color: #6cb6ff; }
 	  #preview h1, #preview h2 { border-color: #333; }
 	  #preview .front-matter { border-color: #333; color: #a9b1ba; }

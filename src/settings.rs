@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use crate::window::{clamp_sidebar_width, SIDEBAR_WIDTH};
+
 /// 从资源管理器点开一个 Markdown 文件时的窗口行为
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -69,6 +71,8 @@ pub struct Settings {
     pub tab_mode: TabMode,
     /// 左侧栏是否展开。不进设置面板，只是把开合状态记住跨启动
     pub sidebar_open: bool,
+    /// 左侧栏宽度。拖动右缘的拖拽条写入，下次启动按这个值布局
+    pub sidebar_width: u32,
     /// 作者模式：在标题和正文旁边显示复制按钮，方便整段取用去发布
     pub author_mode: bool,
     /// 自动换行：代码块和编辑器正文是否自动软换行
@@ -89,6 +93,7 @@ impl Default for Settings {
             open_mode: OpenMode::default(),
             tab_mode: TabMode::default(),
             sidebar_open: false,
+            sidebar_width: SIDEBAR_WIDTH as u32,
             author_mode: false,
             word_wrap: true,
             theme: ThemeChoice::System,
@@ -181,6 +186,18 @@ impl Settings {
                 self.sidebar_open = false;
                 true
             }
+            // 拖拽结束时上报一次宽度；页面拖到哪就是哪，越界值在这里夹回可用区间
+            ("sidebar-width", width) => {
+                let Ok(width) = width.trim().parse::<u32>() else {
+                    return false;
+                };
+                let width = clamp_sidebar_width(width);
+                if self.sidebar_width == width {
+                    return false;
+                }
+                self.sidebar_width = width;
+                true
+            }
             ("word-wrap", "on") => {
                 if self.word_wrap {
                     return false;
@@ -252,6 +269,7 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::window::{SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN};
 
     #[test]
     fn defaults_keep_the_current_reuse_window_and_accumulate_behavior() {
@@ -266,6 +284,7 @@ mod tests {
         assert_eq!(settings.theme, ThemeChoice::System);
         assert!(!settings.disable_all_shortcuts);
         assert!(settings.disabled_shortcuts.is_empty());
+        assert_eq!(settings.sidebar_width, SIDEBAR_WIDTH as u32);
     }
 
     #[test]
@@ -308,6 +327,17 @@ mod tests {
         assert!(!settings.apply("sidebar", "1"));
         assert!(settings.apply("sidebar", "0"));
         assert!(!settings.sidebar_open);
+        // 侧栏宽度：非法值不落盘，越界值夹到区间内，重复值不算变化
+        assert_eq!(settings.sidebar_width, SIDEBAR_WIDTH as u32);
+        assert!(settings.apply("sidebar-width", "320"));
+        assert_eq!(settings.sidebar_width, 320);
+        assert!(!settings.apply("sidebar-width", "320"));
+        assert!(!settings.apply("sidebar-width", "wide"));
+        assert_eq!(settings.sidebar_width, 320);
+        assert!(settings.apply("sidebar-width", "9999"));
+        assert_eq!(settings.sidebar_width, SIDEBAR_WIDTH_MAX);
+        assert!(settings.apply("sidebar-width", "1"));
+        assert_eq!(settings.sidebar_width, SIDEBAR_WIDTH_MIN);
         assert!(settings.apply("word-wrap", "off"));
         assert!(!settings.word_wrap);
         assert!(!settings.apply("word-wrap", "off"));
@@ -360,6 +390,7 @@ mod tests {
             open_mode: OpenMode::NewWindow,
             tab_mode: TabMode::Single,
             sidebar_open: true,
+            sidebar_width: 340,
             author_mode: true,
             word_wrap: false,
             theme: ThemeChoice::Dark,
@@ -375,6 +406,7 @@ mod tests {
         assert!(raw.contains("\"wordWrap\": false"), "{raw}");
         assert!(raw.contains("\"theme\": \"dark\""), "{raw}");
         assert!(raw.contains("\"disableAllShortcuts\": true"), "{raw}");
+        assert!(raw.contains("\"sidebarWidth\": 340"), "{raw}");
         assert!(raw.contains("\"disabledShortcuts\": ["), "{raw}");
         assert_eq!(Settings::load(&path), saved);
 
@@ -405,6 +437,8 @@ mod tests {
         assert_eq!(loaded.theme, ThemeChoice::System);
         assert!(!loaded.disable_all_shortcuts);
         assert!(loaded.disabled_shortcuts.is_empty());
+        // 旧配置文件里没有 sidebarWidth，按默认宽度补上
+        assert_eq!(loaded.sidebar_width, SIDEBAR_WIDTH as u32);
         let _ = fs::remove_dir_all(dir);
     }
 }

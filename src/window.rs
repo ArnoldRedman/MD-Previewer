@@ -75,23 +75,30 @@ pub(crate) fn load_window_geom() -> Option<WindowGeom> {
 
 /// 侧栏宽度。页面 CSS 里的 `.sidebar` 宽度和正文左边距都由它插值生成，只此一处
 pub(crate) const SIDEBAR_WIDTH: f64 = 260.0;
+/// 侧栏可拖动的宽度范围，也是 `settings.json` 里 `sidebarWidth` 的合法区间：
+/// 拖拽时前端按同一范围限制手感，这里再夹一次是因为配置文件可以被手工改坏
+pub(crate) const SIDEBAR_WIDTH_MIN: u32 = 180;
+pub(crate) const SIDEBAR_WIDTH_MAX: u32 = 560;
+
+/// 把任意来源的侧栏宽度收进可用区间
+pub(crate) fn clamp_sidebar_width(width: u32) -> u32 {
+    width.clamp(SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX)
+}
+
 /// 收窄后至少保留的窗口宽度，避免把窗口挤到没法用
 const MIN_WINDOW_WIDTH: f64 = 360.0;
 
 /// 侧栏开合时整体加宽/收窄窗口，让正文可视宽度保持不变。
 /// 优先往左扩：正文和右上角工具栏在屏幕上原地不动，只是左边多出一条侧栏。
 /// 顶到显示器左边就退化为只改宽度；最大化时不动窗口，此时只能挤占正文
-pub(crate) fn resize_for_sidebar(window: &Window, opening: bool) {
+/// `width` 由调用方给出（侧栏宽度是可拖动的设置，不再是固定常量）
+pub(crate) fn resize_for_sidebar(window: &Window, opening: bool, width: f64) {
     if window.is_maximized() {
         return;
     }
     let scale = window.scale_factor();
     let size = window.inner_size().to_logical::<f64>(scale);
-    let delta = if opening {
-        SIDEBAR_WIDTH
-    } else {
-        -SIDEBAR_WIDTH
-    };
+    let delta = if opening { width } else { -width };
     if let Ok(position) = window.outer_position() {
         let position = position.to_logical::<f64>(scale);
         let left_limit = window
