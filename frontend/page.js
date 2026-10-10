@@ -137,8 +137,38 @@
 	  findNext.innerHTML = ICON_DOWN;
 	  findClose.innerHTML = ICON_CLOSE;
 
+  // 大 Markdown 的顶层块在 Rust 侧按组包了 .mdp-md-chunk，屏外的组不参与布局。
+  // 预估高度直接决定总高度（也就是滚动条和阅读位置比例），所以拿第一组的实测高当基准。
+  // 刚写入 innerHTML 时 content-visibility 还没判定哪一组在视口内，量到的是预估高度本身；
+  // 而 rAF 回调跑在这一帧的 layout 之前，所以要等第二帧才量得准。
+  // 每组真实高度之后由 contain-intrinsic-size 的 auto 记住
+  function calibrateMarkdownChunks() {
+    var first = previewEl.querySelector('.mdp-md-chunk');
+    if (!first) {
+      previewEl.style.removeProperty('--md-chunk-height');
+      pendingRestoreProgress = null;
+      return;
+    }
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        // 只在文档停在顶部时校准：这时第一组一定排过版，量到的是真实高度
+        if (window.scrollY <= 1) {
+          var height = Math.round(first.getBoundingClientRect().height);
+          if (height > 0) previewEl.style.setProperty('--md-chunk-height', height + 'px');
+        }
+        // 校准改了总高度，记住阅读位置的那次恢复要按新总高度重新落一次
+        if (pendingRestoreProgress !== null) {
+          var progress = pendingRestoreProgress;
+          pendingRestoreProgress = null;
+          restoreScrollProgress(progress);
+        }
+      });
+    });
+  }
   function inEdit() { return document.body.classList.contains('editing'); }
   var SINGLE_SPACE = /^\s$/u;
+  // 打开大 Markdown 时，组高预估校准完之后要把「记住的阅读位置」重落一次
+  var pendingRestoreProgress = null;
   // 字数统计只是状态栏展示：十四 MB 的文档一次扫完要几百毫秒，会把打开文件和每次
   // 输入都卡住，所以按时间片在空闲时间算，算完再写进去；期间有新请求就丢掉旧的
   var STATS_SLICE_MS = 8;
@@ -908,7 +938,10 @@
 	    if (outlineItem) {
 	      var targetHeading = document.getElementById(outlineItem.getAttribute('data-outline-id'));
 	      if (targetHeading) {
-	        targetHeading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	        // 大文档的组高是预估的，平滑滚动会边滚边重排、实测八秒都落不下来；
+	        // 直接跳一帧到位，所以这类文档不开动画
+	        var lazy = !!previewEl.querySelector('.mdp-md-chunk');
+	        targetHeading.scrollIntoView({ behavior: lazy ? 'auto' : 'smooth', block: 'start' });
 	      }
 	      return;
 	    }
@@ -1017,6 +1050,19 @@
 	    btn.textContent = AUTHOR_LABELS[kind];
 	    return btn;
 	  }
+	  // 大文档的顶层块被包在 .mdp-md-chunk 里，取正文时要拆开当成平的
+	  function topLevelBlocks(preview) {
+	    var blocks = [];
+	    for (var i = 0; i < preview.children.length; i++) {
+	      var node = preview.children[i];
+	      if (node.classList && node.classList.contains('mdp-md-chunk')) {
+	        for (var j = 0; j < node.children.length; j++) blocks.push(node.children[j]);
+	        continue;
+	      }
+	      blocks.push(node);
+	    }
+	    return blocks;
+	  }
 	  // 正文按屏幕上看到的取：逐个顶层块读 innerText，段落之间留空行。
 	  // 用渲染结果而不是 Markdown 原文，复制出来才不会带 # * ` 这些语法
 	  function authorBodyText() {
@@ -1025,8 +1071,9 @@
 	    var heading = preview.querySelector('h1, h2, h3, h4, h5, h6');
 	    var reached = !heading;
 	    var blocks = [];
-	    for (var i = 0; i < preview.children.length; i++) {
-	      var node = preview.children[i];
+	    var nodes = topLevelBlocks(preview);
+	    for (var i = 0; i < nodes.length; i++) {
+	      var node = nodes[i];
 	      if (!reached) {
 	        if (node === heading) reached = true;
 	        continue;
@@ -1057,7 +1104,8 @@
 	    var bodyActions = document.createElement('div');
 	    bodyActions.className = 'author-body-actions';
 	    bodyActions.appendChild(authorButton('body'));
-	    if (heading) preview.insertBefore(bodyActions, heading.nextSibling);
+	    // 标题可能在大文档的分组里，按钮要插到标题自己的那一层，不能假定标题是 #preview 的直接子节点
+	    if (heading) heading.parentNode.insertBefore(bodyActions, heading.nextSibling);
 	    else preview.insertBefore(bodyActions, preview.firstChild);
 	  }
 	  window.__applyAuthorMode = applyAuthorMode;
@@ -1603,6 +1651,7 @@
     else updateFindState();
     if (window.__applyAuthorMode) window.__applyAuthorMode();
     setupCodeBlockCopyButtons();
+    calibrateMarkdownChunks();
     if (sidebarSection === 'outline') renderSidebar();
     (window.requestIdleCallback || function(fn){ return setTimeout(fn, 0); })(function() {
       if (typeof hljs !== 'undefined') hljs.highlightAll();
@@ -1679,6 +1728,8 @@
 	    document.body.classList.remove('missing');
 	    resetTransientUi();
 	    window.__setBaseHref(baseHref);
+	    // 组高预估的校准在下一帧完成，校准之后要按新总高度重落一次阅读位置
+	    pendingRestoreProgress = typeof restoreProgress === 'number' ? restoreProgress : null;
 	    window.__setPreview(previewHtml, needsMath, needsMermaid);
 	    // 已记住阅读位置的文件恢复到上次的比例，其余文件停在开头
 	    if (typeof restoreProgress === 'number') restoreScrollProgress(restoreProgress);

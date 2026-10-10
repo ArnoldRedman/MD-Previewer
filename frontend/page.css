@@ -18,6 +18,14 @@ body.has-tabs { --bar-top: 40px; }
    侧栏展开时 body 已有 padding-left 占位，max-width:none 不会顶出右边缘 */
 #app:has(#preview .mdp-plain-text) { max-width: none; }
 #preview { font-size: calc(15px * var(--content-scale)); }
+/* 大 Markdown 的顶层块在 Rust 侧按组包了 .mdp-md-chunk（超过 256KB 才包）。
+   屏外的组直接跳过 layout/paint，几十万个节点的一次性重排就没了。
+   预估高度由页面用第一组实测值写进 --md-chunk-height，块真实高度由 auto 记住，
+   所以总高度不会离真实值太远 */
+#preview .mdp-md-chunk {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--md-chunk-height, 6000px);
+}
 #preview .front-matter {
   margin: 0 0 1.5em;
   padding: .85em 0;

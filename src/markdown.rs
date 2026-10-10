@@ -45,8 +45,55 @@ pub(crate) fn md_to_html_with_base(md: &str, base_dir: Option<&Path>) -> String 
         html_out.push_str(&html_escape_text(metadata.trim_end_matches(['\r', '\n'])));
         html_out.push_str("</pre></aside>\n");
     }
-    html::push_html(&mut html_out, events.into_iter());
+    if markdown.len() >= LAZY_CHUNK_MIN_BYTES {
+        push_chunked_html(&mut html_out, events);
+    } else {
+        html::push_html(&mut html_out, events.into_iter());
+    }
     html_out
+}
+
+/// 超过这个体积的 Markdown 才会把顶层块分组：分组只为大文件的懒布局服务，
+/// 小文档保持原来的平铺结构，样式与脚本行为一个字节都不变
+const LAZY_CHUNK_MIN_BYTES: usize = 256 * 1024;
+
+/// 每组多少个顶层块。块数决定懒布局的粒度：组太大一屏内就要排一大段，
+/// 组太小页面要记住太多预估高度
+const LAZY_BLOCKS_PER_CHUNK: usize = 100;
+
+/// 把顶层块按组包进 `<div class="mdp-md-chunk">`，页面用 content-visibility
+/// 跳过屏外组的布局（几十万个节点一次性重排是秒级开销）。
+/// 只在事件层分组、直接写进 HTML：在页面里搬节点实测 2.4 万个节点要 16 秒
+fn push_chunked_html<'a>(out: &mut String, events: Vec<MdEvent<'a>>) {
+    let mut group: Vec<MdEvent<'a>> = Vec::new();
+    let mut blocks = 0usize;
+    let mut depth = 0usize;
+    for event in events {
+        // 深度回到 0 之后再来的 Start 就是下一个顶层块
+        let top_level_start = depth == 0 && matches!(event, MdEvent::Start(_));
+        if top_level_start && blocks > 0 && blocks % LAZY_BLOCKS_PER_CHUNK == 0 {
+            flush_chunk(out, &mut group);
+        }
+        match event {
+            MdEvent::Start(_) => depth += 1,
+            MdEvent::End(_) => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if top_level_start {
+            blocks += 1;
+        }
+        group.push(event);
+    }
+    flush_chunk(out, &mut group);
+}
+
+fn flush_chunk<'a>(out: &mut String, group: &mut Vec<MdEvent<'a>>) {
+    if group.is_empty() {
+        return;
+    }
+    out.push_str("<div class=\"mdp-md-chunk\">");
+    html::push_html(out, group.drain(..));
+    out.push_str("</div>\n");
 }
 
 fn split_yaml_front_matter(md: &str) -> Option<(&str, &str)> {

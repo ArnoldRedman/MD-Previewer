@@ -1656,3 +1656,63 @@ pub(crate) fn plain_text_short_documents_stay_one_chunk() {
     assert_eq!(html.matches(r#"<div class="mdp-text-chunk">"#).count(), 1);
     assert!(html.contains("短文档\n第二行\n</div>"));
 }
+
+/// 大 Markdown 才分组懒布局，小文档的 HTML 结构必须和以前一模一样
+#[test]
+pub(crate) fn markdown_chunks_only_kick_in_for_large_documents() {
+    let small: String = (1..=50)
+        .map(|n| format!("## 标题 {n}\n\n段落 {n}。\n\n"))
+        .collect();
+    let html = md_to_html(&small);
+    assert!(
+        !html.contains("mdp-md-chunk"),
+        "小文档不该出现分组包装: {html}"
+    );
+
+    // 分组阈值按 Markdown 原文长度算，这里按行重复到超过阈值
+    let line = "## 标题\n\n段落内容，用来把体积撑过阈值。\n\n";
+    let repeat = (256 * 1024 / line.len()) + 2;
+    let large = line.repeat(repeat);
+    let chunked = md_to_html(&large);
+    let chunks = chunked.matches(r#"<div class="mdp-md-chunk">"#).count();
+    assert!(chunks >= 2, "大文档应该切成多组，实际 {chunks} 组");
+    assert_eq!(
+        chunked.matches(r#"<div class="mdp-md-chunk">"#).count(),
+        chunked.matches("</div>").count(),
+        "每组都要正确闭合，不能把正文切坏"
+    );
+    // 分组只加包装，块本身不能多也不能少
+    assert_eq!(
+        chunked.matches("<h2").count(),
+        line.matches("## ").count() * repeat,
+        "标题数量必须与原文一致"
+    );
+}
+
+/// 每 100 个顶层块一组：分块边界落在块之间，不能落在块内部
+#[test]
+pub(crate) fn markdown_chunk_boundaries_fall_between_blocks() {
+    let mut md = String::new();
+    for n in 1..=250 {
+        md.push_str(&format!("## 标题 {n}\n\n内容 {n}\n\n"));
+    }
+    let html = md_to_html(&md);
+    for chunk in html.split(r#"<div class="mdp-md-chunk">"#).skip(1) {
+        let body = chunk.split("</div>").next().unwrap_or("");
+        // 一个块（标题/段落）不应被跨组拆开：组内不出现半截的标题
+        assert!(
+            !body.contains("<h2") || body.contains("</h2>"),
+            "标题被跨组拆开了: {body}"
+        );
+        assert_eq!(
+            body.matches("<h2").count(),
+            body.matches("</h2>").count(),
+            "组内标题必须成对"
+        );
+        assert_eq!(
+            body.matches("<p>").count(),
+            body.matches("</p>").count(),
+            "组内段落必须成对"
+        );
+    }
+}

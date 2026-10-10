@@ -117,6 +117,7 @@ if command -v node >/dev/null 2>&1 && node -e "import('playwright')" >/dev/null 
   node scripts/verify-desktop-reading-tools.mjs
   node scripts/verify-desktop-tables.mjs
   node scripts/verify-desktop-plain-text.mjs
+  node scripts/verify-desktop-large-markdown.mjs
   node scripts/verify-desktop-edit-topbar.mjs
   node scripts/verify-desktop-word-highlight.mjs
   node scripts/verify-ux-improvements.mjs
