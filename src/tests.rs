@@ -1774,8 +1774,12 @@ pub(crate) fn reading_positions_keep_records_on_missing_volumes() {
 
     let mut positions = ReadingPositions::load(&store_path);
     positions.set(&deleted, 0.5);
-    // 整个目录都不存在：模拟移动硬盘没插（Windows 上就是盘符没了）
+    // 整个目录都不存在：模拟移动硬盘没插（Windows 上就是盘符没了）。
+    // 路径必须在各平台都是绝对路径，否则会被当成"非绝对路径的脏数据"丢掉，测不到这条分支
+    #[cfg(target_os = "windows")]
     let unmounted = Path::new("Z:/not-mounted/书.md").to_path_buf();
+    #[cfg(not(target_os = "windows"))]
+    let unmounted = Path::new("/not-mounted/书.md").to_path_buf();
     positions.set(&unmounted, 0.25);
     positions.save(&store_path);
     fs::remove_file(&deleted).unwrap();
