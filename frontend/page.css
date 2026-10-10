@@ -652,7 +652,7 @@ body.empty #topbar { display: none; }
 	.tab-switcher-list { max-height: 45vh; overflow: auto; }
 	.tab-switcher-item {
 	  display: flex; align-items: baseline; gap: 8px;
-	  padding: 6px 8px; border-radius: 6px; color: #24292f;
+	  padding: 6px 8px; border-radius: 6px; color: #24292f; cursor: pointer;
 	}
 	.tab-switcher-item.selected { background: #ddf4ff; color: #0969da; }
 	.tab-switcher-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

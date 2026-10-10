@@ -416,6 +416,7 @@
 	    return folder.length > 42 ? '…' + folder.slice(-41) : folder;
 	  }
 	  function renderTabSwitcher() {
+	    if (!tabSwitcherList || !tabSwitcher) return;
 	    tabSwitcherList.textContent = '';
 	    for (var index = 0; index < tabMru.length; index++) {
 	      var tab = tabSwitcherItem(index);
@@ -424,6 +425,7 @@
 	      var selected = index === tabSwitcherIndex;
 	      item.className = 'tab-switcher-item' + (selected ? ' selected' : '');
 	      item.id = 'tab-switcher-item-' + index;
+	      item.setAttribute('data-switcher-index', String(index));
 	      item.setAttribute('role', 'option');
 	      item.setAttribute('aria-selected', selected ? 'true' : 'false');
 	      var name = document.createElement('span');
@@ -441,13 +443,40 @@
 	        item.appendChild(dot);
 	      }
 	      tabSwitcherList.appendChild(item);
-	  	  if (selected) item.scrollIntoView({ block: 'nearest' });
 	    }
-	    tabSwitcher.setAttribute('aria-activedescendant', 'tab-switcher-item-' + tabSwitcherIndex);
+	    selectTabSwitcher(tabSwitcherIndex);
 	  }
+	  // 只改选中态、不重建列表：鼠标划过每一项时会频繁调用
+	  function selectTabSwitcher(index) {
+	    tabSwitcherIndex = index;
+	    if (!tabSwitcherList || !tabSwitcher) return;
+	    var items = tabSwitcherList.children;
+	    for (var i = 0; i < items.length; i++) {
+	      var selected = i === index;
+	      items[i].classList.toggle('selected', selected);
+	      items[i].setAttribute('aria-selected', selected ? 'true' : 'false');
+	      if (selected) items[i].scrollIntoView({ block: 'nearest' });
+	    }
+	    tabSwitcher.setAttribute('aria-activedescendant', 'tab-switcher-item-' + index);
+	  }
+	  // 鼠标也能直接用：移到哪一项就选它，点一下就切过去
+	  if (tabSwitcherList) tabSwitcherList.addEventListener('mousemove', function(e) {
+	    if (tabSwitcherIndex < 0 || !e.target.closest) return;
+	    var item = e.target.closest('[data-switcher-index]');
+	    if (!item) return;
+	    var index = Number(item.getAttribute('data-switcher-index'));
+	    if (index !== tabSwitcherIndex) selectTabSwitcher(index);
+	  });
+	  if (tabSwitcherList) tabSwitcherList.addEventListener('click', function(e) {
+	    if (!e.target.closest) return;
+	    var item = e.target.closest('[data-switcher-index]');
+	    if (!item) return;
+	    selectTabSwitcher(Number(item.getAttribute('data-switcher-index')));
+	    commitTabSwitcher();
+	  });
 	  function showTabSwitcher() {
 	    // 只有一个标签时没有可切的目标，浮层不出现
-	    if (tabMru.length < 2) return false;
+	    if (!tabSwitcher || tabMru.length < 2) return false;
 	    // 默认选“上次看的那个”，所以按一下再松开就是回上一个文件
 	    tabSwitcherIndex = 1;
 	    tabSwitcher.style.display = 'block';
@@ -456,7 +485,7 @@
 	    return true;
 	  }
 	  function hideTabSwitcher() {
-	    if (tabSwitcherIndex < 0) return;
+	    if (tabSwitcherIndex < 0 || !tabSwitcher) return;
 	    tabSwitcherIndex = -1;
 	    tabSwitcher.style.display = 'none';
 	    tabSwitcher.setAttribute('aria-hidden', 'true');
@@ -464,8 +493,7 @@
 	  function stepTabSwitcher(backwards) {
 	    if (tabSwitcherIndex < 0) return showTabSwitcher();
 	    var count = tabMru.length;
-	    tabSwitcherIndex = (tabSwitcherIndex + (backwards ? -1 : 1) + count) % count;
-	    renderTabSwitcher();
+	    selectTabSwitcher((tabSwitcherIndex + (backwards ? -1 : 1) + count) % count);
 	    return true;
 	  }
 	  // 松开 Ctrl 才切；Escape 或点到别处就放弃
@@ -1615,7 +1643,12 @@
   document.addEventListener('keyup', function(e) {
     if (e.key === 'Control' || e.key === 'Meta') commitTabSwitcher();
   });
-  document.addEventListener('mousedown', hideTabSwitcher, true);
+  // 点浮层里面交给它自己的 click 处理，点到别处才关闭
+  document.addEventListener('mousedown', function(e) {
+    // 只装了部分 DOM 的测试页没有浮层，这里必须容忍它不存在
+    if (tabSwitcher && tabSwitcher.contains(e.target)) return;
+    hideTabSwitcher();
+  }, true);
   window.addEventListener('blur', hideTabSwitcher);
   // 文档切换时所有与旧文档绑定的临时状态都要归零：搜索、浮层、菜单、悬浮框和待触发的实时渲染
   function resetTransientUi() {

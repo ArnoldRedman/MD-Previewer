@@ -208,5 +208,63 @@ await page.evaluate((tabs) => {
   window.__setTabs(set(22));
 }, TABS);
 
+// 8. 鼠标直接用：按住 Ctrl 时点某一项就切过去，不用一个个人工绕
+await page.evaluate((tabs) => {
+  window.__messages.length = 0;
+  const set = (id) => tabs.map((tab) => ({ ...tab, active: tab.id === id }));
+  window.__setTabs(set(11));
+  window.__setTabs(set(22));
+  window.__setTabs(set(33));
+  window.__setTabs(set(22));
+}, TABS);
+await press({ ctrl: true });
+const clicked = await page.evaluate(() => {
+  const items = Array.from(document.querySelectorAll('.tab-switcher-item'));
+  items[2].click();
+  return {
+    visible: document.getElementById('tab-switcher').style.display !== 'none',
+    messages: window.__messages.filter((message) => message.startsWith('tab-action:activate:')),
+  };
+});
+if (clicked.visible) throw new Error('clicking an entry should close the switcher');
+if (clicked.messages.length !== 1 || !clicked.messages[0].startsWith('tab-action:activate:11')) {
+  throw new Error(`clicking an entry should switch to it: ${JSON.stringify(clicked.messages)}`);
+}
+
+// 9. 鼠标悬停就把选中态带过去，之后松开 Ctrl 切的是它
+await page.evaluate(() => { window.__messages.length = 0; });
+await press({ ctrl: true });
+const hovered = await page.evaluate(() => {
+  const items = Array.from(document.querySelectorAll('.tab-switcher-item'));
+  items[2].dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+  return {
+    selected: Array.from(document.querySelectorAll('.tab-switcher-item')).findIndex((item) =>
+      item.classList.contains('selected'),
+    ),
+  };
+});
+if (hovered.selected !== 2) throw new Error(`hovering an entry should select it: ${hovered.selected}`);
+await releaseCtrl();
+const hoverSwitch = await page.evaluate(() =>
+  window.__messages.filter((message) => message.startsWith('tab-action:activate:')),
+);
+if (hoverSwitch.length !== 1 || !hoverSwitch[0].startsWith('tab-action:activate:11')) {
+  throw new Error(`releasing Ctrl after hovering should switch to the hovered entry: ${JSON.stringify(hoverSwitch)}`);
+}
+
+// 10. 点浮层外面（不是列表项）要关掉浮层且不切换
+await page.evaluate(() => { window.__messages.length = 0; });
+await press({ ctrl: true });
+const outside = await page.evaluate(() => {
+  document.getElementById('preview').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  return {
+    visible: document.getElementById('tab-switcher').style.display !== 'none',
+    messages: window.__messages.filter((message) => message.startsWith('tab-action:activate:')),
+  };
+});
+if (outside.visible) throw new Error('clicking outside should close the switcher');
+if (outside.messages.length) throw new Error(`clicking outside must not switch: ${JSON.stringify(outside.messages)}`);
+await releaseCtrl();
+
 console.log('[desktop-tab-switcher-verify] OK');
 await browser.close();
