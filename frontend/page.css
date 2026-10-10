@@ -194,8 +194,9 @@ body.has-tabs { --bar-top: 40px; }
 	body.has-tabs .tabbar { display: flex; }
 	.tabs { display: flex; flex: 1; min-width: 0; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 	.tabs::-webkit-scrollbar { display: none; }
+	/* 标签宽度固定，不随打开数量收缩：放不下就横向滚动，鼠标纵向滚轮也走横向 */
 	.tab {
-	  flex: 0 1 180px; min-width: 96px; max-width: 200px; height: 31px;
+	  flex: 0 0 180px; height: 31px;
 	  display: flex; align-items: center; gap: 7px; padding: 0 8px 0 10px;
 	  box-sizing: border-box; border: 1px solid transparent; border-radius: 7px;
 	  color: #6b6b6b; background: transparent; cursor: default; user-select: none;

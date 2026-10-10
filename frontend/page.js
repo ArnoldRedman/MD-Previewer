@@ -1846,6 +1846,14 @@
 	    if (tab.active) requestAnimationFrame(function() { item.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
 	  });
 	};
+	// 标签放不下时横向滚动；鼠标的纵向滚轮在标签栏上也转成横向（滚动条本身是隐藏的）
+	tabsEl.addEventListener('wheel', function(e) {
+	  if (tabsEl.scrollWidth <= tabsEl.clientWidth) return;
+	  var delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+	  if (!delta) return;
+	  e.preventDefault();
+	  tabsEl.scrollLeft += delta;
+	}, { passive: false });
 	tabsEl.addEventListener('keydown', function(e) {
 	  if (e.key !== 'Enter' && e.key !== ' ') return;
 	  var tab = hit(e, '[data-tab-id]');
