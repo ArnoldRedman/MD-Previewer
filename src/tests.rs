@@ -724,6 +724,10 @@ pub(crate) fn page_separates_new_file_from_open_and_debounces_autosave() {
     assert!(page.contains("class=\"settings-help\""));
     assert!(page.contains("window.__setAuthorDoc"));
     assert!(page.contains("data-author-copy"));
+    // Ctrl+Tab 切换浮层：浮层本体 + 可单独禁用的快捷键开关
+    assert!(page.contains("id=\"tab-switcher\""));
+    assert!(page.contains("data-shortcut-toggle=\"switch-tab\""));
+    assert!(page.contains("window.__setTabs = function"));
     assert!(page.contains("id=\"btn-sidebar\""));
     assert!(page.contains("id=\"sidebar-list\""));
     assert!(page.contains("data-sidebar-section=\"folder\""));

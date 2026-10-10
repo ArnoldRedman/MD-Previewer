@@ -96,6 +96,8 @@
 	  }
 	  var dirty = false;
 	  var activeTabId = 0;
+	  // Ctrl+Tab 的切换顺序：最近用过的标签在前，第一个就是当前标签
+	  var tabMru = [];
 	  var pendingAutosaveTimer = 0;
 	  var autosavePaused = false;
 	  var AUTOSAVE_DEBOUNCE_MS = 700;
@@ -379,6 +381,101 @@
 	    var message = 'tab-action:' + action + ':' + id;
 	    if (dirty) message += '\n' + ta.value;
 	    window.ipc.postMessage(message);
+	  }
+
+	  // ---- Ctrl+Tab 切换浮层：按住 Ctrl 停留，连按 Tab 选中，松开 Ctrl 才真正切 ----
+	  var tabSwitcher = document.getElementById('tab-switcher');
+	  var tabSwitcherList = document.getElementById('tab-switcher-list');
+	  var tabListCache = [];
+	  // -1 表示浮层关着；否则是 tabMru 里的下标
+	  var tabSwitcherIndex = -1;
+
+	  // MRU 顺序：当前标签第一，然后是之前用过的，关掉的标签立刻摘掉
+	  function updateTabMru(tabs, activeId) {
+	    tabListCache = tabs;
+	    var present = tabs.map(function(tab) { return tab.id; });
+	    var next = [];
+	    if (activeId) next.push(activeId);
+	    tabMru.concat(present).forEach(function(id) {
+	      if (present.indexOf(id) >= 0 && next.indexOf(id) < 0) next.push(id);
+	    });
+	    tabMru = next;
+	  }
+	  function tabSwitcherItem(index) {
+	    var id = tabMru[index];
+	    for (var i = 0; i < tabListCache.length; i++) {
+	      if (tabListCache[i].id === id) return tabListCache[i];
+	    }
+	    return null;
+	  }
+	  // 路径太长，只留目录部分（Windows 和 POSIX 分隔符都要认）
+	  // 路径太长，只留目录部分（Windows 和 POSIX 分隔符都要认），太长就从左边截
+	  function parentFolder(path) {
+	    var cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+	    var folder = cut > 0 ? path.slice(0, cut) : path;
+	    return folder.length > 42 ? '…' + folder.slice(-41) : folder;
+	  }
+	  function renderTabSwitcher() {
+	    tabSwitcherList.textContent = '';
+	    for (var index = 0; index < tabMru.length; index++) {
+	      var tab = tabSwitcherItem(index);
+	      if (!tab) continue;
+	      var item = document.createElement('div');
+	      var selected = index === tabSwitcherIndex;
+	      item.className = 'tab-switcher-item' + (selected ? ' selected' : '');
+	      item.id = 'tab-switcher-item-' + index;
+	      item.setAttribute('role', 'option');
+	      item.setAttribute('aria-selected', selected ? 'true' : 'false');
+	      var name = document.createElement('span');
+	      name.className = 'tab-switcher-name';
+	      name.textContent = tab.missing ? tab.name + ' !' : tab.name;
+	      var path = document.createElement('span');
+	      path.className = 'tab-switcher-path';
+	      path.textContent = parentFolder(tab.path);
+	      item.appendChild(name);
+	      item.appendChild(path);
+	      if (tab.dirty) {
+	        var dot = document.createElement('span');
+	        dot.className = 'tab-switcher-dirty';
+	        dot.textContent = '•';
+	        item.appendChild(dot);
+	      }
+	      tabSwitcherList.appendChild(item);
+	  	  if (selected) item.scrollIntoView({ block: 'nearest' });
+	    }
+	    tabSwitcher.setAttribute('aria-activedescendant', 'tab-switcher-item-' + tabSwitcherIndex);
+	  }
+	  function showTabSwitcher() {
+	    // 只有一个标签时没有可切的目标，浮层不出现
+	    if (tabMru.length < 2) return false;
+	    // 默认选“上次看的那个”，所以按一下再松开就是回上一个文件
+	    tabSwitcherIndex = 1;
+	    tabSwitcher.style.display = 'block';
+	    tabSwitcher.setAttribute('aria-hidden', 'false');
+	    renderTabSwitcher();
+	    return true;
+	  }
+	  function hideTabSwitcher() {
+	    if (tabSwitcherIndex < 0) return;
+	    tabSwitcherIndex = -1;
+	    tabSwitcher.style.display = 'none';
+	    tabSwitcher.setAttribute('aria-hidden', 'true');
+	  }
+	  function stepTabSwitcher(backwards) {
+	    if (tabSwitcherIndex < 0) return showTabSwitcher();
+	    var count = tabMru.length;
+	    tabSwitcherIndex = (tabSwitcherIndex + (backwards ? -1 : 1) + count) % count;
+	    renderTabSwitcher();
+	    return true;
+	  }
+	  // 松开 Ctrl 才切；Escape 或点到别处就放弃
+	  function commitTabSwitcher() {
+	    if (tabSwitcherIndex < 0) return;
+	    var target = tabSwitcherItem(tabSwitcherIndex);
+	    hideTabSwitcher();
+	    if (!target || target.id === activeTabId) return;
+	    if (!isShortcutEnabled('switch-tab')) return;
+	    requestTabAction('activate', target.id);
 	  }
 	  function openFile() {
 	    if (inEdit()) leaveEdit();
@@ -1514,6 +1611,12 @@
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') clearWordHits();
   });
+  // Ctrl+Tab 浮层：松开 Ctrl 才切，点到别处或窗口失焦就放弃
+  document.addEventListener('keyup', function(e) {
+    if (e.key === 'Control' || e.key === 'Meta') commitTabSwitcher();
+  });
+  document.addEventListener('mousedown', hideTabSwitcher, true);
+  window.addEventListener('blur', hideTabSwitcher);
   // 文档切换时所有与旧文档绑定的临时状态都要归零：搜索、浮层、菜单、悬浮框和待触发的实时渲染
   function resetTransientUi() {
     hideFind();
@@ -1525,6 +1628,27 @@
 
   document.addEventListener('keydown', function(e) {
 	if (e.isComposing || e.keyCode === 229) return;
+	// Ctrl+Tab 浮层是模态的：开着的时候只认 Tab / Shift+Tab / Esc，别的键不往下走
+	if (tabSwitcherIndex >= 0) {
+	  if (e.key === 'Tab' || e.keyCode === 9) {
+	    e.preventDefault();
+	    stepTabSwitcher(e.shiftKey);
+	    return;
+	  }
+	  if (e.key === 'Escape') {
+	    e.preventDefault();
+	    hideTabSwitcher();
+	    return;
+	  }
+	}
+	// 只认真正的 Ctrl：macOS 上 Cmd+Tab 是系统切应用，页面拿不到，VS Code 同样只给 Ctrl+Tab
+	if (e.ctrlKey && !e.metaKey && (e.key === 'Tab' || e.keyCode === 9)) {
+	  if (!isShortcutEnabled('switch-tab')) return;
+	  e.preventDefault();
+	  if (tabSwitcherIndex >= 0) stepTabSwitcher(e.shiftKey);
+	  else showTabSwitcher();
+	  return;
+	}
 	if ((e.metaKey || e.ctrlKey) && (e.key === 'w' || e.key === 'W')) {
 	  if (!isShortcutEnabled('close-tab')) return;
 	  if (activeTabId) {
@@ -1689,6 +1813,12 @@
 	  tabsEl.textContent = '';
 	  activeTabId = 0;
 	  document.body.classList.toggle('has-tabs', tabs.length > 0);
+	  // 切换标签的顺序按“最近用过”排：当前标签永远排第一，其余按之前用过的先后
+	  var mruActive = 0;
+	  for (var m = 0; m < tabs.length; m++) {
+	    if (tabs[m].active) mruActive = tabs[m].id;
+	  }
+	  updateTabMru(tabs, mruActive);
 	  tabs.forEach(function(tab) {
 	    var item = document.createElement('div');
 	    item.className = 'tab' + (tab.active ? ' active' : '') + (tab.missing ? ' missing' : '') + (tab.dirty ? ' dirty' : '');

@@ -637,6 +637,32 @@ body.empty #topbar { display: none; }
 	}
 	.context-menu-item:hover { background: #f0f3f6; color: #0969da; }
 	.context-menu-sep { height: 1px; background: #e1e4e8; margin: 4px 0; }
+	/* Ctrl+Tab 的切换浮层：按住 Ctrl 期间停在屏幕中上，松开才真正切 */
+	.tab-switcher {
+	  position: fixed; top: 12%; left: 50%; transform: translateX(-50%);
+	  z-index: 1200; min-width: 280px; max-width: min(520px, 90vw);
+	  background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px;
+	  box-shadow: 0 12px 32px rgba(140,149,159,0.28); padding: 6px; font-size: 13px;
+	}
+	.tab-switcher-title {
+	  padding: 4px 8px 6px; color: #57606a; font-size: 11px;
+	  text-transform: uppercase; letter-spacing: 0.04em;
+	}
+	.tab-switcher-list { max-height: 45vh; overflow: auto; }
+	.tab-switcher-item {
+	  display: flex; align-items: baseline; gap: 8px;
+	  padding: 6px 8px; border-radius: 6px; color: #24292f;
+	}
+	.tab-switcher-item.selected { background: #ddf4ff; color: #0969da; }
+	.tab-switcher-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.tab-switcher-path {
+	  flex: 1 1 auto; overflow: hidden; white-space: nowrap;
+	  color: #6e7781; font-size: 11px; text-align: right;
+	}
+	.tab-switcher-item.selected .tab-switcher-path { color: #4f8cc9; }
+	.tab-switcher-dirty { color: #bf8700; }
+	.tab-switcher-badge { color: #57606a; font-size: 11px; }
+	.tab-switcher-hint { padding: 6px 8px 2px; color: #6e7781; font-size: 11px; }
 	.lightbox {
 	  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
 	  z-index: 500; display: flex; align-items: center; justify-content: center; user-select: none;
@@ -803,6 +829,13 @@ body.empty #topbar { display: none; }
 	  .context-menu-item { color: #c9d1d9; }
 	  .context-menu-item:hover { background: #282e33; color: #58a6ff; }
 	  .context-menu-sep { background: #30363d; }
+	  .tab-switcher { background: #1c2128; border-color: #30363d; box-shadow: 0 12px 32px rgba(0,0,0,0.55); }
+	  .tab-switcher-title { color: #768390; }
+	  .tab-switcher-item { color: #c9d1d9; }
+	  .tab-switcher-item.selected { background: #23324a; color: #9dc0ff; }
+	  .tab-switcher-path { color: #768390; }
+	  .tab-switcher-item.selected .tab-switcher-path { color: #7fa8d8; }
+	  .tab-switcher-hint { color: #768390; }
 	  body.editing.split-view #editor { border-right-color: #383e47; background: rgba(255,255,255,0.015); }
 	  .encoding-btn { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); color: #9da7b3; }
 	  .encoding-btn:hover { background: rgba(255,255,255,0.12); color: #f0f6fc; border-color: rgba(255,255,255,0.22); }

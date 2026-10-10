@@ -132,6 +132,13 @@
 	              </div>
 	            </div>
 	            <div class="shortcut-row">
+	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_switch_tab}}</span><kbd class="shortcut-key">Ctrl+Tab</kbd></div>
+	              <div class="settings-seg">
+	                <button type="button" data-shortcut-toggle="switch-tab" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
+	                <button type="button" data-shortcut-toggle="switch-tab" data-value="disable" aria-pressed="false">{{set_shortcuts_disabled}}</button>
+	              </div>
+	            </div>
+	            <div class="shortcut-row">
 	              <div class="shortcut-info"><span class="shortcut-name">{{shortcut_new_file}}</span><kbd class="shortcut-key">Ctrl+N</kbd></div>
 	              <div class="settings-seg">
 	                <button type="button" data-shortcut-toggle="new-file" data-value="enable" aria-pressed="true">{{set_shortcuts_enabled}}</button>
@@ -249,6 +256,11 @@
 	  <div class="context-menu-sep"></div>
 	  <button type="button" class="context-menu-item" data-tab-action="copy-path">{{tab_menu_copy_path}}</button>
 	  <button type="button" class="context-menu-item" data-tab-action="reveal">{{tab_menu_reveal}}</button>
+	</div>
+	<div id="tab-switcher" class="tab-switcher" role="listbox" aria-label="{{switch_tab_title}}" aria-hidden="true" style="display:none;">
+	  <div class="tab-switcher-title">{{switch_tab_title}}</div>
+	  <div class="tab-switcher-list" id="tab-switcher-list"></div>
+	  <div class="tab-switcher-hint">{{switch_tab_hint}}</div>
 	</div>
 	<div id="recent-context-menu" class="context-menu" style="display:none;" role="menu">
 	  <button type="button" class="context-menu-item" data-recent-action="reveal">{{tab_menu_reveal}}</button>

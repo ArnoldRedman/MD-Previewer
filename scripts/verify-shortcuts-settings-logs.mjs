@@ -33,6 +33,12 @@ if (!appSource.includes('data-shortcut-toggle="escape"')) {
   throw new Error('Expected data-shortcut-toggle="escape" in page template');
 }
 // 侧栏开合：开关行和实际按下的 id 必须一致，否则设置里禁用不了
+if (!appSource.includes('data-shortcut-toggle="switch-tab"')) {
+  throw new Error('Expected data-shortcut-toggle="switch-tab" in page template');
+}
+if (!appSource.includes("window.__setTabs = function")) {
+  throw new Error('Expected tab state push in page.js');
+}
 if (!appSource.includes('data-shortcut-toggle="toggle-sidebar"')) {
   throw new Error('Expected data-shortcut-toggle="toggle-sidebar" in page template');
 }
