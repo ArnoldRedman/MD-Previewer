@@ -12,10 +12,12 @@ use crate::ipc::{parse_finder_action, parse_ipc_message, FinderAction, IpcMessag
 use crate::markdown::{build_enhancer_bootstrap, md_to_html, EnhanceFlags};
 use crate::page::empty_preview_html;
 use crate::paths::{
-    is_markdown_document, is_supported_document, local_document_path_from_url, session_path,
-    supported_dialog_extensions, MARKDOWN_EXTENSIONS, TEXT_EXTENSIONS,
+    is_markdown_document, is_supported_document, local_document_path_from_url,
+    reading_positions_path, session_path, supported_dialog_extensions, MARKDOWN_EXTENSIONS,
+    TEXT_EXTENSIONS,
 };
 use crate::platform::reveal_in_file_manager;
+use crate::reading::ReadingPositions;
 use crate::recent::RecentFiles;
 use crate::session::DocumentSession;
 use crate::settings::{Settings, TabMode, ThemeChoice};
@@ -108,6 +110,8 @@ pub(crate) struct App {
     pub(crate) settings: Settings,
     pub(crate) session: DocumentSession,
     pub(crate) recent: RecentFiles,
+    /// 记住阅读位置的文件：路径 -> 阅读比例，没记住的文件每次从头打开
+    pub(crate) reading: ReadingPositions,
     pub(crate) enhance_flags: EnhanceFlags,
     pub(crate) loaded_enhancers: EnhanceFlags,
     pub(crate) watcher: Option<notify::RecommendedWatcher>,
@@ -146,6 +150,46 @@ impl App {
     pub(crate) fn refresh_tabs(&self) {
         update_tabs(&self.webview, &self.session);
         update_window_title(&self.window, &self.session);
+    }
+
+    /// 阅读位置只在离开文档、关闭窗口和点书签时落盘，滚动过程不写磁盘
+    fn save_reading(&self) {
+        self.reading.save(&reading_positions_path());
+    }
+
+    /// 页面上报的阅读位置：只有已记住的文件留在内存里，别的文件重开时从开头开始
+    fn on_reading_progress(&mut self, progress: f64) {
+        let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
+            return;
+        };
+        if self.reading.remember(&path) {
+            self.reading.set(&path, progress);
+        }
+    }
+
+    /// 点书签：记住当前文件的阅读位置，或取消记住并删掉记录
+    fn set_remember_position(&mut self, remember: bool, progress: f64) {
+        let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
+            return;
+        };
+        if remember {
+            self.reading.set(&path, progress);
+        } else {
+            self.reading.remove(&path);
+        }
+        self.save_reading();
+        self.refresh_remember_position();
+    }
+
+    /// 书签按钮反映的是当前文件的状态，所以每次换文档都要重新推一遍
+    fn refresh_remember_position(&self) {
+        let remembered = self
+            .session
+            .active()
+            .is_some_and(|tab| self.reading.remember(&tab.path));
+        self.eval(&format!(
+            "if(window.__setRememberPosition)window.__setRememberPosition({remembered});"
+        ));
     }
 
     pub(crate) fn refresh_sidebar(&self) {
@@ -192,6 +236,11 @@ impl App {
     /// 切换活动文档后的固定流程：落盘会话、重绘、把文件监听挪到新文档上
     pub(crate) fn show_active(&mut self) {
         self.persist_session();
+        // 离开旧文档前把它的阅读位置落盘，后面 render_active 会决定新文档从哪儿开始
+        self.save_reading();
+        // 换文档时页面不重载，滚动位置会留在上一个文件；先归零，
+        // 已记住位置的文件随后由 __setContent 恢复到上次的进度
+        self.eval("window.scrollTo(0, 0);");
         self.render_active();
         self.install_watcher();
     }
@@ -240,6 +289,7 @@ impl App {
             update_author_doc(&self.webview, "");
             self.refresh_tabs();
             self.refresh_sidebar();
+            self.refresh_remember_position();
             return;
         };
 
@@ -254,13 +304,19 @@ impl App {
                 self.recent.remember(&active.path);
                 let (html, flags, base_href) = document_to_html(&active.path, &raw);
                 self.enhance_flags = flags;
+                // 没记住阅读位置的文件传 null，页面留在开头（换文档时 Rust 已经先归零）
+                let restore = match self.reading.get(&active.path) {
+                    Some(progress) => progress.to_string(),
+                    None => "null".to_string(),
+                };
                 self.eval(&format!(
-                    "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
+                    "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
                     escape_js(&html),
                     escape_js(&raw),
                     escape_js(&base_href.unwrap_or_default()),
                     flags.math,
                     flags.mermaid,
+                    restore,
                     escape_js(resolved_encoding)
                 ));
                 self.push_author_doc(&active.path, &raw);
@@ -297,6 +353,7 @@ impl App {
 
         self.refresh_tabs();
         self.refresh_sidebar();
+        self.refresh_remember_position();
     }
 
     /// 把页面正文按活动标签的编码写回磁盘；成功后刷新预览并清脏标记，失败弹窗并取消待关窗
@@ -368,6 +425,7 @@ impl App {
     pub(crate) fn exit(&self, control_flow: &mut ControlFlow) {
         save_window_geom(&self.window);
         self.persist_session();
+        self.save_reading();
         *control_flow = ControlFlow::Exit;
     }
 
@@ -825,6 +883,10 @@ impl App {
                 }
             }
             IpcMessage::ExternalChangeResolved { dirty } => self.on_external_change_resolved(dirty),
+            IpcMessage::ReadingProgress(progress) => self.on_reading_progress(progress),
+            IpcMessage::RememberPosition { remember, progress } => {
+                self.set_remember_position(remember, progress)
+            }
             IpcMessage::Print => {
                 if let Err(error) = self.webview.print() {
                     eprintln!("Could not print: {error}");

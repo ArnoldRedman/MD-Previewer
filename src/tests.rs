@@ -19,6 +19,7 @@ use crate::paths::{
     supported_dialog_extensions,
 };
 use crate::platform::linux_webkit_compat_env;
+use crate::reading::ReadingPositions;
 use crate::sanitize::is_safe_url;
 use crate::session::strip_verbatim_prefix;
 use crate::sidebar::{author_doc, folder_documents, sidebar_json, strip_chapter_prefix};
@@ -712,6 +713,10 @@ pub(crate) fn page_separates_new_file_from_open_and_debounces_autosave() {
     assert!(page.contains("id=\"doc-stats\""));
     assert!(page.contains("updateDocumentStats"));
     assert!(page.contains("restoreScrollProgress"));
+    // 记住阅读位置：工具栏书签按钮 + 滚动上报，换文档时由 Rust 推状态
+    assert!(page.contains("id=\"btn-remember\""));
+    assert!(page.contains("window.__setRememberPosition"));
+    assert!(page.contains("'reading-progress:'"));
     assert!(page.contains("md-previewer-content-zoom-v1"));
     assert!(page.contains("data-setting=\"author-mode\" data-value=\"on\""));
     assert!(page.contains("class=\"settings-help\""));
@@ -1084,6 +1089,25 @@ pub(crate) fn ipc_messages_parse_into_typed_commands() {
     );
     assert_eq!(parse_ipc_message("tab-action:activate:abc"), None);
     assert_eq!(parse_ipc_message("tab-action:rename:3"), None);
+    assert_eq!(
+        parse_ipc_message("reading-progress:0.25"),
+        Some(IpcMessage::ReadingProgress(0.25))
+    );
+    assert_eq!(parse_ipc_message("reading-progress:abc"), None);
+    assert_eq!(
+        parse_ipc_message("remember-position:1\n0.5"),
+        Some(IpcMessage::RememberPosition {
+            remember: true,
+            progress: 0.5,
+        })
+    );
+    assert_eq!(
+        parse_ipc_message("remember-position:0\n0.5"),
+        Some(IpcMessage::RememberPosition {
+            remember: false,
+            progress: 0.5,
+        })
+    );
     assert_eq!(
         parse_ipc_message("convert-encoding:GBK\n正文"),
         Some(IpcMessage::ConvertEncoding {
@@ -1528,4 +1552,67 @@ pub(crate) fn math_flag_scan_handles_a_dollar_heavy_document() {
     assert!(enhance_flags_for(r"圆括号公式 \(x\) 结尾").math);
     assert!(!enhance_flags_for("价格 $ 空格结尾").math);
     assert!(!enhance_flags_for("转义过的 \\$a$ 不算公式").math);
+}
+
+/// 阅读位置：记住的文件能存下比例，取消记住后记录立刻消失
+#[test]
+pub(crate) fn reading_positions_survive_a_round_trip() {
+    let dir = temp_test_dir("reading-roundtrip");
+    let store_path = dir.join("reading-positions.json");
+    let doc = dir.join("a.md");
+    fs::write(&doc, "# a\n").unwrap();
+    let other = dir.join("b.md");
+    fs::write(&other, "# b\n").unwrap();
+
+    let mut positions = ReadingPositions::load(&store_path);
+    assert_eq!(positions.get(&doc), None);
+    positions.set(&doc, 0.375);
+    positions.set(&other, 0.0);
+    positions.save(&store_path);
+
+    let reloaded = ReadingPositions::load(&store_path);
+    assert_eq!(reloaded.get(&doc), Some(0.375));
+    assert!(reloaded.remember(&other));
+    assert!(!reloaded.remember(&dir.join("never-remembered.md")));
+
+    // 取消记住只是删掉这一条，别的文件不受影响
+    let mut positions = reloaded;
+    positions.remove(&doc);
+    positions.save(&store_path);
+    let reloaded = ReadingPositions::load(&store_path);
+    assert_eq!(reloaded.get(&doc), None);
+    assert_eq!(reloaded.get(&other), Some(0.0));
+}
+
+/// 启动时清掉失效记录：文件被删或被移动后不该留在配置里
+#[test]
+pub(crate) fn reading_positions_drop_records_without_a_file() {
+    let dir = temp_test_dir("reading-prune");
+    let store_path = dir.join("reading-positions.json");
+    let kept = dir.join("kept.md");
+    fs::write(&kept, "# kept\n").unwrap();
+    let removed = dir.join("removed.md");
+    fs::write(&removed, "# removed\n").unwrap();
+
+    let mut positions = ReadingPositions::load(&store_path);
+    positions.set(&kept, 1.0);
+    positions.set(&removed, 1.0);
+    positions.save(&store_path);
+    fs::remove_file(&removed).unwrap();
+
+    let reloaded = ReadingPositions::load(&store_path);
+    assert_eq!(reloaded.get(&kept), Some(1.0));
+    assert_eq!(reloaded.get(&removed), None);
+
+    // 越界和空记录的脏数据不能变成一次跳到底部的恢复
+    let mut positions = reloaded;
+    positions.set(&kept, 1.5);
+    assert_eq!(positions.get(&kept), Some(1.0), "越界比例要被忽略");
+    positions.remove(&kept);
+    positions.save(&store_path);
+    assert!(
+        !store_path.exists(),
+        "没有记录时不该留下空配置文件: {}",
+        store_path.display()
+    );
 }

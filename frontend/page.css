@@ -275,6 +275,10 @@ body.empty #topbar { display: none; }
   transition: color 0.15s, background 0.15s;
 }
 .toolbar button:hover { color: #000; background: rgba(255,255,255,1); }
+/* 已记住阅读位置：书签从描边变实心，和“从头打开”一眼能分开 */
+.toolbar #btn-remember.on { color: #0969da; background: rgba(9,105,218,0.1); border-color: rgba(9,105,218,0.35); }
+.toolbar #btn-remember.on:hover { color: #0b5cab; background: rgba(9,105,218,0.18); }
+.toolbar #btn-remember.on svg { fill: currentColor; }
 .toolbar button[hidden] { display: none !important; }
 	.zoom-control { position: relative; }
 	.zoom-popover {
@@ -690,6 +694,8 @@ body.empty #topbar { display: none; }
     color: #bbb;
 	  }
 	  .toolbar button:hover { color: #fff; background: rgba(55,55,55,1); }
+	  .toolbar #btn-remember.on { color: #8ab4f8; background: rgba(56,139,253,0.18); border-color: rgba(56,139,253,0.4); }
+	  .toolbar #btn-remember.on:hover { color: #a8c7fa; background: rgba(56,139,253,0.28); }
 	  .zoom-popover { background: rgba(34,34,34,.96); border-color: rgba(255,255,255,.12); }
 	  .toolbar .zoom-popover button:hover { background: rgba(255,255,255,.1); }
 	  .settings-popover { background: rgba(34,34,34,.96); border-color: rgba(255,255,255,.12); }

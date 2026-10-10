@@ -27,7 +27,8 @@ pub(crate) fn parse_finder_action(value: &str) -> Option<FinderAction> {
         _ => None,
     }
 }
-#[derive(Debug, PartialEq, Eq)]
+// 带阅读位置的消息用 f64，所以这里只能派 PartialEq
+#[derive(Debug, PartialEq)]
 pub(crate) enum IpcMessage {
     NewFile,
     OpenFile,
@@ -62,6 +63,13 @@ pub(crate) enum IpcMessage {
     DirtyChanged(bool),
     /// 页面手动切换预览/编辑模式；按标签记住，切回来时恢复
     EditMode(bool),
+    /// 当前文件的阅读位置（0~1）：只有已记住的文件会被落盘
+    ReadingProgress(f64),
+    /// 点书签按钮：记住/不记住当前文件的阅读位置，带上点击时的进度
+    RememberPosition {
+        remember: bool,
+        progress: f64,
+    },
     ExternalChangeResolved {
         dirty: bool,
     },
@@ -153,6 +161,15 @@ pub(crate) fn parse_ipc_message(body: &str) -> Option<IpcMessage> {
         }
         "save" => IpcMessage::Save(rest.to_string()),
         "set-encoding" => IpcMessage::SetEncoding(rest.to_string()),
+        "reading-progress" => IpcMessage::ReadingProgress(rest.parse().ok()?),
+        // 页面点书签时把当前位置一起带上，避免等下一次滚动上报才拿到进度
+        "remember-position" => {
+            let (remember, progress) = rest.split_once('\n').unwrap_or((rest, "0"));
+            IpcMessage::RememberPosition {
+                remember: remember == "1",
+                progress: progress.parse().unwrap_or(0.0),
+            }
+        }
         "self-update" => IpcMessage::SelfUpdate(rest.to_string()),
         _ => return None,
     };

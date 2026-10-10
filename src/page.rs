@@ -113,6 +113,8 @@ pub(crate) fn build_page_with_encoding(
     let config = serde_json::json!({
         "btnEditJs": s.btn_edit,
         "btnPreviewJs": s.btn_preview,
+        "btnRememberJs": s.btn_remember,
+        "btnRememberClearJs": s.btn_remember_clear,
         "codeCopyJs": s.code_copy,
         "codeCopiedJs": s.code_copied,
         "sidebarOutlineEmptyJs": s.sidebar_outline_empty,
@@ -164,6 +166,7 @@ pub(crate) fn build_page_with_encoding(
         ("recent_clear_all", s.recent_clear_all.to_string()),
         ("btn_open", s.btn_open.to_string()),
         ("btn_search", s.btn_search.to_string()),
+        ("btn_remember", s.btn_remember.to_string()),
         ("btn_edit", s.btn_edit.to_string()),
         ("btn_split", s.btn_split.to_string()),
         ("btn_print", s.btn_print.to_string()),

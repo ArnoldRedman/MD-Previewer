@@ -41,6 +41,8 @@ ${desktopCss}</style>`;
 const DEFAULT_CONFIG = {
   btnEditJs: 'Edit',
   btnPreviewJs: 'Preview',
+  btnRememberJs: 'Remember reading position',
+  btnRememberClearJs: 'Stop remembering reading position',
   codeCopyJs: 'Copy',
   codeCopiedJs: 'Copied',
   sidebarEmptyJs: 'Nothing to show',

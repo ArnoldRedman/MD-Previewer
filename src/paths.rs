@@ -32,6 +32,10 @@ pub(crate) fn session_path() -> PathBuf {
     config_dir().join("session.json")
 }
 
+pub(crate) fn reading_positions_path() -> PathBuf {
+    config_dir().join("reading-positions.json")
+}
+
 fn percent_encode_file_path(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {

@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-import { configScript, desktopScript } from './desktop-page.mjs';
+import { configScript, desktopCss, desktopScript } from './desktop-page.mjs';
 
 const pageConfig = configScript({
   btnEditJs: 'Edit',
@@ -62,6 +62,7 @@ await page.setContent(`<!doctype html>
     <div class="toolbar">
       <button id="btn-open"></button>
       <button id="btn-search"></button>
+      <button id="btn-remember" aria-pressed="false"></button>
       <button id="btn-toggle"></button>
       <button id="btn-print"></button>
       <div id="zoom-control" class="zoom-control">
@@ -188,6 +189,96 @@ if (Math.abs(previewProgress - editorProgress) > 0.03 ||
     restoredPreviewProgress,
     editorState,
   })}`);
+}
+
+// 书签按钮：默认描边（从头打开），点一下把当前位置报给 Rust
+await page.evaluate(() => {
+  document.getElementById('preview').innerHTML = Array.from(
+    { length: 100 },
+    (_, index) => `<p>Preview paragraph ${index + 1}</p>`,
+  ).join('');
+  scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * 0.5);
+  window.__messages.length = 0;
+});
+let remember = await page.evaluate(() => ({
+  on: document.getElementById('btn-remember').classList.contains('on'),
+  pressed: document.getElementById('btn-remember').getAttribute('aria-pressed'),
+  title: document.getElementById('btn-remember').title,
+}));
+if (remember.on || remember.pressed !== 'false' || remember.title !== 'Remember reading position') {
+  throw new Error(`bookmark button should start off: ${JSON.stringify(remember)}`);
+}
+
+await page.locator('#btn-remember').click();
+const rememberMsg = await page.evaluate(() => {
+  const message = window.__messages[window.__messages.length - 1];
+  return { message, ratio: scrollY / (document.documentElement.scrollHeight - innerHeight) };
+});
+if (!rememberMsg.message || !rememberMsg.message.startsWith('remember-position:1\n')) {
+  throw new Error(`click should ask Rust to remember the position: ${rememberMsg.message}`);
+}
+const reportedRatio = Number(rememberMsg.message.split('\n')[1]);
+if (!(Math.abs(reportedRatio - rememberMsg.ratio) < 0.01)) {
+  throw new Error(`reported ratio ${reportedRatio} != ${rememberMsg.ratio}`);
+}
+
+// Rust 回推状态：高亮实心 + 提示语变成「不再记住」
+await page.evaluate(() => window.__setRememberPosition(true));
+remember = await page.evaluate(() => ({
+  on: document.getElementById('btn-remember').classList.contains('on'),
+  pressed: document.getElementById('btn-remember').getAttribute('aria-pressed'),
+  title: document.getElementById('btn-remember').title,
+}));
+if (!remember.on || remember.pressed !== 'true' || remember.title !== 'Stop remembering reading position') {
+  throw new Error(`bookmark button should be filled when remembered: ${JSON.stringify(remember)}`);
+}
+// 实心效果来自真实样式表，不是只在 JS 里换 class
+if (!/#btn-remember\.on svg \{ fill: currentColor; \}/.test(desktopCss)) {
+  throw new Error('desktop css should fill the bookmark icon once the position is remembered');
+}
+await page.evaluate(() => { window.__messages.length = 0; });
+await page.locator('#btn-remember').click();
+const forgetMsg = await page.evaluate(() => window.__messages[window.__messages.length - 1]);
+if (!forgetMsg || !forgetMsg.startsWith('remember-position:0\n')) {
+  throw new Error(`second click should stop remembering: ${forgetMsg}`);
+}
+await page.evaluate(() => window.__setRememberPosition(false));
+
+// 已记住的文件按上次比例打开；没记住的（Rust 传 null 且先把滚动归零）停在开头
+await page.evaluate((source) => {
+  scrollTo(0, document.documentElement.scrollHeight);
+  window.__setContent(source, 'doc', '', false, false, 0.5);
+}, previewBlocks);
+await page.waitForTimeout(200);
+const restored = await page.evaluate(
+  () => scrollY / (document.documentElement.scrollHeight - innerHeight),
+);
+if (Math.abs(restored - 0.5) > 0.02) {
+  throw new Error(`remembered progress should be restored, got ${restored}`);
+}
+await page.evaluate((source) => {
+  scrollTo(0, document.documentElement.scrollHeight);
+  scrollTo(0, 0);
+  window.__setContent(source, 'doc', '', false, false, null);
+}, previewBlocks);
+await page.waitForTimeout(200);
+const started = await page.evaluate(() => Math.round(scrollY));
+if (started !== 0) {
+  throw new Error(`null progress must stay at the top, scrollY=${started}`);
+}
+
+// 滚动停下来后上报比例，滚动过程中不刷屏
+await page.evaluate(() => { window.__messages.length = 0; });
+await page.evaluate(() => scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * 0.25));
+await page.waitForTimeout(400);
+const scrollReports = await page.evaluate(
+  () => window.__messages.filter((message) => message.startsWith('reading-progress:')),
+);
+if (scrollReports.length !== 1) {
+  throw new Error(`expected one debounced scroll report, got ${JSON.stringify(scrollReports)}`);
+}
+if (Math.abs(Number(scrollReports[0].split(':')[1]) - 0.25) > 0.02) {
+  throw new Error(`scroll report ratio is off: ${scrollReports[0]}`);
 }
 
 await browser.close();

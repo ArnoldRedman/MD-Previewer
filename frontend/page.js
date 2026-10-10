@@ -13,6 +13,8 @@
 	  var ICON_VIEW = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 	  var ICON_OPEN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6A2 2 0 0 1 18.45 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>';
 	  var ICON_SEARCH = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
+	  // 记住阅读位置：书签描边是没记住，记住后由 CSS 变实心
+	  var ICON_REMEMBER = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/></svg>';
 	  var ICON_PRINT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
 	  var ICON_ZOOM = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>';
 	  var ICON_SIDEBAR = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>';
@@ -27,6 +29,7 @@
 
 	  var btnOpen = document.getElementById('btn-open');
 	  var btnSearch = document.getElementById('btn-search');
+	  var btnRemember = document.getElementById('btn-remember');
 	  var btnToggle = document.getElementById('btn-toggle');
 	  var btnSplit = document.getElementById('btn-split');
 	  var btnPrint = document.getElementById('btn-print');
@@ -123,6 +126,7 @@
 
 	  btnOpen.innerHTML = ICON_OPEN;
 	  btnSearch.innerHTML = ICON_SEARCH;
+	  if (btnRemember) btnRemember.innerHTML = ICON_REMEMBER;
 	  btnToggle.innerHTML = ICON_EDIT;
 	  if (btnSplit) btnSplit.innerHTML = ICON_SPLIT;
 	  btnPrint.innerHTML = ICON_PRINT;
@@ -184,6 +188,43 @@
     requestAnimationFrame(function() {
       restore();
       requestAnimationFrame(restore);
+    });
+  }
+  // 阅读位置：滚动停下来后上报一次比例，只给已记住位置的文件落盘
+  var SCROLL_REPORT_DEBOUNCE_MS = 250;
+  var scrollReportTimer = 0;
+  window.addEventListener('scroll', function() {
+    if (scrollReportTimer) clearTimeout(scrollReportTimer);
+    scrollReportTimer = setTimeout(function() {
+      scrollReportTimer = 0;
+      window.ipc.postMessage('reading-progress:' + currentScrollProgress().toFixed(4));
+    }, SCROLL_REPORT_DEBOUNCE_MS);
+  }, { passive: true });
+
+  // 书签按钮：高亮（实心）表示这个文件下次从上次的位置打开，灰色则从头打开
+  var L_REMEMBER = CFG.btnRememberJs;
+  var L_REMEMBER_CLEAR = CFG.btnRememberClearJs;
+  var rememberPosition = false;
+  function applyRememberState() {
+    if (!btnRemember) return;
+    btnRemember.classList.toggle('on', rememberPosition);
+    btnRemember.setAttribute('aria-pressed', rememberPosition ? 'true' : 'false');
+    var label = rememberPosition ? L_REMEMBER_CLEAR : L_REMEMBER;
+    btnRemember.title = label;
+    btnRemember.setAttribute('aria-label', label);
+  }
+  window.__setRememberPosition = function(on) {
+    rememberPosition = !!on;
+    applyRememberState();
+  };
+  if (btnRemember) {
+    applyRememberState();
+    btnRemember.addEventListener('click', function() {
+      // 点击时的位置一起报过去，不用等下一次滚动上报
+      window.ipc.postMessage(
+        'remember-position:' + (rememberPosition ? '0' : '1') + '\n' +
+        currentScrollProgress().toFixed(4),
+      );
     });
   }
   applyZoom(loadZoomPercent(), false);
@@ -1610,12 +1651,14 @@
 	  e.preventDefault();
 	  requestTabAction('activate', tab.getAttribute('data-tab-id'));
 	});
-	  window.__setContent = function(previewHtml, rawMd, baseHref, needsMath, needsMermaid) {
+	  window.__setContent = function(previewHtml, rawMd, baseHref, needsMath, needsMermaid, restoreProgress) {
 	    document.body.classList.remove('empty');
 	    document.body.classList.remove('missing');
 	    resetTransientUi();
 	    window.__setBaseHref(baseHref);
 	    window.__setPreview(previewHtml, needsMath, needsMermaid);
+	    // 已记住阅读位置的文件恢复到上次的比例，其余文件停在开头
+	    if (typeof restoreProgress === 'number') restoreScrollProgress(restoreProgress);
 	    // 编辑中且有未保存内容时保留编辑框，只刷新预览；待触发的自动保存也必须留着
 	    if (!inEdit() || !dirty) {
 	      cancelPendingAutosave();

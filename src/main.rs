@@ -16,6 +16,7 @@ mod markdown;
 mod page;
 mod paths;
 mod platform;
+mod reading;
 mod recent;
 mod sanitize;
 mod session;
@@ -38,8 +39,11 @@ use crate::i18n::{detect_lang, Strings};
 use crate::macos_menu::install_macos_menu;
 use crate::markdown::EnhanceFlags;
 use crate::page::startup_page;
-use crate::paths::{config_dir, is_supported_document, recent_files_path, session_path};
+use crate::paths::{
+    config_dir, is_supported_document, reading_positions_path, recent_files_path, session_path,
+};
 use crate::platform::{apply_linux_webkit_compat_env, register_as_default};
+use crate::reading::ReadingPositions;
 use crate::recent::RecentFiles;
 use crate::session::DocumentSession;
 use crate::settings::{OpenMode, Settings, TabMode, ThemeChoice};
@@ -204,6 +208,8 @@ fn main() {
         .expect("failed to build window");
     bench_log("window_built");
     let recent = RecentFiles::load(recent_files_path());
+    // 读取时会顺手清掉文件已经不存在的阅读位置记录
+    let reading = ReadingPositions::load(&reading_positions_path());
 
     let initial_page = startup_page(&strings, recent.paths());
 
@@ -312,6 +318,7 @@ fn main() {
         settings,
         session,
         recent,
+        reading,
         enhance_flags: EnhanceFlags::default(),
         loaded_enhancers: EnhanceFlags::default(),
         watcher: None,
