@@ -66,7 +66,13 @@ await page.setContent(`<!doctype html>
     <div class="sidebar-list" id="sidebar-list"></div>
   </aside>
   <div class="findbar"><input id="find-input"><span id="find-state"></span><button id="find-prev"></button><button id="find-next"></button><button id="find-close"></button></div>
-  <div id="app"><div id="preview"></div><textarea id="editor"></textarea></div>
+  <div id="app">
+    <div id="doc-notice" class="doc-notice" style="display:none;">
+      <span id="doc-notice-text">This file is very large</span>
+      <button type="button" id="doc-notice-action">Render as Markdown anyway</button>
+    </div>
+    <div id="preview"></div><textarea id="editor"></textarea>
+  </div>
   <script>
     window.__messages = [];
     window.ipc = { postMessage(message) { window.__messages.push(message); } };
@@ -201,6 +207,33 @@ if (!authorCopy.text || !authorCopy.text.includes('第 400 节的正文')) {
 if (!authorCopy.text.startsWith('第 1 节的正文')) {
   throw new Error(`author body copy should start at the first block: ${JSON.stringify(authorCopy.text.slice(0, 40))}`);
 }
+
+// 6. 超大 Markdown 降级提示条：__setContent 第七个参数为 true 时显示，按钮上报出口消息
+const notice = await page.evaluate(async () => {
+  const el = document.getElementById('doc-notice');
+  const action = document.getElementById('doc-notice-action');
+  // 降级渲染：第七个参数为 true
+  window.__setContent('<div class="mdp-plain-text">大文件</div>', 'x', '', false, false, null, true);
+  const shown = el.style.display !== 'none';
+  window.__messages.length = 0;
+  action.click();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  return { shown, messages: window.__messages.slice() };
+});
+if (!notice.shown) throw new Error('degraded documents must show the notice');
+if (!notice.messages.includes('render-markdown-anyway')) {
+  throw new Error(`notice action should ask Rust to render markdown: ${JSON.stringify(notice.messages)}`);
+}
+const afterNormal = await page.evaluate(() => {
+  window.__setContent('<p>普通文档</p>', 'x', '', false, false, null, false);
+  return document.getElementById('doc-notice').style.display === 'none';
+});
+if (!afterNormal) throw new Error('the notice must hide for documents that are not degraded');
+const afterDegraded = await page.evaluate(() => {
+  window.__setContent('<div class="mdp-plain-text">大文件</div>', 'x', '', false, false, null, true);
+  return document.getElementById('doc-notice').style.display !== 'none';
+});
+if (!afterDegraded) throw new Error('the notice must show again for a degraded document');
 
 console.log(
   `[desktop-large-markdown-verify] OK layout ${baseline.layoutMs.toFixed(0)}ms -> ${chunked.layoutMs.toFixed(0)}ms, ` +

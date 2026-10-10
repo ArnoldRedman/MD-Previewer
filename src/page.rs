@@ -167,6 +167,11 @@ pub(crate) fn build_page_with_encoding(
         ("btn_open", s.btn_open.to_string()),
         ("btn_search", s.btn_search.to_string()),
         ("btn_remember", s.btn_remember.to_string()),
+        ("large_doc_notice", s.large_doc_notice.to_string()),
+        (
+            "large_doc_render_markdown",
+            s.large_doc_render_markdown.to_string(),
+        ),
         ("btn_edit", s.btn_edit.to_string()),
         ("btn_split", s.btn_split.to_string()),
         ("btn_print", s.btn_print.to_string()),

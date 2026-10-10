@@ -157,6 +157,17 @@ impl App {
         self.reading.save(&reading_positions_path());
     }
 
+    /// 提示条上的"仍按 Markdown 渲染"：这个标签之后都按 Markdown 渲染（可能较慢）
+    fn render_active_as_markdown(&mut self) {
+        let Some(id) = self.session.active_id else {
+            return;
+        };
+        if let Some(tab) = self.session.tabs.iter_mut().find(|tab| tab.id == id) {
+            tab.force_markdown = true;
+        }
+        self.render_active();
+    }
+
     /// 页面上报的阅读位置：只有已记住的文件留在内存里，别的文件重开时从开头开始
     fn on_reading_progress(&mut self, progress: f64) {
         let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
@@ -302,7 +313,8 @@ impl App {
                     }
                 }
                 self.recent.remember(&active.path);
-                let (html, flags, base_href) = document_to_html(&active.path, &raw);
+                let (html, flags, base_href, degraded) =
+                    document_to_html(&active.path, &raw, active.force_markdown);
                 self.enhance_flags = flags;
                 // 没记住阅读位置的文件传 null，页面留在开头（换文档时 Rust 已经先归零）
                 let restore = match self.reading.get(&active.path) {
@@ -310,13 +322,14 @@ impl App {
                     None => "null".to_string(),
                 };
                 self.eval(&format!(
-                    "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
+                    "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {}, {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
                     escape_js(&html),
                     escape_js(&raw),
                     escape_js(&base_href.unwrap_or_default()),
                     flags.math,
                     flags.mermaid,
                     restore,
+                    degraded,
                     escape_js(resolved_encoding)
                 ));
                 self.push_author_doc(&active.path, &raw);
@@ -394,7 +407,10 @@ impl App {
             let encoding = self.session.active().and_then(|tab| tab.encoding.clone());
             match read_document_with_encoding(&path, encoding.as_deref()) {
                 Ok((raw, _)) => {
-                    let (html, flags, _) = document_to_html(&path, &raw);
+                    // 渲染方式跟着标签的选择走：超大 Markdown 默认纯文本，用户选了就一直按 Markdown
+                    let force_markdown =
+                        self.session.active().is_some_and(|tab| tab.force_markdown);
+                    let (html, flags, _, _) = document_to_html(&path, &raw, force_markdown);
                     self.enhance_flags = flags;
                     self.eval(&format!(
                         "if(window.__setPreview)window.__setPreview('{}', {}, {});if(window.__markSaved)window.__markSaved('{}');",
@@ -572,7 +588,9 @@ impl App {
         let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
             return;
         };
-        let (html, flags, _) = document_to_html(&path, content);
+        // 同上：编辑中的实时预览也按这个标签选定的渲染方式
+        let force_markdown = self.session.active().is_some_and(|tab| tab.force_markdown);
+        let (html, flags, _, _) = document_to_html(&path, content, force_markdown);
         self.eval(&format!(
             "if(window.__setLivePreview)window.__setLivePreview('{}', {}, {});",
             escape_js(&html),
@@ -883,6 +901,7 @@ impl App {
                 }
             }
             IpcMessage::ExternalChangeResolved { dirty } => self.on_external_change_resolved(dirty),
+            IpcMessage::RenderMarkdownAnyway => self.render_active_as_markdown(),
             IpcMessage::ReadingProgress(progress) => self.on_reading_progress(progress),
             IpcMessage::RememberPosition { remember, progress } => {
                 self.set_remember_position(remember, progress)

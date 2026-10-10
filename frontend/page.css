@@ -16,6 +16,19 @@ body.has-tabs { --bar-top: 40px; }
 /* 非 Markdown 文档整篇是 .mdp-plain-text（配置 / 日志 / 源码这类行导向内容），
    不套 Markdown 的正文栏宽度：用满可用宽度，长行只在真的超出窗口时才折。
    侧栏展开时 body 已有 padding-left 占位，max-width:none 不会顶出右边缘 */
+/* 超大 Markdown 降级为纯文本时顶在正文上方的提示条，带“仍按 Markdown 渲染”的出口 */
+.doc-notice {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 16px; padding: 8px 12px; border-radius: 6px;
+  background: rgba(255,244,214,0.9); border: 1px solid #e8d9a8;
+  color: #6b5a1e; font-size: 12px;
+}
+.doc-notice button {
+  margin-left: auto; padding: 3px 10px; border-radius: 5px; cursor: pointer;
+  border: 1px solid #d0bd82; background: rgba(255,255,255,0.75); color: inherit;
+  font: inherit;
+}
+.doc-notice button:hover { background: #fff; }
 #app:has(#preview .mdp-plain-text) { max-width: none; }
 #preview { font-size: calc(15px * var(--content-scale)); }
 /* 大 Markdown 的顶层块在 Rust 侧按组包了 .mdp-md-chunk（超过 256KB 才包）。
@@ -837,6 +850,9 @@ body.empty #topbar { display: none; }
 	  .tab-switcher-path { color: #768390; }
 	  .tab-switcher-item.selected .tab-switcher-path { color: #7fa8d8; }
 	  .tab-switcher-hint { color: #768390; }
+	  .doc-notice { background: #2b2617; border-color: #4a4028; color: #e3d5a8; }
+	  .doc-notice button { border-color: #5a4e2f; background: rgba(255,255,255,0.08); }
+	  .doc-notice button:hover { background: rgba(255,255,255,0.16); }
 	  body.editing.split-view #editor { border-right-color: #383e47; background: rgba(255,255,255,0.015); }
 	  .encoding-btn { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); color: #9da7b3; }
 	  .encoding-btn:hover { background: rgba(255,255,255,0.12); color: #f0f6fc; border-color: rgba(255,255,255,0.22); }
@@ -906,7 +922,7 @@ body.editing .findbar { display: none !important; }
 }
 
 @media print {
-  .toolbar, #topbar, .tabbar, #editor, .sidebar,
+  .toolbar, #topbar, .tabbar, #editor, .sidebar, .doc-notice,
   .author-actions, .author-body-actions { display: none !important; }
   body { padding-left: 0 !important; }
   #preview { display: block !important; }

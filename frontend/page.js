@@ -30,6 +30,14 @@
 	  var btnOpen = document.getElementById('btn-open');
 	  var btnSearch = document.getElementById('btn-search');
 	  var btnRemember = document.getElementById('btn-remember');
+	  var docNotice = document.getElementById('doc-notice');
+	  var docNoticeAction = document.getElementById('doc-notice-action');
+	  if (docNoticeAction) {
+	    // 提示条上的出口：这个标签之后都按 Markdown 渲染（可能较慢）
+	    docNoticeAction.addEventListener('click', function() {
+	      window.ipc.postMessage('render-markdown-anyway');
+	    });
+	  }
 	  var btnToggle = document.getElementById('btn-toggle');
 	  var btnSplit = document.getElementById('btn-split');
 	  var btnPrint = document.getElementById('btn-print');
@@ -1894,7 +1902,8 @@
 	  e.preventDefault();
 	  requestTabAction('activate', tab.getAttribute('data-tab-id'));
 	});
-	  window.__setContent = function(previewHtml, rawMd, baseHref, needsMath, needsMermaid, restoreProgress) {
+	  window.__setContent = function(previewHtml, rawMd, baseHref, needsMath, needsMermaid, restoreProgress, largeDocDegraded) {
+	    if (docNotice) docNotice.style.display = largeDocDegraded ? 'flex' : 'none';
 	    document.body.classList.remove('empty');
 	    document.body.classList.remove('missing');
 	    resetTransientUi();

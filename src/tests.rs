@@ -4,7 +4,7 @@ use crate::document::{
     decode_utf16, document_to_html, encode_document, read_document_to_string,
     read_document_with_encoding, save_as_target_path, save_document_text,
     self_write_still_matches_disk, should_protect_external_change, write_document_bytes,
-    SelfWriteRecord,
+    SelfWriteRecord, LARGE_MARKDOWN_LIMIT,
 };
 // Windows 专用：代码页转换只在 Windows 上有实现
 #[cfg(target_os = "windows")]
@@ -121,7 +121,8 @@ pub(crate) fn any_text_file_opens_as_plain_text_but_binaries_are_rejected() {
     assert!(!is_supported_document(&binary));
     assert!(!is_supported_document(&dir));
 
-    let (html, flags, base_href) = document_to_html(&toml, "[package]\nname = \"x\"\n");
+    let (html, flags, base_href, _degraded) =
+        document_to_html(&toml, "[package]\nname = \"x\"\n", false);
     assert!(html.starts_with(r#"<div class="mdp-plain-text">"#));
     assert!(!flags.math && !flags.mermaid);
     assert!(base_href.is_none());
@@ -304,7 +305,7 @@ pub(crate) fn strict_codepage_detection_rejects_invalid_gbk() {
 pub(crate) fn txt_document_preserves_newlines_and_escapes_html() {
     let raw = "# Title\n\nLine 1 <tag> & more\nLine 2 *not bold*\n| table | col |\n";
     let path = Path::new("test.txt");
-    let (html, flags, base_href) = document_to_html(path, raw);
+    let (html, flags, base_href, _degraded) = document_to_html(path, raw, false);
 
     assert!(html.starts_with(r#"<div class="mdp-plain-text">"#));
     assert!(html.ends_with("</div>"));
@@ -322,7 +323,7 @@ pub(crate) fn txt_document_preserves_newlines_and_escapes_html() {
 #[test]
 pub(crate) fn document_to_html_disables_enhancers_for_txt() {
     let raw = "Math: $$E=mc^2$$\nMermaid:\n```mermaid\ngraph TD\nA-->B\n```\n";
-    let (html, flags, _) = document_to_html(Path::new("notes.txt"), raw);
+    let (html, flags, _, _) = document_to_html(Path::new("notes.txt"), raw, false);
 
     assert!(!flags.math);
     assert!(!flags.mermaid);
@@ -728,6 +729,10 @@ pub(crate) fn page_separates_new_file_from_open_and_debounces_autosave() {
     assert!(page.contains("id=\"tab-switcher\""));
     assert!(page.contains("data-shortcut-toggle=\"switch-tab\""));
     assert!(page.contains("window.__setTabs = function"));
+    // 超大 Markdown 降级提示条：文案 + 出口按钮
+    assert!(page.contains("id=\"doc-notice\""));
+    assert!(page.contains("id=\"doc-notice-action\""));
+    assert!(page.contains("'render-markdown-anyway'"));
     assert!(page.contains("id=\"btn-sidebar\""));
     assert!(page.contains("id=\"sidebar-list\""));
     assert!(page.contains("data-sidebar-section=\"folder\""));
@@ -1108,6 +1113,10 @@ pub(crate) fn ipc_messages_parse_into_typed_commands() {
         })
     );
     assert_eq!(
+        parse_ipc_message("render-markdown-anyway"),
+        Some(IpcMessage::RenderMarkdownAnyway)
+    );
+    assert_eq!(
         parse_ipc_message("remember-position:0\n0.5"),
         Some(IpcMessage::RememberPosition {
             remember: false,
@@ -1422,7 +1431,7 @@ pub(crate) fn startup_page_stays_small_even_for_a_huge_document() {
     assert!(!page.contains("标记尾"), "首屏页里混进了文档正文");
 
     // 同一份文档走「正文进首屏」的老路子就会顶穿上限，这就是首屏必须延后加载的根据
-    let (html, flags, _) = document_to_html(&file, &raw);
+    let (html, flags, _, _) = document_to_html(&file, &raw, false);
     let document_page = build_page(&html, &raw, None, flags, &strings, false);
     assert!(
         document_page.len() > 2 * 1024 * 1024,
@@ -1719,4 +1728,30 @@ pub(crate) fn markdown_chunk_boundaries_fall_between_blocks() {
             "组内段落必须成对"
         );
     }
+}
+
+/// 超大 Markdown 降级为纯文本：超过阈值不解析 Markdown，提示条要求的"仍按 Markdown 渲染"能覆盖它
+#[test]
+pub(crate) fn large_markdown_falls_back_to_plain_text() {
+    // 阈值按 UTF-8 字节算，这里用 ASCII 撑到刚好超过阈值
+    let body = "# 标题\n\n段落\n\n".repeat(LARGE_MARKDOWN_LIMIT / 12 + 8);
+    let path = Path::new("huge.md");
+    assert!(body.len() > LARGE_MARKDOWN_LIMIT);
+
+    let (html, flags, base_href, degraded) = document_to_html(path, &body, false);
+    assert!(degraded, "超过阈值的 Markdown 应该退化成纯文本");
+    assert!(html.starts_with(r#"<div class="mdp-plain-text">"#));
+    assert!(!html.contains("<h1"), "降级后不应该有 Markdown 解析结果");
+    assert!(!flags.math && !flags.mermaid);
+    assert_eq!(base_href, None);
+
+    // 用户点了"仍按 Markdown 渲染"就按原文渲染，不再降级
+    let (html, _flags, _base, degraded) = document_to_html(path, &body, true);
+    assert!(!degraded);
+    assert!(html.contains("<h1"), "强制渲染时应该有 Markdown 解析结果");
+
+    // 刚好等于阈值的文件不降级
+    let exact = "a".repeat(LARGE_MARKDOWN_LIMIT);
+    let (_html, _flags, _base, degraded) = document_to_html(path, &exact, false);
+    assert!(!degraded, "等于阈值的文件不算超大");
 }

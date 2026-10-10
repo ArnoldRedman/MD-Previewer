@@ -311,16 +311,30 @@ fn encode_wide_to_codepage(wide: &[u16], code_page: u32) -> Option<(Vec<u8>, boo
     Some((bytes, used_default != 0))
 }
 
-/// Markdown 按扩展名识别；其余任何文本文件都按纯文本渲染，不做 Markdown 解析
-pub(crate) fn document_to_html(path: &Path, raw: &str) -> (String, EnhanceFlags, Option<String>) {
+/// 超过这个体积的 Markdown 直接按纯文本渲染。几 MB 的 Markdown 会生成几十万个 DOM
+/// 节点，建节点和内存占用都会跳一个台阶（实测 2MB → 76 万节点），纯文本那条路是快的。
+/// 用户可以在提示条上选择仍按 Markdown 渲染（每个标签各自记着）
+pub(crate) const LARGE_MARKDOWN_LIMIT: usize = 3 * 1024 * 1024;
+
+/// Markdown 按扩展名识别；其余任何文本文件都按纯文本渲染，不做 Markdown 解析。
+/// 返回的第四个值表示这次是否因为体积过大而退化成了纯文本
+pub(crate) fn document_to_html(
+    path: &Path,
+    raw: &str,
+    force_markdown: bool,
+) -> (String, EnhanceFlags, Option<String>, bool) {
     if is_markdown_document(path) {
+        if !force_markdown && raw.len() > LARGE_MARKDOWN_LIMIT {
+            return (txt_to_html(raw), EnhanceFlags::default(), None, true);
+        }
         (
             md_to_html_with_base(raw, path.parent()),
             enhance_flags_for(raw),
             base_href_for_file(path),
+            false,
         )
     } else {
-        (txt_to_html(raw), EnhanceFlags::default(), None)
+        (txt_to_html(raw), EnhanceFlags::default(), None, false)
     }
 }
 /// 先登记自写记录再落盘，文件监听才能把这次写入识别为应用自己的保存

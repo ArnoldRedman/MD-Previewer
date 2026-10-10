@@ -14,6 +14,8 @@ pub struct DocumentTab {
     /// 用户手动切换后由页面回报覆盖，切标签时按这个值恢复
     pub edit_mode: bool,
     pub encoding: Option<String>,
+    /// 超大 Markdown 默认按纯文本打开；用户在提示条上点"仍按 Markdown 渲染"后置位
+    pub force_markdown: bool,
 }
 
 #[derive(Debug, Default)]
@@ -83,6 +85,7 @@ impl DocumentSession {
         self.next_id += 1;
         let id = self.next_id;
         self.tabs.push(DocumentTab {
+            force_markdown: false,
             id,
             missing: !path.exists(),
             path,

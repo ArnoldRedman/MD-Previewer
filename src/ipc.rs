@@ -65,6 +65,8 @@ pub(crate) enum IpcMessage {
     EditMode(bool),
     /// 当前文件的阅读位置（0~1）：只有已记住的文件会被落盘
     ReadingProgress(f64),
+    /// 提示条上的"仍按 Markdown 渲染"：这次不要按纯文本降级
+    RenderMarkdownAnyway,
     /// 点书签按钮：记住/不记住当前文件的阅读位置，带上点击时的进度
     RememberPosition {
         remember: bool,
@@ -105,6 +107,7 @@ pub(crate) fn parse_ipc_message(body: &str) -> Option<IpcMessage> {
         "ready" => Some(IpcMessage::Ready),
         "refresh" => Some(IpcMessage::Refresh),
         "save-skipped" => Some(IpcMessage::SaveSkipped),
+        "render-markdown-anyway" => Some(IpcMessage::RenderMarkdownAnyway),
         "open-log" => Some(IpcMessage::OpenLog),
         "clear-log" => Some(IpcMessage::ClearLog),
         _ => None,
