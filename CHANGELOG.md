@@ -2,6 +2,21 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.5.4
+
+- **大 Markdown 不再卡 (Large Markdown Files)**:
+  - 几 MB 的 Markdown 会生成几十万个 DOM 节点，之前打开与每次重排（开侧栏、缩放、改窗口大小）都要整篇重排一遍；现在顶层块按 100 个一组、超过 256KB 才分组，屏外组的布局与绘制直接跳过。
+  - 实测（同一台机器）：1MB 文档首次布局 502ms → 5ms，2MB 文档 1011ms → 10ms，之后的缩放/侧栏重排从 473–967ms 降到 1–13ms。
+  - 分组后总高度与真实高度差在 1% 以内（拿不到校准值时用兑底预估值，差约 12%），所以滚动条与“记住阅读位置”的比例仍然准；作者模式取正文、目录跳转、搜索跳转均不受影响。
+- **Ctrl+Tab 在最近用过的标签之间切换 (Tab Switcher)**:
+  - 按住 Ctrl 弹出列表，连按 Tab 往下选、Shift+Tab 往回选，松开 Ctrl 才真正切走；Esc 或点到别处放弃。列表按最近使用排序，当前标签永远在第一项，所以按一下再松开就是回到上一个看的文件。
+  - 也支持鼠标：移到哪一项就选中哪一项，点一下就切过去。
+  - 和其他快捷键一样，可以在设置里单独关掉；只有一个标签时不弹列表。
+  - 只认真正的 Ctrl：macOS 上 Cmd+Tab 是系统切应用，页面拿不到（VS Code 的切换器也是 Ctrl+Tab）。
+- **标签栏宽度固定、横向滚动 (Tab Bar)**:
+  - 以前标签一多就一路缩到 96px，文件名几乎看不清；现在宽度固定 180px，放不下就横向滚动。
+  - 鼠标纵向滚轮在标签栏上转成横向滚动，触控板的横向滚轮也认；没有溢出时不抢滚轮事件，正文照常上下滚。
+
 ## 1.5.3
 
 - **换文件从头打开，书签记住阅读位置 (Reading Position)**:
