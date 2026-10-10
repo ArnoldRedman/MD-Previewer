@@ -12,7 +12,9 @@ use crate::document::decode_windows_codepage;
 use crate::finder::{create_finder_file, normalize_new_markdown_path};
 use crate::i18n::{Lang, Strings};
 use crate::ipc::{parse_finder_action, parse_ipc_message, FinderAction, IpcMessage, TabAction};
-use crate::markdown::{enhance_flags_for, md_to_html, md_to_html_with_base, EnhanceFlags};
+use crate::markdown::{
+    enhance_flags_for, md_to_html, md_to_html_with_base, txt_to_html, EnhanceFlags,
+};
 use crate::page::{build_page, build_page_with_encoding, empty_preview_html, startup_page};
 use crate::paths::{
     is_listed_document, is_markdown_document, is_supported_document, local_document_path_from_url,
@@ -1615,4 +1617,42 @@ pub(crate) fn reading_positions_drop_records_without_a_file() {
         "没有记录时不该留下空配置文件: {}",
         store_path.display()
     );
+}
+
+/// 纯文本分块只改变 DOM 数量，文本内容必须和整篇渲染逐字一致
+#[test]
+pub(crate) fn plain_text_chunks_preserve_the_whole_text() {
+    let raw: String = (1..=450)
+        .map(|n| format!("line {n} <tag> & 值\r\n"))
+        .collect();
+    let html = txt_to_html(&raw);
+
+    assert!(html.starts_with(r#"<div class="mdp-plain-text">"#));
+    assert!(html.ends_with("</div>"));
+    assert_eq!(
+        html.matches(r#"<div class="mdp-text-chunk">"#).count(),
+        3,
+        "450 行应该切成 3 块: {html}"
+    );
+    // 每块取回文本（反转义）再拼起来，应当与原文完全相同
+    let mut restored = String::new();
+    for chunk in html.split(r#"<div class="mdp-text-chunk">"#).skip(1) {
+        let body = chunk.split("</div>").next().unwrap_or("");
+        restored.push_str(
+            &body
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&"),
+        );
+    }
+    assert_eq!(restored, raw);
+}
+
+/// 小文件保持单块：常规文档的 DOM 结构不因为这次改动变多
+#[test]
+pub(crate) fn plain_text_short_documents_stay_one_chunk() {
+    let raw = "短文档\n第二行\n";
+    let html = txt_to_html(raw);
+    assert_eq!(html.matches(r#"<div class="mdp-text-chunk">"#).count(), 1);
+    assert!(html.contains("短文档\n第二行\n</div>"));
 }

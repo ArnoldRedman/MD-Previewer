@@ -365,12 +365,39 @@ fn unique_heading_id(base: String, seen: &mut HashMap<String, usize>) -> String 
     id
 }
 
-/// 纯文本渲染为保留换行与空格的 HTML 容器，特殊符号统一做 HTML 转义
+/// 纯文本每块的行数：块是 `content-visibility` 的粒度，块内行数决定懒布局的粗细。
+/// 十几 MB 的文本整篇一个文本节点时，任何一次重排（缩放、开侧栏、改窗口大小）
+/// 都要重新排整篇，分块后屏外的块不参与布局
+const PLAIN_TEXT_CHUNK_LINES: usize = 200;
+
+/// 纯文本渲染为保留换行与空格的 HTML 容器，特殊符号统一做 HTML 转义。
+/// 按行切成块，块边界只落在换行之后，文本内容与不分块时逐字一致
 pub(crate) fn txt_to_html(raw: &str) -> String {
-    format!(
-        r#"<div class="mdp-plain-text">{}</div>"#,
-        html_escape_text(raw)
-    )
+    let mut html = String::with_capacity(raw.len() + raw.len() / 32 + 64);
+    html.push_str(r#"<div class="mdp-plain-text">"#);
+    let mut chunk = String::new();
+    let mut lines = 0;
+    for line in raw.split_inclusive('\n') {
+        chunk.push_str(line);
+        lines += 1;
+        if lines == PLAIN_TEXT_CHUNK_LINES {
+            push_plain_text_chunk(&mut html, &mut chunk);
+            lines = 0;
+        }
+    }
+    push_plain_text_chunk(&mut html, &mut chunk);
+    html.push_str("</div>");
+    html
+}
+
+fn push_plain_text_chunk(html: &mut String, chunk: &mut String) {
+    if chunk.is_empty() {
+        return;
+    }
+    html.push_str(r#"<div class="mdp-text-chunk">"#);
+    html.push_str(&html_escape_text(chunk));
+    html.push_str("</div>");
+    chunk.clear();
 }
 
 /// 根据文档扩展名分发渲染：txt 走纯文本保留换行，md 走标准 Markdown 解析与增强

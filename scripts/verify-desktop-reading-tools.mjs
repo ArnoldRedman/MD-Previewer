@@ -13,6 +13,20 @@ const pageConfig = configScript({
   statCharsJs: '字符',
 });
 
+// 字数统计在空闲时间分片算，先等状态栏落到期望值再断言
+async function waitForStats(expected) {
+  try {
+    await page.waitForFunction(
+      (want) => document.getElementById('doc-stats').textContent === want,
+      expected,
+      { timeout: 5000 },
+    );
+  } catch (error) {
+    const actual = await page.locator('#doc-stats').textContent();
+    throw new Error(`stats should be '${expected}', got '${actual}'`, { cause: error });
+  }
+}
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
 await page.route('https://md-previewer.test/**', (route) => route.fulfill({
@@ -108,22 +122,22 @@ await page.evaluate(() => window.__setContent(
   false,
 ));
 
+await waitForStats('3 字 · 5 字符');
 let result = await page.evaluate(() => ({
-  stats: document.getElementById('doc-stats').textContent,
   scale: getComputedStyle(document.documentElement).getPropertyValue('--content-scale').trim(),
   toolbarWidth: document.getElementById('btn-open').getBoundingClientRect().width,
 }));
-if (result.stats !== '3 字 · 5 字符' || result.scale !== '1' || result.toolbarWidth !== 34) {
+if (result.scale !== '1' || result.toolbarWidth !== 34) {
   throw new Error(`initial reading tools failed: ${JSON.stringify(result)}`);
 }
 
 await page.locator('#btn-toggle').click();
 await page.locator('#editor').fill('你 好');
+await waitForStats('2 字 · 3 字符');
 result = await page.evaluate(() => ({
-  stats: document.getElementById('doc-stats').textContent,
   dirty: window.__messages.includes('dirty:1'),
 }));
-if (result.stats !== '2 字 · 3 字符' || !result.dirty) {
+if (!result.dirty) {
   throw new Error(`live stats failed: ${JSON.stringify(result)}`);
 }
 await page.locator('#btn-toggle').click();

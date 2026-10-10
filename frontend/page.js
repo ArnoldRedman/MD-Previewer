@@ -138,21 +138,44 @@
 	  findClose.innerHTML = ICON_CLOSE;
 
   function inEdit() { return document.body.classList.contains('editing'); }
-  function textSegments(text) {
-    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
-      var segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-      return Array.from(segmenter.segment(text), function(item) { return item.segment; });
-    }
-    return Array.from(text);
-  }
+  var SINGLE_SPACE = /^\s$/u;
+  // 字数统计只是状态栏展示：十四 MB 的文档一次扫完要几百毫秒，会把打开文件和每次
+  // 输入都卡住，所以按时间片在空闲时间算，算完再写进去；期间有新请求就丢掉旧的
+  var STATS_SLICE_MS = 8;
+  var statsToken = 0;
   function updateDocumentStats(raw) {
-    var segments = textSegments(String(raw || ''));
-    var words = segments.reduce(function(total, segment) {
-      return total + (/^\s+$/u.test(segment) ? 0 : 1);
-    }, 0);
-    var number = new Intl.NumberFormat().format;
-    docStats.textContent =
-      number(words) + ' ' + STAT_WORDS + ' · ' + number(segments.length) + ' ' + STAT_CHARS;
+    var text = String(raw || '');
+    var segmenter = (typeof Intl !== 'undefined' && Intl.Segmenter)
+      ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+      : null;
+    var items = (segmenter ? segmenter.segment(text) : text)[Symbol.iterator]();
+    var token = (statsToken = statsToken + 1);
+    var words = 0;
+    var chars = 0;
+    var idle = window.requestIdleCallback || function(fn) { return setTimeout(fn, 0); };
+    idle(function count() {
+      var deadline = performance.now() + STATS_SLICE_MS;
+      var ticks = 0;
+      for (;;) {
+        var step = items.next();
+        if (step.done) {
+          if (token === statsToken) {
+            var number = new Intl.NumberFormat().format;
+            docStats.textContent =
+              number(words) + ' ' + STAT_WORDS + ' · ' + number(chars) + ' ' + STAT_CHARS;
+          }
+          return;
+        }
+        var segment = segmenter ? step.value.segment : step.value;
+        chars += 1;
+        if (!(segment.length === 1 && SINGLE_SPACE.test(segment))) words += 1;
+        // 每 4096 段看一次时钟，避免 performance.now() 成为统计本身的开销
+        if ((ticks++ & 0xfff) === 0 && performance.now() > deadline) {
+          if (token === statsToken) idle(count);
+          return;
+        }
+      }
+    });
   }
   function loadZoomPercent() {
     try {

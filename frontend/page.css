@@ -144,6 +144,13 @@ body.has-tabs { --bar-top: 40px; }
   line-height: 1.65;
   tab-size: 4;
 }
+/* 纯文本按 200 行一块前后端切开，屏外的块直接跳过 layout/paint：
+   大文件滚动时不会每帧重排整篇。预估高度 = 块内行数 × 行高（1.65 × 14px），
+   和真实高度一致，滚动条不会因为懒布局跳动 */
+#preview .mdp-text-chunk {
+  content-visibility: auto;
+  contain-intrinsic-size: auto calc(200 * 1.65 * 14px * var(--content-scale));
+}
 	.empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
 	  min-height: 60vh; color: #999; font-size: 18px; gap: 12px; text-align: center; }
 	.empty.has-recent {
