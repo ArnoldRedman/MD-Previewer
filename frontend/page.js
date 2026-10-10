@@ -253,16 +253,40 @@
       requestAnimationFrame(restore);
     });
   }
-  // 阅读位置：滚动停下来后上报一次比例，只给已记住位置的文件落盘
+  // 阅读位置：滚动停下来后上报一次比例，只给已记住位置的文件落盘。
+  // 标签 id 和比例都在滚动发生时就取好：防抖到期时可能已经切到别的文档，
+  // 那时再读会把这一份的位置算到另一份头上（会把别人的书签覆盖掉）
   var SCROLL_REPORT_DEBOUNCE_MS = 250;
+  // 换文档时页面要先归零再按记住的比例恢复，这些程序性滚动不是阅读位置，
+  // 一律不上报（否则会把书签改成顶部或恢复过程中的半路值）
+  var SCROLL_REPORT_SETTLE_MS = 400;
   var scrollReportTimer = 0;
+  var suppressScrollReports = false;
+  var pendingScrollReport = '';
   window.addEventListener('scroll', function() {
+    if (suppressScrollReports || !activeTabId) return;
+    // 标签 id 和比例一起在滚动发生时取好：防抖到期时可能已经切到别的文档，
+    // 那时再读会把这一份的位置算到另一份头上
+    pendingScrollReport = activeTabId + ':' + currentScrollProgress().toFixed(4);
     if (scrollReportTimer) clearTimeout(scrollReportTimer);
     scrollReportTimer = setTimeout(function() {
       scrollReportTimer = 0;
-      window.ipc.postMessage('reading-progress:' + currentScrollProgress().toFixed(4));
+      if (!pendingScrollReport) return;
+      window.ipc.postMessage('reading-progress:' + pendingScrollReport);
+      pendingScrollReport = '';
     }, SCROLL_REPORT_DEBOUNCE_MS);
   }, { passive: true });
+
+  /// 换文档：既要结束上一份的上报，也要吃掉归零/恢复产生的滚动事件
+  function beginDocumentSwitch() {
+    suppressScrollReports = true;
+    if (scrollReportTimer) {
+      clearTimeout(scrollReportTimer);
+      scrollReportTimer = 0;
+    }
+    pendingScrollReport = '';
+    setTimeout(function() { suppressScrollReports = false; }, SCROLL_REPORT_SETTLE_MS);
+  }
 
   // 书签按钮：高亮（实心）表示这个文件下次从上次的位置打开，灰色则从头打开
   var L_REMEMBER = CFG.btnRememberJs;
@@ -1911,8 +1935,12 @@
 	    // 组高预估的校准在下一帧完成，校准之后要按新总高度重落一次阅读位置
 	    pendingRestoreProgress = typeof restoreProgress === 'number' ? restoreProgress : null;
 	    window.__setPreview(previewHtml, needsMath, needsMermaid);
-	    // 已记住阅读位置的文件恢复到上次的比例，其余文件停在开头
+	    // 换文档期间不上报：归零和恢复都是程序性滚动
+	    beginDocumentSwitch();
+	    // 已记住阅读位置的文件恢复到上次的比例，其余文件停在开头。
+	    // 归零交给页面做：Rust 那边在内容还没换的时候就归零，会被记成上一份文档的位置
 	    if (typeof restoreProgress === 'number') restoreScrollProgress(restoreProgress);
+	    else window.scrollTo(0, 0);
 	    // 编辑中且有未保存内容时保留编辑框，只刷新预览；待触发的自动保存也必须留着
 	    if (!inEdit() || !dirty) {
 	      cancelPendingAutosave();

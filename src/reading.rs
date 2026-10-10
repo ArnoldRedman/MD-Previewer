@@ -31,7 +31,12 @@ impl ReadingPositions {
         let mut positions = Self::default();
         for (path, progress) in saved.positions {
             // 手改或损坏的记录里可能出现相对路径、目录或越界比例，一律丢掉
-            if !path.is_absolute() || !path.is_file() || !is_valid_progress(progress) {
+            if !path.is_absolute() || !is_valid_progress(progress) {
+                continue;
+            }
+            // 只在"父目录还在、文件确实没了"时才当成失效记录：移动硬盘没插、网盘还没挂上
+            // 时父目录也不存在，那种情况要留着，不然一次误判就把书签永久删掉了
+            if !path.is_file() && path.parent().is_some_and(Path::exists) {
                 continue;
             }
             positions.positions.insert(path, progress);

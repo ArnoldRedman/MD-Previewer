@@ -63,8 +63,11 @@ pub(crate) enum IpcMessage {
     DirtyChanged(bool),
     /// 页面手动切换预览/编辑模式；按标签记住，切回来时恢复
     EditMode(bool),
-    /// 当前文件的阅读位置（0~1）：只有已记住的文件会被落盘
-    ReadingProgress(f64),
+    /// 某个标签的阅读位置（0~1）：带着标签 id，只有已记住的文件会被落盘
+    ReadingProgress {
+        tab_id: u64,
+        progress: f64,
+    },
     /// 提示条上的"仍按 Markdown 渲染"：这次不要按纯文本降级
     RenderMarkdownAnyway,
     /// 点书签按钮：记住/不记住当前文件的阅读位置，带上点击时的进度
@@ -164,7 +167,14 @@ pub(crate) fn parse_ipc_message(body: &str) -> Option<IpcMessage> {
         }
         "save" => IpcMessage::Save(rest.to_string()),
         "set-encoding" => IpcMessage::SetEncoding(rest.to_string()),
-        "reading-progress" => IpcMessage::ReadingProgress(rest.parse().ok()?),
+        // 标签 id 和比例一起报来：位置要记在真正滚动过的那个文档上
+        "reading-progress" => {
+            let (tab_id, progress) = rest.split_once(':')?;
+            IpcMessage::ReadingProgress {
+                tab_id: tab_id.parse().ok()?,
+                progress: progress.parse().ok()?,
+            }
+        }
         // 页面点书签时把当前位置一起带上，避免等下一次滚动上报才拿到进度
         "remember-position" => {
             let (remember, progress) = rest.split_once('\n').unwrap_or((rest, "0"));

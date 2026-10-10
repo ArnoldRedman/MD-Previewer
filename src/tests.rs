@@ -1101,10 +1101,18 @@ pub(crate) fn ipc_messages_parse_into_typed_commands() {
     assert_eq!(parse_ipc_message("tab-action:activate:abc"), None);
     assert_eq!(parse_ipc_message("tab-action:rename:3"), None);
     assert_eq!(
-        parse_ipc_message("reading-progress:0.25"),
-        Some(IpcMessage::ReadingProgress(0.25))
+        parse_ipc_message("reading-progress:7:0.25"),
+        Some(IpcMessage::ReadingProgress {
+            tab_id: 7,
+            progress: 0.25,
+        })
     );
-    assert_eq!(parse_ipc_message("reading-progress:abc"), None);
+    assert_eq!(
+        parse_ipc_message("reading-progress:0.25"),
+        None,
+        "没有标签 id 的旧格式要拒掉"
+    );
+    assert_eq!(parse_ipc_message("reading-progress:abc:0.25"), None);
     assert_eq!(
         parse_ipc_message("remember-position:1\n0.5"),
         Some(IpcMessage::RememberPosition {
@@ -1754,4 +1762,33 @@ pub(crate) fn large_markdown_falls_back_to_plain_text() {
     let exact = "a".repeat(LARGE_MARKDOWN_LIMIT);
     let (_html, _flags, _base, degraded) = document_to_html(path, &exact, false);
     assert!(!degraded, "等于阈值的文件不算超大");
+}
+
+/// 盘没插/网盘没挂时不能把书签当失效记录删掉，只有父目录还在、文件确实没了才算失效
+#[test]
+pub(crate) fn reading_positions_keep_records_on_missing_volumes() {
+    let dir = temp_test_dir("reading-volume");
+    let store_path = dir.join("reading-positions.json");
+    let deleted = dir.join("deleted.md");
+    fs::write(&deleted, "# x\n").unwrap();
+
+    let mut positions = ReadingPositions::load(&store_path);
+    positions.set(&deleted, 0.5);
+    // 整个目录都不存在：模拟移动硬盘没插（Windows 上就是盘符没了）
+    let unmounted = Path::new("Z:/not-mounted/书.md").to_path_buf();
+    positions.set(&unmounted, 0.25);
+    positions.save(&store_path);
+    fs::remove_file(&deleted).unwrap();
+
+    let reloaded = ReadingPositions::load(&store_path);
+    assert_eq!(
+        reloaded.get(&deleted),
+        None,
+        "父目录还在、文件没了 → 记录该清理"
+    );
+    assert_eq!(
+        reloaded.get(&unmounted),
+        Some(0.25),
+        "目录整块不存在（盘没挂）时记录要留着"
+    );
 }

@@ -281,9 +281,23 @@ if (started !== 0) {
   throw new Error(`null progress must stay at the top, scrollY=${started}`);
 }
 
-// 滚动停下来后上报比例，滚动过程中不刷屏
-await page.evaluate(() => { window.__messages.length = 0; });
-await page.evaluate(() => scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * 0.25));
+// 滚动停下来后上报一次，滚动过程中不刷屏；上报内容带标签 id 和当时的比例
+await page.evaluate((source) => {
+  window.__messages.length = 0;
+  // 用同一份高文档，保证确实能滚动
+  window.__setContent(source, 'doc', '', false, false, null);
+  window.__setTabs([
+    { id: 31, name: 'doc.md', path: 'D:/docs/doc.md', active: true, dirty: false, missing: false },
+  ]);
+}, previewBlocks);
+// 换文档后的归零/恢复期间不上报，等静默窗口过去再滚
+await page.waitForTimeout(500);
+const scrolled = await page.evaluate(() => {
+  window.__messages.length = 0;
+  const max = document.documentElement.scrollHeight - innerHeight;
+  scrollTo(0, max * 0.25);
+  return { expected: scrollY / (document.documentElement.scrollHeight - innerHeight), max: Math.round(max) };
+});
 await page.waitForTimeout(400);
 const scrollReports = await page.evaluate(
   () => window.__messages.filter((message) => message.startsWith('reading-progress:')),
@@ -291,8 +305,53 @@ const scrollReports = await page.evaluate(
 if (scrollReports.length !== 1) {
   throw new Error(`expected one debounced scroll report, got ${JSON.stringify(scrollReports)}`);
 }
-if (Math.abs(Number(scrollReports[0].split(':')[1]) - 0.25) > 0.02) {
-  throw new Error(`scroll report ratio is off: ${scrollReports[0]}`);
+const [reportTabId, reportRatioValue] = scrollReports[0].replace('reading-progress:', '').split(':');
+if (Number(reportTabId) !== 31) {
+  throw new Error(`scroll report should carry the tab id: ${scrollReports[0]}`);
+}
+if (Math.abs(Number(reportRatioValue) - scrolled.expected) > 0.02) {
+  const all = await page.evaluate(() => window.__messages.slice());
+  throw new Error(
+    `scroll report ratio should match the scrolled position: ${scrollReports[0]} vs ${scrolled.expected} :: ${JSON.stringify(all)}`,
+  );
+}
+
+// 9. 换文档（真实流程：推送新内容 + 切标签）不能把上一份的位置上报成"读到顶部"
+//    这正是把书签改成 0.0006 的元凶：Rust 以前在换文档前先 scrollTo(0,0)，
+//    那个程序性归零被当成用户在读的位置记到了上一份文档头上
+const switched = await page.evaluate(async (source) => {
+  window.__messages.length = 0;
+  window.__setTabs([
+    { id: 41, name: 'aaa.md', path: 'D:/docs/aaa.md', active: true, dirty: false, missing: false },
+    { id: 42, name: 'bbb.md', path: 'D:/docs/bbb.md', active: false, dirty: false, missing: false },
+  ]);
+  window.__setContent(source, 'doc', '', false, false, null);
+  await new Promise((resolve) => setTimeout(resolve, 500)); // 等换文档的静默窗口过去
+  // 读者滚到 40%，然后在同一个任务里切走（应用里切标签就是这样：内容与标签一起换）
+  scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * 0.4);
+  window.__setContent(source, 'doc', '', false, false, null);
+  window.__setTabs([
+    { id: 41, name: 'aaa.md', path: 'D:/docs/aaa.md', active: false, dirty: false, missing: false },
+    { id: 42, name: 'bbb.md', path: 'D:/docs/bbb.md', active: true, dirty: false, missing: false },
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  return window.__messages.filter((message) => message.startsWith('reading-progress:'));
+}, previewBlocks);
+if (switched.length) {
+  throw new Error(
+    `switching documents must not report a position for the outgoing tab: ${JSON.stringify(switched)}`,
+  );
+}
+
+// 10. 静默窗口过去之后，新文档自己的滚动仍然要带上它自己的标签
+const afterSwitch = await page.evaluate(async () => {
+  window.__messages.length = 0;
+  scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * 0.6);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  return window.__messages.filter((message) => message.startsWith('reading-progress:'));
+});
+if (afterSwitch.length !== 1 || !afterSwitch[0].startsWith('reading-progress:42:')) {
+  throw new Error(`after a switch the new tab must report itself: ${JSON.stringify(afterSwitch)}`);
 }
 
 await browser.close();

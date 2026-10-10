@@ -168,11 +168,18 @@ impl App {
         self.render_active();
     }
 
-    /// 页面上报的阅读位置：只有已记住的文件留在内存里，别的文件重开时从开头开始
-    fn on_reading_progress(&mut self, progress: f64) {
-        let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
+    /// 页面上报的阅读位置：记在真正滚动过的那个标签上，不是"消息到的时候活动的标签"
+    fn on_reading_progress(&mut self, tab_id: u64, progress: f64) {
+        let Some(path) = self
+            .session
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| tab.path.clone())
+        else {
             return;
         };
+        // 只有已记住的文件留在内存里，别的文件重开时从开头开始
         if self.reading.remember(&path) {
             self.reading.set(&path, progress);
         }
@@ -249,9 +256,8 @@ impl App {
         self.persist_session();
         // 离开旧文档前把它的阅读位置落盘，后面 render_active 会决定新文档从哪儿开始
         self.save_reading();
-        // 换文档时页面不重载，滚动位置会留在上一个文件；先归零，
-        // 已记住位置的文件随后由 __setContent 恢复到上次的进度
-        self.eval("window.scrollTo(0, 0);");
+        // 换文档时的归零交给页面在 __setContent 里做：在这里先滚会把上一份文档的
+        // 位置当成"用户读到顶部"上报，直接把它的书签覆盖掉
         self.render_active();
         self.install_watcher();
     }
@@ -902,7 +908,9 @@ impl App {
             }
             IpcMessage::ExternalChangeResolved { dirty } => self.on_external_change_resolved(dirty),
             IpcMessage::RenderMarkdownAnyway => self.render_active_as_markdown(),
-            IpcMessage::ReadingProgress(progress) => self.on_reading_progress(progress),
+            IpcMessage::ReadingProgress { tab_id, progress } => {
+                self.on_reading_progress(tab_id, progress)
+            }
             IpcMessage::RememberPosition { remember, progress } => {
                 self.set_remember_position(remember, progress)
             }
