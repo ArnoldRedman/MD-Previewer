@@ -354,5 +354,65 @@ if (afterSwitch.length !== 1 || !afterSwitch[0].startsWith('reading-progress:42:
   throw new Error(`after a switch the new tab must report itself: ${JSON.stringify(afterSwitch)}`);
 }
 
+// 11. 缩放：没记住位置的文件写全局默认值，记住位置（书签）的文件按文件上报，
+//     所以给一个书签文件调缩放不会把别的文件一起改掉
+await page.evaluate(() => {
+  window.__messages.length = 0;
+  window.__setTabs([
+    { id: 51, name: 'book.md', path: 'D:/docs/book.md', active: true, dirty: false, missing: false },
+  ]);
+  window.__setRememberPosition(false);
+  localStorage.setItem('md-previewer-content-zoom-v1', '100');
+  window.__setContent(document.getElementById('preview').innerHTML, 'doc', '', false, false, null, false, null);
+});
+await page.locator('#btn-zoom').click();
+await page.locator('#btn-zoom-in').click();
+let bookmarkedZoom = await page.evaluate(() => ({
+  label: document.getElementById('btn-zoom-reset').textContent,
+  stored: localStorage.getItem('md-previewer-content-zoom-v1'),
+  messages: window.__messages.slice(),
+}));
+if (bookmarkedZoom.label !== '110%' || bookmarkedZoom.stored !== '110' ||
+    bookmarkedZoom.messages.some((message) => message.startsWith('reading-zoom:'))) {
+  throw new Error(`without a bookmark the zoom is the global default: ${JSON.stringify(bookmarkedZoom)}`);
+}
+
+await page.evaluate(() => {
+  window.__messages.length = 0;
+  window.__setRememberPosition(true);
+});
+await page.locator('#btn-zoom-in').click();
+bookmarkedZoom = await page.evaluate(() => ({
+  label: document.getElementById('btn-zoom-reset').textContent,
+  stored: localStorage.getItem('md-previewer-content-zoom-v1'),
+  messages: window.__messages.slice(),
+}));
+if (bookmarkedZoom.label !== '120%' || bookmarkedZoom.stored !== '110' ||
+    bookmarkedZoom.messages.join('|') !== 'reading-zoom:51:120') {
+  throw new Error(`a bookmarked file must report its own zoom: ${JSON.stringify(bookmarkedZoom)}`);
+}
+
+// 12. 打开时就带上缩放：书签文件按书签里的值，没记住的退回全局默认值
+await page.evaluate((source) => {
+  window.__setContent(source, 'doc', '', false, false, null, false, 140);
+}, previewBlocks);
+let reopened = await page.evaluate(() => ({
+  label: document.getElementById('btn-zoom-reset').textContent,
+  scale: getComputedStyle(document.documentElement).getPropertyValue('--content-scale').trim(),
+}));
+if (reopened.label !== '140%' || reopened.scale !== '1.4') {
+  throw new Error(`a bookmarked file should open at its own zoom: ${JSON.stringify(reopened)}`);
+}
+await page.evaluate((source) => {
+  window.__setContent(source, 'doc', '', false, false, null, false, null);
+}, previewBlocks);
+reopened = await page.evaluate(() => ({
+  label: document.getElementById('btn-zoom-reset').textContent,
+  scale: getComputedStyle(document.documentElement).getPropertyValue('--content-scale').trim(),
+}));
+if (reopened.label !== '110%' || reopened.scale !== '1.1') {
+  throw new Error(`a file without a bookmark falls back to the global zoom: ${JSON.stringify(reopened)}`);
+}
+
 await browser.close();
 console.log('[desktop-reading-tools-verify] OK');

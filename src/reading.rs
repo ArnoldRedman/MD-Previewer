@@ -6,14 +6,19 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct PersistedReading {
+    // 缩放是后加的字段，带 default 就是旧版本写的文件照样能读，所以版本号不用动
     version: u8,
     positions: BTreeMap<PathBuf, f64>,
+    /// 路径 -> 正文缩放百分比；只有记住位置的文件有，没记住的共用页面的全局缩放
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    zooms: BTreeMap<PathBuf, f64>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct ReadingPositions {
     /// 路径 -> 阅读进度比例（0~1）；只存已记住的文件，没记住的走默认的从头打开
     positions: BTreeMap<PathBuf, f64>,
+    zooms: BTreeMap<PathBuf, f64>,
 }
 
 impl ReadingPositions {
@@ -41,6 +46,12 @@ impl ReadingPositions {
             }
             positions.positions.insert(path, progress);
         }
+        // 缩放是书签的一部分：没有对应位置记录的（旧版本写的或刚被裁掉的）一律丢掉
+        for (path, zoom) in saved.zooms {
+            if is_valid_zoom(zoom) && positions.positions.contains_key(&path) {
+                positions.zooms.insert(path, zoom);
+            }
+        }
         positions
     }
 
@@ -63,6 +74,7 @@ impl ReadingPositions {
         let saved = PersistedReading {
             version: 1,
             positions: self.positions.clone(),
+            zooms: self.zooms.clone(),
         };
         match serde_json::to_vec(&saved) {
             Ok(raw) => {
@@ -89,11 +101,31 @@ impl ReadingPositions {
         self.positions.insert(path.to_path_buf(), progress);
     }
 
+    /// 书签里记下的正文缩放；没记住位置的文件返回 None，页面退回全局缩放
+    pub(crate) fn zoom(&self, path: &Path) -> Option<f64> {
+        self.zooms.get(path).copied()
+    }
+
+    pub(crate) fn set_zoom(&mut self, path: &Path, zoom: f64) {
+        // 缩放只跟在书签上，没记住位置的文件不留孤立记录
+        if !is_valid_zoom(zoom) || !self.positions.contains_key(path) {
+            return;
+        }
+        self.zooms.insert(path.to_path_buf(), zoom);
+    }
+
     pub(crate) fn remove(&mut self, path: &Path) {
         self.positions.remove(path);
+        // 缩放属于书签，取消记住时一起删掉
+        self.zooms.remove(path);
     }
 }
 
 fn is_valid_progress(progress: f64) -> bool {
     progress.is_finite() && (0.0..=1.0).contains(&progress)
+}
+
+/// 只挡损坏值，具体范围由页面自己的 ZOOM_MIN/ZOOM_MAX 夹住，避免两处各写一份边界
+fn is_valid_zoom(zoom: f64) -> bool {
+    zoom.is_finite() && zoom > 0.0
 }

@@ -720,6 +720,7 @@ pub(crate) fn page_separates_new_file_from_open_and_debounces_autosave() {
     assert!(page.contains("id=\"btn-remember\""));
     assert!(page.contains("window.__setRememberPosition"));
     assert!(page.contains("'reading-progress:'"));
+    assert!(page.contains("'reading-zoom:' + activeTabId"));
     assert!(page.contains("md-previewer-content-zoom-v1"));
     assert!(page.contains("data-setting=\"author-mode\" data-value=\"on\""));
     assert!(page.contains("class=\"settings-help\""));
@@ -1114,10 +1115,20 @@ pub(crate) fn ipc_messages_parse_into_typed_commands() {
     );
     assert_eq!(parse_ipc_message("reading-progress:abc:0.25"), None);
     assert_eq!(
-        parse_ipc_message("remember-position:1\n0.5"),
+        parse_ipc_message("reading-zoom:7:130"),
+        Some(IpcMessage::ReadingZoom {
+            tab_id: 7,
+            zoom: 130.0,
+        })
+    );
+    assert_eq!(parse_ipc_message("reading-zoom:130"), None);
+    assert_eq!(parse_ipc_message("reading-zoom:abc:130"), None);
+    assert_eq!(
+        parse_ipc_message("remember-position:1\n0.5\n130"),
         Some(IpcMessage::RememberPosition {
             remember: true,
             progress: 0.5,
+            zoom: Some(130.0),
         })
     );
     assert_eq!(
@@ -1125,11 +1136,21 @@ pub(crate) fn ipc_messages_parse_into_typed_commands() {
         Some(IpcMessage::RenderMarkdownAnyway)
     );
     assert_eq!(
-        parse_ipc_message("remember-position:0\n0.5"),
+        parse_ipc_message("remember-position:0\n0.5\n70"),
         Some(IpcMessage::RememberPosition {
             remember: false,
             progress: 0.5,
+            zoom: Some(70.0),
         })
+    );
+    assert_eq!(
+        parse_ipc_message("remember-position:1\n0.5"),
+        Some(IpcMessage::RememberPosition {
+            remember: true,
+            progress: 0.5,
+            zoom: None,
+        }),
+        "旧格式只有位置时不算缩放"
     );
     assert_eq!(
         parse_ipc_message("convert-encoding:GBK\n正文"),
@@ -1605,6 +1626,64 @@ pub(crate) fn reading_positions_survive_a_round_trip() {
     let reloaded = ReadingPositions::load(&store_path);
     assert_eq!(reloaded.get(&doc), None);
     assert_eq!(reloaded.get(&other), Some(0.0));
+}
+
+/// 书签记住的缩放：只跟在已记住的文件上，取消记住时一起删掉
+#[test]
+pub(crate) fn bookmark_zoom_follows_the_remembered_files() {
+    let dir = temp_test_dir("reading-zoom");
+    let store_path = dir.join("reading-positions.json");
+    let bookmarked = dir.join("bookmarked.md");
+    fs::write(&bookmarked, "# a\n").unwrap();
+    let plain = dir.join("plain.md");
+    fs::write(&plain, "# b\n").unwrap();
+
+    let mut positions = ReadingPositions::load(&store_path);
+    positions.set(&bookmarked, 0.4);
+    positions.set_zoom(&bookmarked, 130.0);
+    // 没记住位置的文件不留缩放，它们用页面的全局缩放
+    positions.set_zoom(&plain, 150.0);
+    assert_eq!(positions.zoom(&plain), None);
+    // 损坏值一律丢掉，不然打开时会变成一个离谱的字号
+    positions.set_zoom(&bookmarked, 0.0);
+    positions.set_zoom(&bookmarked, f64::NAN);
+    assert_eq!(positions.zoom(&bookmarked), Some(130.0));
+    positions.save(&store_path);
+
+    let reloaded = ReadingPositions::load(&store_path);
+    assert_eq!(reloaded.zoom(&bookmarked), Some(130.0));
+    assert_eq!(reloaded.zoom(&plain), None, "非书签文件不该有缩放记录");
+
+    // 取消记住：位置和缩放一起消失
+    let mut positions = reloaded;
+    positions.remove(&bookmarked);
+    assert_eq!(positions.zoom(&bookmarked), None);
+    positions.save(&store_path);
+    let reloaded = ReadingPositions::load(&store_path);
+    assert_eq!(reloaded.zoom(&bookmarked), None);
+}
+
+/// 旧版本写的配置只有位置没有缩放，照样能读，且没有位置的孤立缩放记录会被清掉
+#[test]
+pub(crate) fn reading_config_without_zooms_still_loads() {
+    let dir = temp_test_dir("reading-legacy");
+    let store_path = dir.join("reading-positions.json");
+    let doc = dir.join("doc.md");
+    fs::write(&doc, "# doc\n").unwrap();
+    let orphan = dir.join("orphan.md");
+    fs::write(&orphan, "# orphan\n").unwrap();
+
+    let body = serde_json::json!({
+        "version": 1,
+        "positions": { doc.to_string_lossy(): 0.25 },
+        "zooms": { orphan.to_string_lossy(): 140.0 },
+    });
+    fs::write(&store_path, body.to_string()).unwrap();
+
+    let loaded = ReadingPositions::load(&store_path);
+    assert_eq!(loaded.get(&doc), Some(0.25));
+    assert_eq!(loaded.zoom(&doc), None, "没有记录的文件退回全局缩放");
+    assert_eq!(loaded.zoom(&orphan), None, "没有位置记录的缩放要被清掉");
 }
 
 /// 启动时清掉失效记录：文件被删或被移动后不该留在配置里

@@ -68,12 +68,19 @@ pub(crate) enum IpcMessage {
         tab_id: u64,
         progress: f64,
     },
+    /// 某个标签的正文缩放（百分比）：同上，只有已记住的文件单独记，别的文件走全局缩放
+    ReadingZoom {
+        tab_id: u64,
+        zoom: f64,
+    },
     /// 提示条上的"仍按 Markdown 渲染"：这次不要按纯文本降级
     RenderMarkdownAnyway,
-    /// 点书签按钮：记住/不记住当前文件的阅读位置，带上点击时的进度
+    /// 点书签按钮：记住/不记住当前文件的阅读位置，带上点击时的进度和缩放
     RememberPosition {
         remember: bool,
         progress: f64,
+        /// 旧消息格式没有这一段，缺省表示这次不记缩放
+        zoom: Option<f64>,
     },
     ExternalChangeResolved {
         dirty: bool,
@@ -175,12 +182,23 @@ pub(crate) fn parse_ipc_message(body: &str) -> Option<IpcMessage> {
                 progress: progress.parse().ok()?,
             }
         }
-        // 页面点书签时把当前位置一起带上，避免等下一次滚动上报才拿到进度
+        // 页面点书签时把当前位置和缩放一起带上，不用等下一次变化才拿到
         "remember-position" => {
-            let (remember, progress) = rest.split_once('\n').unwrap_or((rest, "0"));
+            let mut fields = rest.split('\n');
+            let remember = fields.next().unwrap_or("0");
+            let progress = fields.next().unwrap_or("0").parse().unwrap_or(0.0);
             IpcMessage::RememberPosition {
                 remember: remember == "1",
-                progress: progress.parse().unwrap_or(0.0),
+                progress,
+                zoom: fields.next().and_then(|zoom| zoom.parse().ok()),
+            }
+        }
+        // 标签 id 和缩放一起报来：缩放要记在真正被调过缩放的那个文档上
+        "reading-zoom" => {
+            let (tab_id, zoom) = rest.split_once(':')?;
+            IpcMessage::ReadingZoom {
+                tab_id: tab_id.parse().ok()?,
+                zoom: zoom.parse().ok()?,
             }
         }
         "self-update" => IpcMessage::SelfUpdate(rest.to_string()),

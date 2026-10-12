@@ -185,13 +185,31 @@ impl App {
         }
     }
 
-    /// 点书签：记住当前文件的阅读位置，或取消记住并删掉记录
-    fn set_remember_position(&mut self, remember: bool, progress: f64) {
+    /// 页面上报的缩放：只有已记住的文件单独记缩放，别的文件共用页面的全局默认值
+    fn on_reading_zoom(&mut self, tab_id: u64, zoom: f64) {
+        let Some(path) = self
+            .session
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| tab.path.clone())
+        else {
+            return;
+        };
+        self.reading.set_zoom(&path, zoom);
+    }
+
+    /// 点书签：记住当前文件的阅读位置和缩放，或取消记住并删掉记录
+    fn set_remember_position(&mut self, remember: bool, progress: f64, zoom: Option<f64>) {
         let Some(path) = self.session.active().map(|tab| tab.path.clone()) else {
             return;
         };
         if remember {
+            // 先落位置再落缩放：缩放只跟在已记住的位置上
             self.reading.set(&path, progress);
+            if let Some(zoom) = zoom {
+                self.reading.set_zoom(&path, zoom);
+            }
         } else {
             self.reading.remove(&path);
         }
@@ -327,8 +345,13 @@ impl App {
                     Some(progress) => progress.to_string(),
                     None => "null".to_string(),
                 };
+                // 书签里的缩放同样按路径取；没有记录的传 null，页面退回全局缩放
+                let zoom = match self.reading.zoom(&active.path) {
+                    Some(zoom) => zoom.to_string(),
+                    None => "null".to_string(),
+                };
                 self.eval(&format!(
-                    "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {}, {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
+                    "if(window.__setContent)window.__setContent('{}', '{}', '{}', {}, {}, {}, {}, {});if(window.__setEncoding)window.__setEncoding('{}');",
                     escape_js(&html),
                     escape_js(&raw),
                     escape_js(&base_href.unwrap_or_default()),
@@ -336,6 +359,7 @@ impl App {
                     flags.mermaid,
                     restore,
                     degraded,
+                    zoom,
                     escape_js(resolved_encoding)
                 ));
                 self.push_author_doc(&active.path, &raw);
@@ -911,9 +935,12 @@ impl App {
             IpcMessage::ReadingProgress { tab_id, progress } => {
                 self.on_reading_progress(tab_id, progress)
             }
-            IpcMessage::RememberPosition { remember, progress } => {
-                self.set_remember_position(remember, progress)
-            }
+            IpcMessage::ReadingZoom { tab_id, zoom } => self.on_reading_zoom(tab_id, zoom),
+            IpcMessage::RememberPosition {
+                remember,
+                progress,
+                zoom,
+            } => self.set_remember_position(remember, progress, zoom),
             IpcMessage::Print => {
                 if let Err(error) = self.webview.print() {
                     eprintln!("Could not print: {error}");

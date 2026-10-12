@@ -229,7 +229,13 @@
     document.documentElement.style.setProperty('--content-scale', String(zoomPercent / 100));
     btnZoomReset.textContent = zoomPercent + '%';
     if (persist) {
-      try { localStorage.setItem(ZOOM_STORAGE_KEY, String(zoomPercent)); } catch (_) {}
+      // 记住阅读位置的文件：缩放跟着书签按路径存，不写全局默认值，
+      // 否则给一个书签文件调缩放会把没记住位置的文件一起改掉
+      if (rememberPosition && activeTabId) {
+        window.ipc.postMessage('reading-zoom:' + activeTabId + ':' + zoomPercent);
+      } else {
+        try { localStorage.setItem(ZOOM_STORAGE_KEY, String(zoomPercent)); } catch (_) {}
+      }
     }
     if (inEdit()) autoResize();
   }
@@ -307,10 +313,10 @@
   if (btnRemember) {
     applyRememberState();
     btnRemember.addEventListener('click', function() {
-      // 点击时的位置一起报过去，不用等下一次滚动上报
+      // 点击时的位置和缩放一起报过去，不用等下一次变化
       window.ipc.postMessage(
         'remember-position:' + (rememberPosition ? '0' : '1') + '\n' +
-        currentScrollProgress().toFixed(4),
+        currentScrollProgress().toFixed(4) + '\n' + zoomPercent,
       );
     });
   }
@@ -1937,17 +1943,20 @@
 	  e.preventDefault();
 	  requestTabAction('activate', tab.getAttribute('data-tab-id'));
 	});
-	  window.__setContent = function(previewHtml, rawMd, baseHref, needsMath, needsMermaid, restoreProgress, largeDocDegraded) {
+	  window.__setContent = function(previewHtml, rawMd, baseHref, needsMath, needsMermaid, restoreProgress, largeDocDegraded, fileZoom) {
 	    if (docNotice) docNotice.style.display = largeDocDegraded ? 'flex' : 'none';
 	    document.body.classList.remove('empty');
 	    document.body.classList.remove('missing');
 	    resetTransientUi();
 	    window.__setBaseHref(baseHref);
+	    // 换文档期间不上报：应用缩放、归零和恢复都是程序性滚动
+	    beginDocumentSwitch();
+	    // 缩放要在正文写入之前应用：分组懒布局的预估高度是按写入当时的字号量的。
+	    // 书签里有缩放的按书签来，没有的退回全局默认值（全局值不会因为书签文件改缩放而变）
+	    applyZoom(typeof fileZoom === 'number' ? fileZoom : loadZoomPercent(), false);
 	    // 组高预估的校准在下一帧完成，校准之后要按新总高度重落一次阅读位置
 	    pendingRestoreProgress = typeof restoreProgress === 'number' ? restoreProgress : null;
 	    window.__setPreview(previewHtml, needsMath, needsMermaid);
-	    // 换文档期间不上报：归零和恢复都是程序性滚动
-	    beginDocumentSwitch();
 	    // 已记住阅读位置的文件恢复到上次的比例，其余文件停在开头。
 	    // 归零交给页面做：Rust 那边在内容还没换的时候就归零，会被记成上一份文档的位置
 	    if (typeof restoreProgress === 'number') restoreScrollProgress(restoreProgress);
