@@ -144,8 +144,41 @@ if (activated.activeLeft < -1 || activated.activeRight > activated.clientWidth +
   throw new Error(`the active tab should be inside the visible area: ${JSON.stringify(activated)}`);
 }
 
+// 6. 关标签会整条重建标签栏：横向滚动位置要保住，当前标签不在视野里也不能把视线拽回去
+//    （累计标签模式下常见：打开一堆文件后回到最早那个，再滚到最后去叉标签）
+const rebuilt = await page.evaluate(async (tabs) => {
+  const tabsEl = document.getElementById('tabs');
+  window.__setTabs(tabs); // 当前标签是第一个
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  tabsEl.scrollLeft = 900; // 用户滚到后面看别的标签
+  const before = Math.round(tabsEl.scrollLeft);
+  // 关掉最后一个标签：和点叉一样整条重建，当前标签没换
+  window.__setTabs(tabs.slice(0, -1));
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const active = document.querySelector('.tab.active').getBoundingClientRect();
+  const bar = tabsEl.getBoundingClientRect();
+  return {
+    before,
+    after: Math.round(tabsEl.scrollLeft),
+    activeRight: Math.round(active.right - bar.left),
+    overflows: tabsEl.scrollWidth > tabsEl.clientWidth,
+  };
+}, tabsFor(12));
+if (rebuilt.before <= 0 || !rebuilt.overflows) {
+  throw new Error(`the bar should be scrolled and overflowing before the rebuild: ${JSON.stringify(rebuilt)}`);
+}
+if (rebuilt.activeRight > 0) {
+  throw new Error(`the active tab should be out of view for this case: ${JSON.stringify(rebuilt)}`);
+}
+if (rebuilt.after !== rebuilt.before) {
+  throw new Error(
+    `rebuilding the tab bar must keep the scroll position: ${rebuilt.before} -> ${rebuilt.after}`,
+  );
+}
+
 console.log(
   `[desktop-tabbar-scroll-verify] OK width ${many.uniqueWidths[0]}px, overflow ${many.scrollWidth}>${many.clientWidth}, ` +
-    `wheel ${wheel.before}->${wheel.afterDown}->${wheel.afterUp}->${wheel.afterDX}`,
+    `wheel ${wheel.before}->${wheel.afterDown}->${wheel.afterUp}->${wheel.afterDX}, ` +
+    `rebuild keeps scrollLeft ${rebuilt.after}`,
 );
 await browser.close();

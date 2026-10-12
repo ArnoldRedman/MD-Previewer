@@ -1875,6 +1875,11 @@
 	};
 	window.__setTabs = function(tabs) {
 	  tabs = Array.isArray(tabs) ? tabs : [];
+	  // 清空标签会把 scrollLeft 夹到 0，重建完再放回去：横向滚到哪儿是用户的位置，
+	  // 而打开文件、保存、外部改动、关标签都会走到这里重建一次
+	  var keptScrollLeft = tabsEl.scrollLeft;
+	  // 上一次渲染的当前标签，用来分辨“换标签”和“只是重建”
+	  var previousActiveId = activeTabId;
 	  tabsEl.textContent = '';
 	  activeTabId = 0;
 	  document.body.classList.toggle('has-tabs', tabs.length > 0);
@@ -1884,6 +1889,10 @@
 	    if (tabs[m].active) mruActive = tabs[m].id;
 	  }
 	  updateTabMru(tabs, mruActive);
+	  // 只有“当前标签真的换了”才把它滚进可视区（点标签、Ctrl+Tab、打开新文件）。
+	  // 关一个别的标签时当前标签没变，滚过去等于把用户滚到后面的位置拽回当前标签，
+	  // 看起来就是“叉掉一个标签又回到开头”
+	  var revealActive = mruActive !== 0 && mruActive !== previousActiveId;
 	  tabs.forEach(function(tab) {
 	    var item = document.createElement('div');
 	    item.className = 'tab' + (tab.active ? ' active' : '') + (tab.missing ? ' missing' : '') + (tab.dirty ? ' dirty' : '');
@@ -1908,8 +1917,10 @@
 	    item.appendChild(name);
 	    item.appendChild(close);
 	    tabsEl.appendChild(item);
-	    if (tab.active) requestAnimationFrame(function() { item.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+	    if (revealActive && tab.active) requestAnimationFrame(function() { item.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
 	  });
+	  // 当前标签本来就在视野里时上面的 scrollIntoView 什么都不做，不在时才会把它滚进来
+	  tabsEl.scrollLeft = keptScrollLeft;
 	};
 	// 标签放不下时横向滚动；鼠标的纵向滚轮在标签栏上也转成横向（滚动条本身是隐藏的）
 	tabsEl.addEventListener('wheel', function(e) {
