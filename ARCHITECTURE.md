@@ -40,6 +40,8 @@
 **关键分工**：Rust 只负责"拿到什么内容、用什么文案、什么时候重载"；排版和交互全在 `frontend/`。
 改界面样式/交互只动 `frontend/`，不用碰 Rust。改渲染规则（哪些 Markdown 语法支持什么）才动 `markdown.rs`/`sanitize.rs`。
 
+**多窗口与标签转移（Windows）**：`desktop.rs` 复用建窗流程和 WebContext；`workspace.rs` 按 WindowId 分发事件，统一保存所有窗口的文件列表，最近文件与阅读位置共享。`App` 仍只处理一个窗口。`tab_transfer.rs` 负责拖动快照校验和 Windows 物理坐标采样；页面报告标签栏逻辑坐标，宿主按目标窗口 DPI 换算，只有最上层目标窗口的标签栏可接收。`tab_drag_preview.rs` 用不激活、鼠标穿透的原生浮动标签显示拖动预览，松手或取消即销毁。只有松回源标签栏才取消，正文区和工具栏也可触发拆窗。源页面在拖动期间锁定，目标页面确认安装正文后才移除源标签；Esc、超时和读取失败都回滚。重启沿用原会话格式，在一个窗口恢复文件，不恢复窗口布局。其他平台暂不启用标签拖动。多窗口打开时安装更新需先关闭其他窗口，避免安装脚本等待仍在运行的主进程。
+
 **数据流（一次打开文档）**：Rust 读文件 → 探测编码 → `markdown.rs` 转 HTML → `sanitize.rs` 白名单过滤 →
 `page.rs` 把 `{{占位符}}` 替换成真实值 → `webview.load_html()` → `page.js` 接管交互，
 后续变更走 `window.ipc.postMessage()` 回到 `app.rs`。
@@ -62,7 +64,7 @@
 | 打开文档不发任何网络请求；安卓包不声明网络权限 | 对外的隐私承诺，写在下载页和 README 里 | `mobile/scripts/verify-release-readiness.sh`（断言 APK 无 INTERNET 权限） |
 | 外部改动不能覆盖未保存内容；自己的写入不能触发自我重载 | 会丢用户数据 / 无限重载循环 | `document.rs` 的 `SelfWriteRecord` + `self_write_still_matches_disk` + `should_protect_external_change` |
 | 发布资产名不带版本号（`MD-Previewer-*.exe/.apk/.deb/.tar.gz`） | 下载页用 `releases/latest/download/<名>` 直链，带版本号就失效 | `scripts/verify-landing-page.mjs` 与各构建脚本交叉校验 |
-| 应用是单实例；第二次打开同一文件要转发给已有窗口 | Windows 上双击文档的常见路径 | `single_instance.rs` + `scripts/verify-windows-single-instance.ps1` |
+| 应用是单实例；新窗口也由主进程创建，复用模式再次打开同一文件要转发给已有标签所在窗口 | Windows 上双击文档的常见路径 | `single_instance.rs` + `workspace.rs` + `scripts/verify-windows-single-instance.ps1` |
 | 首屏 HTML 不带文档正文，正文一律等页面就绪后走 `__setContent` 推入 | WebView2 的 `NavigateToString` 上限 2MiB，超了连 webview 都建不出来，双击大文档直接闪退 | `tests::startup_page_stays_small_even_for_a_huge_document` + `scripts/verify-windows-large-document-startup.ps1` |
 | 体积大的前端资源（Mermaid/KaTeX/hljs）必须压缩后再内嵌 | 三份原文合计约 3.7MB，直接 `include_str!` 会把 exe 顶到 6MB 以上 | `build.rs` 的 `GZIP_ASSETS` + `tests::gzipped_assets_inflate_back_to_the_originals`（解压结果必须与仓库原文逐字节一致） |
 
@@ -84,6 +86,8 @@
 
 **加检查的规矩**：能用脚本断言的就别靠人自觉。前端行为加 `scripts/verify-*.mjs`（用 `scripts/desktop-page.mjs`
 读资源和源码，别各自解析 `src/main.rs`），Rust 不变量加 `src/tests.rs` 用例，然后挂进 `verify.sh`。
+
+**标签拖动验证**：`scripts/verify-desktop-tab-transfer.mjs` 验证拖动阈值、DOM 重建、未保存正文快照、取消、接收确认以及桌面/窄视口布局；`tab_transfer.rs` 验证快照边界和落点。真实窗口拆分/合并、跨屏 DPI 与原生文件拖入按 `samples/manual-check.md` 验收，网页模拟事件不能替代 Windows 原生鼠标验证。
 
 **脚本盖不到的观感**：`samples/manual-check.md` 是给应用打开的手动验收清单（重复词、公式、
 Mermaid、8 列宽表、多级标题都在里面，兼做渲染压力样例）。它和 `scripts/verify-*.mjs` 一样

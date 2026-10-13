@@ -5,6 +5,7 @@
 
 mod app;
 mod assets;
+mod desktop;
 mod document;
 mod escape;
 mod finder;
@@ -23,77 +24,56 @@ mod session;
 mod settings;
 mod sidebar;
 mod single_instance;
+mod tab_drag_preview;
+mod tab_transfer;
 mod theme;
 mod updater;
 mod watch;
 mod webview;
 mod window;
+mod workspace;
 
 #[cfg(test)]
 mod tests;
 
-use crate::app::App;
-use crate::assets::{hljs_js, HLJS_EXTRA_LANGS};
 use crate::finder::register_finder_extension;
 use crate::i18n::{detect_lang, Strings};
 use crate::macos_menu::install_macos_menu;
-use crate::markdown::EnhanceFlags;
-use crate::page::startup_page;
-use crate::paths::{
-    config_dir, is_supported_document, reading_positions_path, recent_files_path, session_path,
-};
+use crate::paths::{config_dir, is_supported_document, session_path};
 use crate::platform::{apply_linux_webkit_compat_env, register_as_default};
-use crate::reading::ReadingPositions;
-use crate::recent::RecentFiles;
 use crate::session::DocumentSession;
 use crate::settings::{OpenMode, Settings, TabMode, ThemeChoice};
-use crate::webview::{navigation_decision, Navigation};
 use crate::window::{
-    centered_geom, geom_visible, load_window_geom, load_window_icon, migrate_theme_file,
-    settings_path, show_warning_dialog,
+    centered_geom, geom_visible, load_window_geom, migrate_theme_file, settings_path,
+    show_warning_dialog,
 };
 use std::env;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
-// 只有 Windows 分支会去建 WebView2 数据目录
-#[cfg(target_os = "windows")]
-use std::fs;
-use tao::dpi::{LogicalPosition, LogicalSize};
-use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
-use tao::window::WindowBuilder;
-use wry::WebViewBuilder;
+use tao::event_loop::{EventLoop, EventLoopBuilder};
+use tao::window::WindowId;
 
-/// 事件循环消息：页面回调、文件监听、更新线程都只把消息投进队列，状态全部在主线程改
-/// macOS 原生菜单直接构造其中一部分动作，其他平台的同名动作由页面 IPC 触发，
-/// 所以非 macOS 构建下这些变体没有构造点，属于设计如此
+/// 原生菜单发给当前窗口；页面、文件监听与下载回调用 ForWindow 指明所属窗口
 #[derive(Debug)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum UserEvent {
-    /// 页面发来的原始 IPC 消息，在事件循环里解析和处理，页面回调线程不碰任何状态
+    ForWindow(WindowId, Box<UserEvent>),
+    PersistSessions,
+    OpenWindow(Vec<PathBuf>, bool),
     Ipc(String),
     NewFile,
     OpenFile,
     OpenPaths(Vec<PathBuf>, bool),
     CloseActiveTab,
-    /// 文件监听线程发现磁盘上的活动文档变了
     FileChanged(PathBuf),
     ToggleEdit,
     ShowFind,
-    Print, // route print through wry's native API (WKWebView ignores window.print())
+    Print,
     SetTheme(ThemeChoice),
     OpenUrl(&'static str),
     Quit,
-    /// 更新下载线程的进度回报；total 在服务端不给 Content-Length 时为 None
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    UpdateProgress {
-        downloaded: u64,
-        total: Option<u64>,
-    },
-    /// 更新包已完整落盘，事件循环里接着写安装脚本并退出
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    UpdateProgress { downloaded: u64, total: Option<u64> },
     UpdateDownloaded(PathBuf),
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     UpdateFailed(String),
 }
 
@@ -111,10 +91,6 @@ fn print_help() {
 fn main() {
     logger::init_panic_hook();
     apply_linux_webkit_compat_env();
-
-    // Bench instrumentation: MD_PREVIEWER_BENCH=1 makes the app print
-    // cold-start timings to stderr and exit as soon as the first paint
-    // lands. Costs nothing outside bench mode.
     let bench = std::env::var("MD_PREVIEWER_BENCH").is_ok();
     let t0 = Instant::now();
     let bench_log = |label: &str| {
@@ -123,8 +99,6 @@ fn main() {
         }
     };
     bench_log("main_start");
-
-    // CLI: md-previewer [--edit] [file.md ...]
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.iter().any(|arg| is_help_arg(arg)) {
         print_help();
@@ -151,7 +125,6 @@ fn main() {
             }
         })
         .collect::<Vec<_>>();
-
     let lang = detect_lang();
     let strings = Strings::for_lang(lang);
     let mut settings = Settings::load(&settings_path());
@@ -168,7 +141,6 @@ fn main() {
     register_as_default(lang);
     register_finder_extension();
     bench_log("after_register");
-
     let mut session = if settings.keeps_session() {
         DocumentSession::load(&session_path())
     } else {
@@ -178,166 +150,27 @@ fn main() {
     for path in cli_paths {
         session.open(path, edit_from_cli);
     }
-
     let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build();
     let proxy = event_loop.create_proxy();
     instance.start(proxy.clone());
-    let initial_theme = settings.theme;
-    install_macos_menu(proxy.clone(), initial_theme);
-
-    let title = session
-        .active()
-        .and_then(|tab| tab.path.file_name())
-        .map(|name| format!("{} — MD Previewer", name.to_string_lossy()))
-        .unwrap_or_else(|| "MD Previewer".to_string());
-
+    install_macos_menu(proxy.clone(), settings.theme);
     let geom = load_window_geom()
         .filter(|g| geom_visible(g, &event_loop))
         .unwrap_or_else(|| centered_geom(&event_loop));
-
-    let mut window_builder = WindowBuilder::new()
-        .with_title(&title)
-        .with_inner_size(LogicalSize::new(geom.w, geom.h))
-        .with_position(LogicalPosition::new(geom.x, geom.y))
-        .with_theme(initial_theme.tao_theme());
-    if let Some(icon) = load_window_icon() {
-        window_builder = window_builder.with_window_icon(Some(icon));
-    }
-    let window = window_builder
-        .build(&event_loop)
-        .expect("failed to build window");
-    bench_log("window_built");
-    let recent = RecentFiles::load(recent_files_path());
-    // 读取时会顺手清掉文件已经不存在的阅读位置记录
-    let reading = ReadingPositions::load(&reading_positions_path());
-
-    let initial_page = startup_page(&strings, recent.paths());
-
-    // Windows: steer WebView2's cache/cookie tree into %LOCALAPPDATA% instead of
-    // letting it drop next to the exe. Other platforms: use default (None).
-    let data_dir: Option<PathBuf> = {
-        #[cfg(target_os = "windows")]
-        {
-            let d = config_dir().join("WebView2");
-            if let Err(error) = fs::create_dir_all(&d) {
-                eprintln!(
-                    "Could not create WebView2 data dir {}: {error}",
-                    d.display()
-                );
-            }
-            Some(d)
+    let mut desktop = desktop::Desktop::new(proxy);
+    let app = match desktop.create_window(&event_loop, settings, session, &geom) {
+        Ok(mut app) => {
+            app.bench_started = bench.then_some(t0);
+            app
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            None
-        }
-    };
-    let mut web_context = wry::WebContext::new(data_dir);
-
-    let proxy_for_navigation = proxy.clone();
-    let proxy_for_ipc = proxy.clone();
-    let proxy_for_drop = proxy.clone();
-    // with_html 的首屏在 WebView2 里表现为一次 data:text/html 导航，必须放行；见 navigation_decision
-    let initial_page_loaded = std::cell::Cell::new(false);
-    let builder = WebViewBuilder::with_web_context(&mut web_context)
-        .with_html(&initial_page)
-        .with_navigation_handler(move |url: String| {
-            let mut loaded = initial_page_loaded.get();
-            let decision = navigation_decision(&url, &mut loaded);
-            initial_page_loaded.set(loaded);
-            match decision {
-                Navigation::Allow => true,
-                Navigation::Block => false,
-                Navigation::OpenExternally => {
-                    if let Err(error) = open::that(&url) {
-                        eprintln!("Could not open {url}: {error}");
-                    }
-                    false
-                }
-                Navigation::OpenDocument(path) => {
-                    let _ =
-                        proxy_for_navigation.send_event(UserEvent::OpenPaths(vec![path], false));
-                    false
-                }
-            }
-        })
-        .with_ipc_handler(move |msg| {
-            let _ = proxy_for_ipc.send_event(UserEvent::Ipc(msg.body().to_string()));
-        })
-        .with_drag_drop_handler(move |event| {
-            if let wry::DragDropEvent::Drop { paths, .. } = event {
-                let _ = proxy_for_drop.send_event(UserEvent::OpenPaths(paths, false));
-            }
-            true
-        });
-    #[cfg(target_os = "windows")]
-    let builder = {
-        use wry::WebViewBuilderExtWindows;
-        builder.with_theme(initial_theme.wry_theme())
-    };
-
-    #[cfg(target_os = "linux")]
-    let built_webview = {
-        use tao::platform::unix::WindowExtUnix;
-        use wry::WebViewBuilderExtUnix;
-
-        let vbox = window
-            .default_vbox()
-            .expect("failed to get default GTK container");
-        builder.build_gtk(vbox).map_err(|error| error.to_string())
-    };
-    #[cfg(not(target_os = "linux"))]
-    let built_webview = builder.build(&window).map_err(|error| error.to_string());
-    // 建不出 webview 时给个明确报错：release 构建没有控制台，静默退出就等于「双击打不开」
-    let webview = match built_webview {
-        Ok(webview) => webview,
         Err(error) => {
             show_warning_dialog(strings.webview_failed, &error);
             return;
         }
     };
     bench_log("webview_built");
-
-    // hljs + extra language packs aren't part of first-paint HTML anymore.
-    // We push them in via evaluate_script the moment the webview tells us
-    // it's painted (IPC 'ready'). Keeps ~125KB out of the HTML-parse critical
-    // path so the app window shows content faster on cold start.
-    let hljs_bootstrap = format!(
-        "(function(){{{hljs_js};{hljs_extra};try{{window.hljs=hljs;}}catch(e){{}}if(typeof hljs!=='undefined'&&hljs.highlightAll){{hljs.highlightAll();}}}})();",
-        hljs_js = hljs_js(),
-        hljs_extra = HLJS_EXTRA_LANGS,
-    );
-
-    let sidebar_open_applied = settings.sidebar_open;
-    let theme_applied = settings.theme;
-    let mut app = App {
-        webview,
-        window,
-        proxy,
-        strings,
-        settings,
-        session,
-        recent,
-        reading,
-        enhance_flags: EnhanceFlags::default(),
-        loaded_enhancers: EnhanceFlags::default(),
-        watcher: None,
-        last_self_write: Arc::new(Mutex::new(None)),
-        hljs_bootstrap,
-        pending_window_close: false,
-        warned_external_change: None,
-        pending_external_change: None,
-        sidebar_open_applied,
-        theme_applied,
-        update_downloading: false,
-        bench_started: bench.then_some(t0),
-    };
-    app.persist_session();
-    app.push_ui_state();
-    app.install_watcher();
-
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-        app.handle(event, control_flow);
+    let mut workspace = workspace::Workspace::new(desktop, app);
+    event_loop.run(move |event, target, control_flow| {
+        workspace.handle(event, target, control_flow);
     });
 }

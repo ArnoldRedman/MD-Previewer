@@ -30,12 +30,12 @@ use crate::watch::{event_should_reload_file, watch_scope_for_file};
 use crate::window::{resize_for_sidebar, save_window_geom, settings_path, show_warning_dialog};
 use crate::UserEvent;
 use notify::{Event, RecursiveMode, Watcher};
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tao::event::Event as TaoEvent;
-use tao::event::WindowEvent;
 use tao::event_loop::{ControlFlow, EventLoopProxy};
 use tao::window::Window;
 use wry::WebView;
@@ -109,9 +109,9 @@ pub(crate) struct App {
     pub(crate) strings: Strings,
     pub(crate) settings: Settings,
     pub(crate) session: DocumentSession,
-    pub(crate) recent: RecentFiles,
+    pub(crate) recent: Rc<RefCell<RecentFiles>>,
     /// 记住阅读位置的文件：路径 -> 阅读比例，没记住的文件每次从头打开
-    pub(crate) reading: ReadingPositions,
+    pub(crate) reading: Rc<RefCell<ReadingPositions>>,
     pub(crate) enhance_flags: EnhanceFlags,
     pub(crate) loaded_enhancers: EnhanceFlags,
     pub(crate) watcher: Option<notify::RecommendedWatcher>,
@@ -128,6 +128,7 @@ pub(crate) struct App {
     pub(crate) update_downloading: bool,
     /// MD_PREVIEWER_BENCH=1 时记录启动时刻，首屏就绪即打印耗时并退出
     pub(crate) bench_started: Option<Instant>,
+    pub(crate) ready: bool,
 }
 
 impl App {
@@ -137,14 +138,9 @@ impl App {
         }
     }
 
-    // 新窗口模式是多进程、单标签模式按设计不恢复，这两种情况下落盘只会互相覆盖或把老标签带回来
+    // 窗口管理器统一保存全部窗口，避免各窗口覆盖同一个会话文件
     pub(crate) fn persist_session(&self) {
-        if !self.settings.keeps_session() {
-            return;
-        }
-        if let Err(error) = self.session.save(&session_path()) {
-            eprintln!("Could not save tab session: {error}");
-        }
+        let _ = self.proxy.send_event(UserEvent::PersistSessions);
     }
 
     pub(crate) fn refresh_tabs(&self) {
@@ -154,7 +150,7 @@ impl App {
 
     /// 阅读位置只在离开文档、关闭窗口和点书签时落盘，滚动过程不写磁盘
     fn save_reading(&self) {
-        self.reading.save(&reading_positions_path());
+        self.reading.borrow().save(&reading_positions_path());
     }
 
     /// 提示条上的"仍按 Markdown 渲染"：这个标签之后都按 Markdown 渲染（可能较慢）
@@ -180,8 +176,8 @@ impl App {
             return;
         };
         // 只有已记住的文件留在内存里，别的文件重开时从开头开始
-        if self.reading.remember(&path) {
-            self.reading.set(&path, progress);
+        if self.reading.borrow().remember(&path) {
+            self.reading.borrow_mut().set(&path, progress);
         }
     }
 
@@ -196,7 +192,7 @@ impl App {
         else {
             return;
         };
-        self.reading.set_zoom(&path, zoom);
+        self.reading.borrow_mut().set_zoom(&path, zoom);
     }
 
     /// 点书签：记住当前文件的阅读位置和缩放，或取消记住并删掉记录
@@ -206,12 +202,12 @@ impl App {
         };
         if remember {
             // 先落位置再落缩放：缩放只跟在已记住的位置上
-            self.reading.set(&path, progress);
+            self.reading.borrow_mut().set(&path, progress);
             if let Some(zoom) = zoom {
-                self.reading.set_zoom(&path, zoom);
+                self.reading.borrow_mut().set_zoom(&path, zoom);
             }
         } else {
-            self.reading.remove(&path);
+            self.reading.borrow_mut().remove(&path);
         }
         self.save_reading();
         self.refresh_remember_position();
@@ -222,18 +218,18 @@ impl App {
         let remembered = self
             .session
             .active()
-            .is_some_and(|tab| self.reading.remember(&tab.path));
+            .is_some_and(|tab| self.reading.borrow().remember(&tab.path));
         self.eval(&format!(
             "if(window.__setRememberPosition)window.__setRememberPosition({remembered});"
         ));
     }
 
     pub(crate) fn refresh_sidebar(&self) {
-        update_sidebar(&self.webview, &self.session, self.recent.paths());
+        update_sidebar(&self.webview, &self.session, self.recent.borrow().paths());
     }
 
     pub(crate) fn push_empty_preview(&self) {
-        let html = empty_preview_html(&self.strings, self.recent.paths());
+        let html = empty_preview_html(&self.strings, self.recent.borrow().paths());
         self.eval(&format!(
             "if(window.__setEmptyPreview)window.__setEmptyPreview('{}');",
             escape_js(&html)
@@ -291,6 +287,7 @@ impl App {
         }
         let callback_path = path.clone();
         let proxy = self.proxy.clone();
+        let window_id = self.window.id();
         let last_self_write = Arc::clone(&self.last_self_write);
         let watcher = notify::recommended_watcher(move |result: Result<Event, _>| {
             let Ok(event) = result else {
@@ -302,7 +299,10 @@ impl App {
             // 只在锁内拷贝记录；比对磁盘内容要读文件，不能让保存路径等在这把锁上
             let record = last_self_write.lock().unwrap().clone();
             if !self_write_still_matches_disk(record.as_ref(), &callback_path) {
-                let _ = proxy.send_event(UserEvent::FileChanged(callback_path.clone()));
+                let _ = proxy.send_event(UserEvent::ForWindow(
+                    window_id,
+                    Box::new(UserEvent::FileChanged(callback_path.clone())),
+                ));
             }
         });
         let mut watcher = match watcher {
@@ -319,6 +319,11 @@ impl App {
     }
 
     pub(crate) fn render_active(&mut self) {
+        self.render_active_content(None);
+    }
+
+    // 转移正文来自源页面，不重读磁盘覆盖未保存内容
+    pub(crate) fn render_active_content(&mut self, content: Option<String>) {
         let Some(active) = self.session.active().cloned() else {
             self.push_empty_preview();
             update_author_doc(&self.webview, "");
@@ -328,7 +333,18 @@ impl App {
             return;
         };
 
-        match read_document_with_encoding(&active.path, active.encoding.as_deref()) {
+        let document = match content {
+            Some(raw) => Ok((
+                raw,
+                active
+                    .encoding
+                    .clone()
+                    .unwrap_or_else(|| "UTF-8".to_string()),
+            )),
+            None => read_document_with_encoding(&active.path, active.encoding.as_deref())
+                .map(|(raw, encoding)| (raw, encoding.to_string())),
+        };
+        match document {
             Ok((raw, resolved_encoding)) => {
                 if let Some(tab) = self.session.get_mut(active.id) {
                     tab.missing = false;
@@ -336,17 +352,17 @@ impl App {
                         tab.encoding = Some(resolved_encoding.to_string());
                     }
                 }
-                self.recent.remember(&active.path);
+                self.recent.borrow_mut().remember(&active.path);
                 let (html, flags, base_href, degraded) =
                     document_to_html(&active.path, &raw, active.force_markdown);
                 self.enhance_flags = flags;
                 // 没记住阅读位置的文件传 null，页面留在开头（换文档时 Rust 已经先归零）
-                let restore = match self.reading.get(&active.path) {
+                let restore = match self.reading.borrow().get(&active.path) {
                     Some(progress) => progress.to_string(),
                     None => "null".to_string(),
                 };
                 // 书签里的缩放同样按路径取；没有记录的传 null，页面退回全局缩放
-                let zoom = match self.reading.zoom(&active.path) {
+                let zoom = match self.reading.borrow().zoom(&active.path) {
                     Some(zoom) => zoom.to_string(),
                     None => "null".to_string(),
                 };
@@ -360,7 +376,7 @@ impl App {
                     restore,
                     degraded,
                     zoom,
-                    escape_js(resolved_encoding)
+                    escape_js(&resolved_encoding)
                 ));
                 self.push_author_doc(&active.path, &raw);
                 self.bootstrap_enhancers(flags);
@@ -814,6 +830,10 @@ impl App {
     }
 
     pub(crate) fn on_ready(&mut self, control_flow: &mut ControlFlow) {
+        self.ready = true;
+        if cfg!(target_os = "windows") {
+            self.eval("if(window.__enableTabDrag)window.__enableTabDrag();");
+        }
         let hljs = std::mem::take(&mut self.hljs_bootstrap);
         if !hljs.is_empty() {
             self.eval(&hljs);
@@ -833,37 +853,38 @@ impl App {
             IpcMessage::NewFile => self.new_file(),
             IpcMessage::OpenFile => self.open_file(),
             IpcMessage::OpenRecent(index) => {
-                let Some(path) = self.recent.get(index).cloned() else {
+                let path = self.recent.borrow().get(index).cloned();
+                let Some(path) = path else {
                     return;
                 };
                 if path.exists() {
                     self.open_paths(vec![path], false);
-                } else if self.recent.forget(&path) {
+                } else if self.recent.borrow_mut().forget(&path) {
                     self.on_recent_changed();
                 }
             }
             IpcMessage::OpenDoc(path) => {
                 if path.is_file() && is_supported_document(&path) {
                     self.open_checked_paths(vec![path], false);
-                } else if self.recent.forget(&path) {
+                } else if self.recent.borrow_mut().forget(&path) {
                     // 侧栏里点到已经不存在的历史条目，顺手把它从最近列表剔掉
                     self.on_recent_changed();
                 }
             }
             IpcMessage::ForgetRecent(path) => {
-                if self.recent.forget(&path) {
+                if self.recent.borrow_mut().forget(&path) {
                     self.on_recent_changed();
                 }
             }
             IpcMessage::ClearRecent => {
-                if self.recent.clear() {
+                if self.recent.borrow_mut().clear() {
                     self.on_recent_changed();
                 }
             }
             IpcMessage::RevealPath(path) => {
                 if path.exists() {
                     reveal_in_file_manager(&path);
-                } else if self.recent.forget(&path) {
+                } else if self.recent.borrow_mut().forget(&path) {
                     // 历史条目对应的文件已经不在了，定位不到就直接从列表剔掉
                     self.on_recent_changed();
                 }
@@ -974,15 +995,19 @@ impl App {
         }
         self.update_downloading = true;
         let proxy = self.proxy.clone();
+        let window_id = self.window.id();
         std::thread::spawn(move || {
             let result = windows_updater::download_update(&download_url, |downloaded, total| {
-                let _ = proxy.send_event(UserEvent::UpdateProgress { downloaded, total });
+                let _ = proxy.send_event(UserEvent::ForWindow(
+                    window_id,
+                    Box::new(UserEvent::UpdateProgress { downloaded, total }),
+                ));
             });
             let event = match result {
                 Ok(path) => UserEvent::UpdateDownloaded(path),
                 Err(error) => UserEvent::UpdateFailed(error),
             };
-            let _ = proxy.send_event(event);
+            let _ = proxy.send_event(UserEvent::ForWindow(window_id, Box::new(event)));
         });
     }
 
@@ -995,6 +1020,7 @@ impl App {
 
     pub(crate) fn handle_user_event(&mut self, event: UserEvent, control_flow: &mut ControlFlow) {
         match event {
+            UserEvent::ForWindow(..) | UserEvent::PersistSessions | UserEvent::OpenWindow(..) => {}
             UserEvent::UpdateProgress { downloaded, total } => {
                 let total = total.map_or("null".to_string(), |total| total.to_string());
                 self.eval(&format!(
@@ -1103,22 +1129,6 @@ impl App {
         }
         if !paths.is_empty() {
             self.open_checked_paths(paths, false);
-        }
-    }
-
-    pub(crate) fn handle(
-        &mut self,
-        event: TaoEvent<'_, UserEvent>,
-        control_flow: &mut ControlFlow,
-    ) {
-        match event {
-            TaoEvent::UserEvent(event) => self.handle_user_event(event, control_flow),
-            TaoEvent::Opened { urls } => self.handle_opened_urls(urls),
-            TaoEvent::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => self.request_close(control_flow),
-            _ => {}
         }
     }
 }

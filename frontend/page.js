@@ -421,6 +421,90 @@
 	    window.ipc.postMessage(message);
 	  }
 
+  // 拖动状态挂在稳定容器上，标签 DOM 因保存或脏状态重建时不会中断手势
+  var tabDragEnabled = false;
+  var tabDragCandidate = null;
+  var tabTransferLocked = false;
+  var contentInstalled = false;
+  var suppressTabClickUntil = 0;
+  function reportTabBar() {
+    if (!tabDragEnabled) return;
+    var rect = tabsEl.parentElement.getBoundingClientRect();
+    window.ipc.postMessage('tabbar-rect:' + JSON.stringify({ x: rect.x, y: rect.y, width: rect.width, height: rect.height }));
+  }
+  window.__enableTabDrag = function() {
+    tabDragEnabled = true;
+    document.body.classList.add('tab-drag-enabled');
+    reportTabBar();
+  };
+  function lockTabTransfer() {
+    tabTransferLocked = true;
+    cancelPendingAutosave();
+    cancelLiveRender();
+    ta.readOnly = true;
+    document.body.classList.add('tab-transferring');
+  }
+  window.__endTabTransfer = function() {
+    tabTransferLocked = false;
+    tabDragCandidate = null;
+    ta.readOnly = false;
+    document.body.classList.remove('tab-transferring');
+    suppressTabClickUntil = performance.now() + 150;
+    if (dirty) scheduleAutosave();
+    reportTabBar();
+  };
+  window.__prepareTabReceive = function(token) {
+    lockTabTransfer();
+    window.ipc.postMessage('tab-receive-ready:' + JSON.stringify({
+      token: token, activeId: activeTabId, content: dirty ? ta.value : null
+    }));
+  };
+  window.__discardTransferredTab = function() { setDirty(false); };
+  window.__restoreTransferredTab = function(state, token, tabId) {
+    if (!contentInstalled || activeTabId !== tabId) return;
+    if (state) {
+      applyZoom(state.zoom, false);
+      pendingRestoreProgress = state.progress;
+      restoreScrollProgress(state.progress);
+      ta.setSelectionRange(state.selectionStart, state.selectionEnd);
+      setDirty(state.dirty);
+      autosavePaused = state.autosavePaused;
+    }
+    // 确认正文已经装进页面后，宿主才允许移除源标签
+    window.ipc.postMessage('tab-received:' + token);
+  };
+  tabsEl.addEventListener('pointerdown', function(e) {
+    if (!tabDragEnabled || tabTransferLocked || e.button !== 0 || e.target.closest('[data-close-tab]')) return;
+    var tab = e.target.closest('[data-tab-id]');
+    if (!tab) return;
+    tabDragCandidate = { id: Number(tab.getAttribute('data-tab-id')), x: e.clientX, y: e.clientY };
+  });
+  document.addEventListener('pointermove', function(e) {
+    var candidate = tabDragCandidate;
+    if (!candidate || tabTransferLocked) return;
+    if (!(e.buttons & 1)) { tabDragCandidate = null; return; }
+    if (Math.hypot(e.clientX - candidate.x, e.clientY - candidate.y) < 8) return;
+    var snapshot = candidate.id === activeTabId ? {
+      raw: ta.value, dirty: dirty, editMode: inEdit(), autosavePaused: autosavePaused, progress: currentScrollProgress(), zoom: zoomPercent,
+      selectionStart: ta.selectionStart, selectionEnd: ta.selectionEnd
+    } : null;
+    lockTabTransfer();
+    window.ipc.postMessage('tab-drag:' + JSON.stringify({ id: candidate.id, snapshot: snapshot }));
+  });
+  document.addEventListener('pointerup', function() { tabDragCandidate = null; });
+  document.addEventListener('dragstart', function(e) {
+    if (e.target.closest && e.target.closest('#tabs')) e.preventDefault();
+  });
+  ['click', 'dblclick', 'contextmenu', 'keydown', 'beforeinput'].forEach(function(type) {
+    document.addEventListener(type, function(e) {
+      if (!tabTransferLocked && !(type === 'click' && performance.now() < suppressTabClickUntil && e.target.closest('#tabs'))) return;
+      if (type === 'keydown' && e.key === 'Escape') window.ipc.postMessage('tab-drag-cancel');
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
+  });
+  window.addEventListener('resize', reportTabBar);
+
 	  // ---- Ctrl+Tab 切换浮层：按住 Ctrl 停留，连按 Tab 选中，松开 Ctrl 才真正切 ----
 	  var tabSwitcher = document.getElementById('tab-switcher');
 	  var tabSwitcherList = document.getElementById('tab-switcher-list');
@@ -1927,6 +2011,7 @@
 	  });
 	  // 当前标签本来就在视野里时上面的 scrollIntoView 什么都不做，不在时才会把它滚进来
 	  tabsEl.scrollLeft = keptScrollLeft;
+    reportTabBar();
 	};
 	// 标签放不下时横向滚动；鼠标的纵向滚轮在标签栏上也转成横向（滚动条本身是隐藏的）
 	tabsEl.addEventListener('wheel', function(e) {
@@ -1944,6 +2029,7 @@
 	  requestTabAction('activate', tab.getAttribute('data-tab-id'));
 	});
 	  window.__setContent = function(previewHtml, rawMd, baseHref, needsMath, needsMermaid, restoreProgress, largeDocDegraded, fileZoom) {
+      contentInstalled = false;
 	    if (docNotice) docNotice.style.display = largeDocDegraded ? 'flex' : 'none';
 	    document.body.classList.remove('empty');
 	    document.body.classList.remove('missing');
@@ -1970,6 +2056,7 @@
       setDirty(false);
       if (inEdit()) autoResize();
     }
+    contentInstalled = true;
   };
 	  // 空白页与缺失页共用一套复位：退出编辑、收起所有浮层和定时器、清空编辑框
 	  function showPlaceholder(state, previewHtml) {

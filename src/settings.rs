@@ -12,8 +12,7 @@ pub enum OpenMode {
     /// 复用已经打开的窗口，在里面加一个标签
     #[default]
     NewTab,
-    /// 每个文件用自己的窗口。Windows 上表现为新起一个进程，
-    /// 所以该模式不做会话持久化，见 [`Settings::keeps_session`]
+    /// 每个文件用自己的窗口，由同一进程管理；仍保持该模式不恢复会话的原有行为
     NewWindow,
 }
 

@@ -207,6 +207,11 @@ body.has-tabs { --bar-top: 40px; }
 	body.has-tabs .tabbar { display: flex; }
 	.tabs { display: flex; flex: 1; min-width: 0; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 	.tabs::-webkit-scrollbar { display: none; }
+  .tab-drag-enabled .tab { cursor: grab; user-select: none; }
+  .tab-drop-target .tabbar { outline: 2px solid #2979c9; outline-offset: -2px; }
+  .tab-transferring::after {
+    content: ''; position: fixed; inset: 0; z-index: 10000; cursor: grabbing;
+  }
 	/* 标签宽度固定，不随打开数量收缩：放不下就横向滚动，鼠标纵向滚轮也走横向 */
 	.tab {
 	  flex: 0 0 180px; height: 31px;

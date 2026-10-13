@@ -6,6 +6,7 @@ use crate::document::{
     self_write_still_matches_disk, should_protect_external_change, write_document_bytes,
     SelfWriteRecord, LARGE_MARKDOWN_LIMIT,
 };
+use std::sync::Mutex;
 // Windows 专用：代码页转换只在 Windows 上有实现
 #[cfg(target_os = "windows")]
 use crate::document::decode_windows_codepage;

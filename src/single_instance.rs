@@ -32,6 +32,8 @@ mod platform {
     struct OpenRequest {
         paths: Vec<PathBuf>,
         edit: bool,
+        #[serde(default)]
+        new_window: bool,
         created_at_ms: u128,
     }
 
@@ -65,8 +67,7 @@ mod platform {
         }
     }
 
-    /// `forward` 为 false 时是「每个文件开新窗口」模式：已有实例继续持锁并监听，
-    /// 本进程不转发，自己开一个窗口。切回复用模式后下一次点击就会重新转发给它
+    /// 两种打开模式都交给主进程，新窗口请求由主进程创建独立窗口
     pub(crate) fn prepare(
         config_dir: &Path,
         paths: &[PathBuf],
@@ -85,11 +86,8 @@ mod platform {
                 request_dir,
             }),
             Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
-                if !forward {
-                    return Startup::Primary(Server::disabled(config_dir));
-                }
                 allow_primary_to_focus(&lock_path);
-                if !write_request(&request_dir, paths, edit) {
+                if !write_request(&request_dir, paths, edit, !forward) {
                     return Startup::Primary(Server::disabled(config_dir));
                 }
                 // 主实例可能刚好在这一瞬间退出：请求写完后锁若已经能拿到，说明没人会处理它，
@@ -131,7 +129,7 @@ mod platform {
         }
     }
 
-    fn write_request(request_dir: &Path, paths: &[PathBuf], edit: bool) -> bool {
+    fn write_request(request_dir: &Path, paths: &[PathBuf], edit: bool, new_window: bool) -> bool {
         if fs::create_dir_all(request_dir).is_err() {
             return false;
         }
@@ -141,6 +139,7 @@ mod platform {
         let request = OpenRequest {
             paths: paths.to_vec(),
             edit,
+            new_window,
             created_at_ms: now_millis(),
         };
         let result = File::create(&temporary)
@@ -219,10 +218,12 @@ mod platform {
             .into_iter()
             .filter(|path| path.is_file() && is_supported_document(path))
             .collect();
-        if proxy
-            .send_event(UserEvent::OpenPaths(paths, request.edit))
-            .is_ok()
-        {
+        let event = if request.new_window {
+            UserEvent::OpenWindow(paths, request.edit)
+        } else {
+            UserEvent::OpenPaths(paths, request.edit)
+        };
+        if proxy.send_event(event).is_ok() {
             let _ = fs::remove_file(request_path);
         }
     }
@@ -290,7 +291,7 @@ mod platform {
         }
 
         #[test]
-        fn new_window_mode_opens_its_own_window_instead_of_forwarding() {
+        fn new_window_mode_requests_a_window_in_the_primary_process() {
             let dir = temp_dir("new-window");
             let document = dir.join("计划.md");
             fs::write(&document, "# 计划").unwrap();
@@ -300,13 +301,17 @@ mod platform {
 
             let second = prepare(&dir, std::slice::from_ref(&document), false, false);
 
-            assert!(matches!(second, Startup::Primary(_)));
-            // 不转发就不该入队请求，否则主实例会多开一个标签
-            let queued = fs::read_dir(dir.join(REQUEST_DIR))
-                .map(|entries| entries.count())
-                .unwrap_or(0);
-            assert_eq!(queued, 0);
-            drop(second);
+            assert!(matches!(second, Startup::Forwarded));
+            let request_path = fs::read_dir(dir.join(REQUEST_DIR))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let request: OpenRequest =
+                serde_json::from_slice(&fs::read(request_path).unwrap()).unwrap();
+            assert!(request.new_window);
+            assert_eq!(request.paths, vec![document]);
             drop(primary);
             let _ = fs::remove_dir_all(dir);
         }

@@ -106,6 +106,16 @@ impl DocumentSession {
         }
     }
 
+    /// 转入的标签重新分配本窗口 ID，路径冲突由窗口管理器在转移前检查
+    pub(crate) fn insert_transferred(&mut self, mut tab: DocumentTab) -> u64 {
+        self.next_id += 1;
+        tab.id = self.next_id;
+        let id = tab.id;
+        self.tabs.push(tab);
+        self.active_id = Some(id);
+        id
+    }
+
     pub fn activate(&mut self, id: u64) -> bool {
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) else {
             return false;
@@ -272,6 +282,29 @@ pub fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transferred_tab_gets_local_id_and_preserves_unsaved_state() {
+        let mut source = DocumentSession::default();
+        let original = source.open(std::env::temp_dir().join("transfer-source.md"), true);
+        let tab = source.get_mut(original).unwrap();
+        tab.dirty = true;
+        tab.encoding = Some("GBK".into());
+        tab.force_markdown = true;
+        let transferred = tab.clone();
+        let mut target = DocumentSession::default();
+        let existing = target.open(std::env::temp_dir().join("transfer-target.md"), false);
+        let received = target.insert_transferred(transferred.clone());
+        assert_ne!(received, existing);
+        assert_eq!(target.active_id, Some(received));
+        let mut expected = transferred;
+        expected.id = received;
+        assert_eq!(target.active(), Some(&expected));
+        assert_eq!(source.tabs.len(), 1, "接收成功前源标签不能被移除");
+        target.close(received);
+        assert_eq!(target.active_id, Some(existing));
+        assert!(source.active().unwrap().dirty);
+    }
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
