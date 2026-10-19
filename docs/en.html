@@ -175,8 +175,16 @@
   <div class="wrap">
     <p class="eyebrow">What's new</p>
     <h2>What changed in the last few releases</h2>
-    <p class="intro">The full history lives in <a href="https://github.com/ArnoldRedman/MD-Previewer/releases">GitHub Releases</a>. Only the highlights are kept here (as of v1.6.0, 2026-10-13).</p>
+    <p class="intro">The full history lives in <a href="https://github.com/ArnoldRedman/MD-Previewer/releases">GitHub Releases</a>. Only the highlights are kept here (as of v1.6.1, 2026-10-19).</p>
     <div class="grid">
+      <div class="card">
+        <h3>v1.6.1 · one-click updates on Linux too</h3>
+        <ul>
+          <li>Linux now follows the same path as Windows: in-app download of the platform's own package, replacement or install after exit, then a restart that restores the previous tabs</li>
+          <li>Portable builds swap the binary from the tar.gz; `.deb` installs use pkexec to run dpkg, and fall back to relaunching the old version if authorisation is cancelled</li>
+          <li>Fixes clicking "Update Now" on Linux / macOS downloading the Windows installer</li>
+        </ul>
+      </div>
       <div class="card">
         <h3>v1.6.0 · tear off and merge tabs</h3>
         <ul>

@@ -2,6 +2,17 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.6.1
+
+- **Linux 应用内一键更新 (Linux In-App Update)**：以前只有 Windows 能点「立即更新」自动替换，Linux 上点下去会去下载 Windows 的 exe，装也不能装。现在 Linux 和 Windows 走同一条链路：
+  - 便携版（解压即用，二进制所在目录可写）下载 `tar.gz`，退出后直接覆盖二进制再重启；
+  - `.deb` 安装版（二进制在 `/usr/bin`）下载 `.deb`，关窗后 `pkexec dpkg -i` 弹系统授权框装好，再按新版本重启；用户取消授权或安装失败则重新拉起旧版本，不会停在一片空白；
+  - 两条路都等进程真正退出再动手，所以未保存的编辑和 `session.json` 一定已经落盘，重启后标签照旧恢复。
+- **按平台选更新包 (Platform-Aware Asset Pick)**：更新包后缀由 Rust 按平台和安装形态给出（Windows `-windows-x64.exe` → `-Setup.exe`，Linux `-linux-<arch>.tar.gz` 或 `-linux-<arch>.deb`），前端只按顺序匹配。修掉了「Linux / macOS 上误下 Windows 安装器」的问题；没有发布包的平台（macOS）只打开发布页。
+- 更新器从 Windows 专属模块改成跨平台实现（`src/updater.rs`），下载与进度回报三平台共用；Linux 用 rustls + 平台证书校验，不引入 openssl 开发包依赖。
+- 验证：Rust 125 项通过、1 项忽略；在容器内的 Ubuntu 26.04 + XFCE 桌面实测 Linux 更新全链路（检查到 v1.6.0 → 下载 `.deb` → `pkexec dpkg -i` 安装 → 自动重启 → 恢复上次打开的标签）。
+- 平台范围：Linux 的 tar.gz 便携版分支只有脚本层单测覆盖，未在真机跑过覆盖重启。
+
 ## 1.6.0
 
 - **Windows 标签拆分与合并**：按住标签拖动，完整标签预览跟随鼠标；离开源标签栏松手即可拆窗，包括拖到正文区或工具栏。拖到另一个窗口的标签栏可合并，空的源窗口自动关闭
