@@ -23,9 +23,9 @@ use crate::session::DocumentSession;
 use crate::settings::{Settings, TabMode, ThemeChoice};
 use crate::sidebar::{author_doc, missing_preview_html, sidebar_json, tabs_json};
 use crate::theme::apply_theme;
-// 只有 Windows 分支会调用更新下载
-#[cfg(target_os = "windows")]
-use crate::updater::windows_updater;
+// 只有带发布包的平台会调用更新下载
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use crate::updater;
 use crate::watch::{event_should_reload_file, watch_scope_for_file};
 use crate::window::{resize_for_sidebar, save_window_geom, settings_path, show_warning_dialog};
 use crate::UserEvent;
@@ -987,8 +987,8 @@ impl App {
         crate::logger::clear_log();
     }
 
-    /// Windows 上在后台线程下载更新包并把进度推给页面；其他平台只打开下载页
-    #[cfg(target_os = "windows")]
+    /// 在后台线程下载当前平台的更新包并把进度推给页面；没有发布包的平台只打开下载页
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     pub(crate) fn start_self_update(&mut self, download_url: String) {
         if self.update_downloading {
             return;
@@ -997,7 +997,7 @@ impl App {
         let proxy = self.proxy.clone();
         let window_id = self.window.id();
         std::thread::spawn(move || {
-            let result = windows_updater::download_update(&download_url, |downloaded, total| {
+            let result = updater::download_update(&download_url, |downloaded, total| {
                 let _ = proxy.send_event(UserEvent::ForWindow(
                     window_id,
                     Box::new(UserEvent::UpdateProgress { downloaded, total }),
@@ -1011,7 +1011,7 @@ impl App {
         });
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     pub(crate) fn start_self_update(&mut self, download_url: String) {
         if let Err(error) = open::that(&download_url) {
             eprintln!("Could not open {download_url}: {error}");
@@ -1029,8 +1029,8 @@ impl App {
             }
             UserEvent::UpdateDownloaded(path) => {
                 self.update_downloading = false;
-                #[cfg(target_os = "windows")]
-                match windows_updater::launch_installer(&path) {
+                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                match updater::launch_installer(&path) {
                     Ok(()) => {
                         // 接手脚本已在等本进程退出；走正常关窗流程，未保存的编辑会先写回
                         self.eval(
@@ -1046,7 +1046,7 @@ impl App {
                         ));
                     }
                 }
-                #[cfg(not(target_os = "windows"))]
+                #[cfg(not(any(target_os = "windows", target_os = "linux")))]
                 let _ = path;
             }
             UserEvent::UpdateFailed(error) => {

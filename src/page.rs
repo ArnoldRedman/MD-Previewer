@@ -134,6 +134,8 @@ pub(crate) fn build_page_with_encoding(
         "updateFailedJs": s.update_failed,
         "btnUpdateTextJs": s.btn_update_text,
         "btnCheckUpdateJs": s.btn_check_update,
+        // 本平台能自动安装的发布资产后缀，空表示只能去发布页
+        "updateAssetSuffixes": crate::updater::asset_suffixes(),
     })
     .to_string();
 

@@ -33,7 +33,7 @@ A small, local-first Markdown reader and quick editor built with Rust and the sy
 - One-click copy buttons on code blocks across desktop and mobile previews.
 - Image lightbox viewer with click-to-zoom, mouse drag panning, and zoom controls.
 - Settings panel for appearance (System / Light / Dark), window reuse, tab accumulation mode, word wrap toggle, per-shortcut switches, run log viewing and clearing, and manual check for updates.
-- Automatic update checks: silent check after startup and periodic 4-hour background polling via GitHub Releases, with an update badge, release notes dialog, in-app background download with real-time progress, and seamless Windows one-click in-place update restart without console windows.
+- Automatic update checks: silent check after startup and periodic 4-hour background polling via GitHub Releases, with an update badge, release notes dialog, in-app background download with real-time progress, and seamless one-click in-place update restart without console windows. The downloaded asset matches the platform and install form: the portable exe or Setup installer on Windows, `tar.gz` or `.deb` on Linux.
 - Includes an author mode that adds copy buttons for the chapter heading line, the title without its chapter number, and the whole body.
 - Reloads previews when another editor changes the file.
 - Supports tables, task lists, syntax highlighting, GitHub alerts, KaTeX, Mermaid, local images, and local document links.

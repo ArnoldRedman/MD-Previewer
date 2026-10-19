@@ -34,6 +34,10 @@ flate2 = "1"
 ureq = { version = "3", default-features = false, features = ["native-tls"] }
 winreg = "0.52"
 
+# Linux 没有 native-tls（会拖进 openssl 开发包），改用 rustls + 平台验证器读系统 CA
+[target.'cfg(target_os = "linux")'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAlert", "NSApplication", "NSButton", "NSCell", "NSControl", "NSEvent", "NSImage", "NSMenu", "NSMenuItem", "NSResponder", "NSView"] }

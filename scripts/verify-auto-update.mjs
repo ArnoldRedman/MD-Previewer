@@ -19,12 +19,22 @@ if (!appSource.includes('id="update-modal"')) {
 if (!appSource.includes('UPDATE_CHECK_INTERVAL_MS')) {
   throw new Error('Expected UPDATE_CHECK_INTERVAL_MS in the frontend script');
 }
-// Windows 更新包由 Rust 后台线程下载并回报进度，接手脚本必须无控制台窗口
-if (!appSource.includes('windows_updater::download_update(')) {
-  throw new Error('Expected windows_updater::download_update in Rust sources');
+// 更新包由 Rust 后台线程下载并回报进度，接手脚本必须无控制台窗口
+if (!appSource.includes('updater::download_update(')) {
+  throw new Error('Expected updater::download_update in Rust sources');
 }
-if (!appSource.includes('windows_updater::launch_installer(')) {
-  throw new Error('Expected windows_updater::launch_installer in Rust sources');
+if (appSource.includes('windows_updater::')) {
+  throw new Error('The updater must stay cross-platform: no windows_updater module');
+}
+// Linux 同样走应用内下载：便携版换二进制，deb 版交给 dpkg
+if (!appSource.includes('updater::launch_installer(')) {
+  throw new Error('Expected updater::launch_installer in Rust sources');
+}
+if (!appSource.includes('pkexec dpkg -i')) {
+  throw new Error('Expected the Linux package handoff to install through pkexec');
+}
+if (!appSource.includes('"-xzf"')) {
+  throw new Error('Expected the Linux portable handoff to extract the tar.gz package');
 }
 if (!appSource.includes('.creation_flags(CREATE_NO_WINDOW)')) {
   throw new Error('Expected the updater script to be spawned with CREATE_NO_WINDOW');
@@ -53,14 +63,14 @@ const page = await browser.newPage();
 
 const pageConfig = configScript({ cargoVersion: '1.4.3' });
 
-const htmlContent = `
+const buildHtml = (config) => `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>MD Previewer Auto Update Test</title>
   ${desktopStyle}
-  ${pageConfig}
+  ${config}
 </head>
 <body>
   <div class="tabbar" id="tabbar">
@@ -184,7 +194,7 @@ const htmlContent = `
 </html>
 `;
 
-await page.setContent(htmlContent);
+await page.setContent(buildHtml(pageConfig));
 
 // Test version comparison in page
 const versionComparisonResult = await page.evaluate(() => {
@@ -416,6 +426,63 @@ if (!isModalReopened) {
   throw new Error('Expected clicking #btn-check-update (when update available) to open #update-modal');
 }
 console.log('  Settings update button opened modal successfully.');
+
+// 跨平台选包：资产后缀由 Rust 按平台和安装方式给出，前端只按顺序匹配；
+// 匹配不到就回发布页，绝不能在 Linux 上下 Windows 的包
+console.log('Verifying 5: Platform-aware asset selection...');
+const allAssetsRelease = {
+  tag_name: 'v1.6.1',
+  name: 'v1.6.1 — Cross-platform update',
+  body: 'notes',
+  html_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/tag/v1.6.1',
+  assets: [
+    { name: 'MD-Previewer-Setup.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.6.1/MD-Previewer-Setup.exe' },
+    { name: 'MD-Previewer-windows-x64.exe', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.6.1/MD-Previewer-windows-x64.exe' },
+    { name: 'MD-Previewer-linux-x64.tar.gz', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.6.1/MD-Previewer-linux-x64.tar.gz' },
+    { name: 'MD-Previewer-linux-amd64.deb', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.6.1/MD-Previewer-linux-amd64.deb' },
+    { name: 'MD-Previewer-mobile.apk', browser_download_url: 'https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.6.1/MD-Previewer-mobile.apk' }
+  ]
+};
+
+async function pickWithSuffixes(suffixes) {
+  const pickPage = await browser.newPage();
+  await pickPage.setContent(buildHtml(configScript({ cargoVersion: '1.6.0', updateAssetSuffixes: suffixes })));
+  const picked = await pickPage.evaluate((rel) => {
+    const asset = window.__pickUpdateAsset(rel);
+    return asset ? asset.name : null;
+  }, allAssetsRelease);
+  await pickPage.close();
+  return picked;
+}
+
+const expectedPicks = [
+  [['-windows-x64.exe', '-Setup.exe'], 'MD-Previewer-windows-x64.exe'],
+  [['-linux-x64.tar.gz'], 'MD-Previewer-linux-x64.tar.gz'],
+  [['-linux-amd64.deb'], 'MD-Previewer-linux-amd64.deb'],
+  [[], null]
+];
+for (const [suffixes, expected] of expectedPicks) {
+  const picked = await pickWithSuffixes(suffixes);
+  if (picked !== expected) {
+    throw new Error(`Asset pick for suffixes ${JSON.stringify(suffixes)} must be ${expected}, got ${picked}`);
+  }
+}
+
+// Linux 上点「立即更新」必须把 tar.gz 的下载地址交给 Rust，而不是 Windows 安装器
+const linuxPage = await browser.newPage();
+await linuxPage.setContent(buildHtml(configScript({ cargoVersion: '1.6.0', updateAssetSuffixes: ['-linux-x64.tar.gz'] })));
+await linuxPage.evaluate((rel) => {
+  window.__applyDetectedRelease(rel);
+  document.getElementById('btn-update-available').click();
+}, allAssetsRelease);
+await linuxPage.click('#btn-do-update');
+const linuxMessages = await linuxPage.evaluate(() => window.__messages.filter((m) => m.startsWith('self-update:')));
+const expectedLinux = 'self-update:https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.6.1/MD-Previewer-linux-x64.tar.gz';
+if (linuxMessages.length !== 1 || linuxMessages[0] !== expectedLinux) {
+  throw new Error('Linux Update Now must request the tar.gz asset, got: ' + JSON.stringify(linuxMessages));
+}
+await linuxPage.close();
+console.log('  Platform-aware asset selection verified successfully.');
 
 await browser.close();
 console.log('[auto-update-verify] ALL CHECKS PASSED');

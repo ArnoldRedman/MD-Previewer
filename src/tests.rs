@@ -26,7 +26,7 @@ use crate::reading::ReadingPositions;
 use crate::sanitize::is_safe_url;
 use crate::session::strip_verbatim_prefix;
 use crate::sidebar::{author_doc, folder_documents, sidebar_json, strip_chapter_prefix};
-use crate::updater::windows_updater;
+use crate::updater;
 use crate::watch::{event_should_reload_file, watch_scope_for_file};
 use crate::webview::{is_script_bearing_url, navigation_decision, Navigation};
 use notify::{Event, EventKind};
@@ -1373,22 +1373,22 @@ pub(crate) fn build_page_includes_auto_update_components() {
 
 #[test]
 pub(crate) fn update_url_whitelist_safety_checks() {
-    assert!(windows_updater::is_allowed_update_url(
+    assert!(updater::is_allowed_update_url(
         "https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.2.2/MD-Previewer-Setup.exe"
     ));
-    assert!(windows_updater::is_allowed_update_url(
+    assert!(updater::is_allowed_update_url(
         "https://github.com/ArnoldRedman/MD-Previewer/releases/download/v1.2.2/MD-Previewer-windows-x64.exe"
     ));
-    assert!(windows_updater::is_allowed_update_url(
+    assert!(updater::is_allowed_update_url(
         "https://github.com/ArnoldRedman/md-preview/releases/tag/v1.2.2"
     ));
-    assert!(!windows_updater::is_allowed_update_url(
+    assert!(!updater::is_allowed_update_url(
         "https://github.com/malicious/repo/releases/download/v1/bad.exe"
     ));
-    assert!(!windows_updater::is_allowed_update_url(
+    assert!(!updater::is_allowed_update_url(
         "http://example.com/bad.exe"
     ));
-    assert!(!windows_updater::is_allowed_update_url(
+    assert!(!updater::is_allowed_update_url(
         "https://evil-phishing.com/setup.exe"
     ));
 }

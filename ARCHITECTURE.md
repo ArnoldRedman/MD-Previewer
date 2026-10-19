@@ -64,6 +64,7 @@
 | 打开文档不发任何网络请求；安卓包不声明网络权限 | 对外的隐私承诺，写在下载页和 README 里 | `mobile/scripts/verify-release-readiness.sh`（断言 APK 无 INTERNET 权限） |
 | 外部改动不能覆盖未保存内容；自己的写入不能触发自我重载 | 会丢用户数据 / 无限重载循环 | `document.rs` 的 `SelfWriteRecord` + `self_write_still_matches_disk` + `should_protect_external_change` |
 | 发布资产名不带版本号（`MD-Previewer-*.exe/.apk/.deb/.tar.gz`） | 下载页用 `releases/latest/download/<名>` 直链，带版本号就失效 | `scripts/verify-landing-page.mjs` 与各构建脚本交叉校验 |
+| 更新只允许下本平台的发布包，后缀由 Rust 给出 | 以前前端只认 `.exe`，Linux 点「立即更新」会去下 Windows 安装器 | `updater::asset_suffixes` + `scripts/verify-auto-update.mjs` 的跨平台选包断言 |
 | 应用是单实例；新窗口也由主进程创建，复用模式再次打开同一文件要转发给已有标签所在窗口 | Windows 上双击文档的常见路径 | `single_instance.rs` + `workspace.rs` + `scripts/verify-windows-single-instance.ps1` |
 | 首屏 HTML 不带文档正文，正文一律等页面就绪后走 `__setContent` 推入 | WebView2 的 `NavigateToString` 上限 2MiB，超了连 webview 都建不出来，双击大文档直接闪退 | `tests::startup_page_stays_small_even_for_a_huge_document` + `scripts/verify-windows-large-document-startup.ps1` |
 | 体积大的前端资源（Mermaid/KaTeX/hljs）必须压缩后再内嵌 | 三份原文合计约 3.7MB，直接 `include_str!` 会把 exe 顶到 6MB 以上 | `build.rs` 的 `GZIP_ASSETS` + `tests::gzipped_assets_inflate_back_to_the_originals`（解压结果必须与仓库原文逐字节一致） |
@@ -119,9 +120,18 @@ Mermaid、8 列宽表、多级标题都在里面，兼做渲染压力样例）�
 
 | 产物 | 在哪构建 | 签名 | 备注 |
 |---|---|---|---|
-| Windows 安装包 / 免安装版 | 本机 `scripts/build-windows.ps1` | 未做代码签名 | 装完关联 `.md`；应用内更新只支持 Windows |
+| Windows 安装包 / 免安装版 | 本机 `scripts/build-windows.ps1` | 未做代码签名 | 装完关联 `.md`；应用内更新换 exe 或跑 Setup |
 | Android APK | 本机 `mobile/scripts/build-release.sh`（先 `source .env.mobile-release`） | 自己的 upload keystore | 密钥在 `mobile/android/signing/`，密码在 `.env.mobile-release`，两者都在 `.gitignore` 里，**丢了就无法给已装用户送更新** |
-| Linux tar.gz / .deb | CI 的 `build-linux` job（`scripts/build-linux.sh`） | 不涉及 | 作为 workflow artifact 产出，发布时下载回来改名上传 |
+| Linux tar.gz / .deb | CI 的 `build-linux` job（`scripts/build-linux.sh`） | 不涉及 | 作为 workflow artifact 产出，发布时下载回来改名上传；应用内更新按安装形态选 tar.gz 或 .deb |
+
+**应用内更新的平台差异**（都在 `src/updater.rs`）：
+
+- 前端只按 `updater::asset_suffixes()` 给的后缀挑资产：Windows 是 `-windows-x64.exe` → `-Setup.exe`，
+  Linux 是 `-linux-<arch>.tar.gz` 或 `-linux-<arch>.deb`，空列表表示只能去发布页（macOS 就是这种）。
+- Windows 写 `.ps1` 等进程退出后覆盖 exe 或跑安装器；Linux 写 `sh` 脚本，便携版覆盖二进制，
+  `.deb` 版走 `pkexec dpkg -i`（没有 pkexec 再试 `sudo -n`），失败就重启旧版本。
+- 「目录能不能写」决定 Linux 走哪条：便携版解压在用户目录，`/usr/bin` 下的只能交给 dpkg。
+- 两条路径都等本进程退出再动手，所以 `exit()` 里写回的 `session.json` 一定已经落盘，重启后按设置恢复标签。
 
 **发布到 release 时的注意点**：
 
@@ -139,7 +149,8 @@ Mermaid、8 列宽表、多级标题都在里面，兼做渲染压力样例）�
 
 - **iOS 没有发布二进制**：需要 macOS + Xcode + Apple 签名身份。
 - **Linux 包未在真机验证 GUI**：只验证过编译、打包、包结构、元数据、二进制可执行性；窗格渲染没实测过。
-- **Linux 没有应用内更新**：更新链路只有 Windows 那条。
+- **Linux 更新只验证到脚本层面**：接手脚本的文本有单测（`updater::tests`），真实 dpkg/pkexec 弹窗和
+  重启没在真机跑过，改这条链路要按 `samples/manual-check.md` 手动过一遍。
 - **没有 tag 自动发版**：目前 release 资产是手工上传的。
 - **截图是手工拍的**：拍摄脚本（含窗口摆位、hover 显示工具栏、点击打开设置面板）留在仓库外，
   下次改 UI 要重拍得重新摸一遍；README/下载页用的是 `docs/*.png`，同一份文件两处引用。

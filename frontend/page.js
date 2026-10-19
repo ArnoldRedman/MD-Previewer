@@ -2092,6 +2092,8 @@
   var UPDATE_API_URL = 'https://api.github.com/repos/ArnoldRedman/MD-Previewer/releases/latest';
   var UPDATE_STORAGE_KEY = 'mdp:update-status';
   var UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+  // 由 Rust 按平台和安装方式算好：Windows 是 exe，Linux 是 tar.gz 或 deb，空表示只能去发布页
+  var UPDATE_ASSET_SUFFIXES = CFG.updateAssetSuffixes || [];
   var CURRENT_VERSION = CFG.cargoVersion;
   var L_CHECKING_UPDATE = CFG.updateStatusCheckingJs;
   var L_LATEST_UPDATE = CFG.updateStatusLatestJs;
@@ -2354,35 +2356,35 @@
     });
   }
 
+  // 按 Rust 给的后缀顺序挑更新包：只认本平台、本安装方式的包，
+  // 不能只看 exe，否则 Linux 上会去下 Windows 安装器
+  function pickUpdateAsset(release) {
+    var assets = (release && release.assets) || [];
+    for (var s = 0; s < UPDATE_ASSET_SUFFIXES.length; s++) {
+      var suffix = UPDATE_ASSET_SUFFIXES[s];
+      if (!suffix) continue;
+      for (var i = 0; i < assets.length; i++) {
+        var name = assets[i].name || '';
+        if (name.length > suffix.length && name.slice(-suffix.length) === suffix) return assets[i];
+      }
+    }
+    return null;
+  }
+
+  window.__pickUpdateAsset = pickUpdateAsset;
+
   if (btnDoUpdate) {
     btnDoUpdate.addEventListener('click', function() {
       if (!activeReleaseData) return;
-      var assets = activeReleaseData.assets || [];
-      var chosenAsset = null;
-      // 优先下载免安装单文件 EXE，实现原地静默替换；若无则降级匹配安装包
-      for (var i = 0; i < assets.length; i++) {
-        if (/MD-Previewer-windows-x64\.exe$/i.test(assets[i].name || '')) {
-          chosenAsset = assets[i];
-          break;
-        }
-      }
-      if (!chosenAsset) {
-        for (var j = 0; j < assets.length; j++) {
-          if (/MD-Previewer-Setup\.exe$/i.test(assets[j].name || '')) {
-            chosenAsset = assets[j];
-            break;
-          }
-        }
-      }
-      var downloadUrl = chosenAsset ? chosenAsset.browser_download_url : activeReleaseData.html_url;
-      if (downloadUrl && downloadUrl.indexOf('.exe') !== -1 && window.ipc) {
+      var chosenAsset = pickUpdateAsset(activeReleaseData);
+      if (chosenAsset && window.ipc) {
         if (updateDownloading) return;
         // 先按未知总量显示动画，Rust 拿到 Content-Length 后会推真实进度
         setUpdateProgress(0, null);
-        window.ipc.postMessage('self-update:' + downloadUrl);
+        window.ipc.postMessage('self-update:' + chosenAsset.browser_download_url);
       } else {
-        var fallbackUrl = (activeReleaseData && activeReleaseData.html_url) || 'https://github.com/ArnoldRedman/MD-Previewer/releases';
-        window.location.href = fallbackUrl;
+        // 本平台没有能自动安装的包：回发布页自己挑安装方式
+        window.location.href = (activeReleaseData && activeReleaseData.html_url) || 'https://github.com/ArnoldRedman/MD-Previewer/releases';
       }
     });
   }

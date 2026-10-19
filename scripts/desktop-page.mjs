@@ -62,6 +62,8 @@ const DEFAULT_CONFIG = {
   updateFailedJs: 'Update failed: ',
   btnUpdateTextJs: 'Update Available',
   btnCheckUpdateJs: 'Check for Updates',
+  // 默认按 Windows 发布资产，验证脚本按需覆盖成 Linux / 空列表
+  updateAssetSuffixes: ['-windows-x64.exe', '-Setup.exe'],
 };
 
 export function configJson(overrides = {}) {
