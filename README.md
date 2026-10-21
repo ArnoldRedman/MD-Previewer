@@ -5,7 +5,7 @@
 [![CI](https://github.com/ArnoldRedman/md-preview/actions/workflows/ci.yml/badge.svg)](https://github.com/ArnoldRedman/md-preview/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A small, local-first Markdown reader and quick editor built with Rust and the system WebView. It does not bundle Chromium or Electron: the portable build is about 3.5 MB and the installer about 2.3 MB.
+A small, local-first Markdown reader and quick editor built with Rust and the system WebView. It does not bundle Chromium or Electron: the portable build is about 3.5 MB and the installer about 4.3 MB.
 
 ![MD Previewer icon](docs/icon.png)
 
@@ -63,7 +63,7 @@ dist\MD-Previewer-Setup.exe         per-user installer
 dist\SHA256SUMS.txt                 SHA-256 checksums
 ```
 
-The installer does not require administrator rights. It installs to `%LOCALAPPDATA%\Programs\MD Previewer`, creates Start Menu and uninstall entries, adds “Edit with MD Previewer” to the classic file context menu, and registers Markdown and common text files (including `.env`) in the “Open with” list. It uses the system WebView2 runtime and does not bundle WebView2. Use `build-windows.cmd --no-pause` from a terminal or CI.
+The installer is an Inno Setup wizard and needs no administrator rights. Defaults to `%LOCALAPPDATA%\Programs\MD Previewer`, with the folder, a desktop shortcut, and the “Open with” formats as wizard choices: Markdown (`.md .markdown .mdown .mkd`), plain text (`.txt .log`), config (`.json .toml .yaml .yml`), and `.env`. It creates Start Menu and uninstall entries and adds “Edit with MD Previewer” to the classic file context menu. Associations are registered, never forced: Windows keeps its current default app until the user picks MD Previewer. It uses the system WebView2 runtime and does not bundle WebView2. Building the installer needs Inno Setup 6 (`winget install -e --id JRSoftware.InnoSetup`); use `build-windows.cmd --no-pause` from a terminal or CI.
 
 ## Build
 

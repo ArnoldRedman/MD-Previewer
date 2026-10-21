@@ -120,7 +120,7 @@ Mermaid、8 列宽表、多级标题都在里面，兼做渲染压力样例）�
 
 | 产物 | 在哪构建 | 签名 | 备注 |
 |---|---|---|---|
-| Windows 安装包 / 免安装版 | 本机 `scripts/build-windows.ps1` | 未做代码签名 | 装完关联 `.md`；应用内更新换 exe 或跑 Setup |
+| Windows 安装包 / 免安装版 | 本机 `scripts/build-windows.ps1` 用 Inno Setup 6 编译 `scripts/windows-installer.iss` | 未做代码签名 | 向导里选安装目录、桌面快捷方式、要登记“打开方式”的格式；应用内更新跑 `/VERYSILENT` |
 | Android APK | 本机 `mobile/scripts/build-release.sh`（先 `source .env.mobile-release`） | 自己的 upload keystore | 密钥在 `mobile/android/signing/`，密码在 `.env.mobile-release`，两者都在 `.gitignore` 里，**丢了就无法给已装用户送更新** |
 | Linux tar.gz / .deb | CI 的 `build-linux` job（`scripts/build-linux.sh`） | 不涉及 | 作为 workflow artifact 产出，发布时下载回来改名上传；应用内更新按安装形态选 tar.gz 或 .deb |
 
@@ -128,7 +128,7 @@ Mermaid、8 列宽表、多级标题都在里面，兼做渲染压力样例）�
 
 - 前端只按 `updater::asset_suffixes()` 给的后缀挑资产：Windows 是 `-windows-x64.exe` → `-Setup.exe`，
   Linux 是 `-linux-<arch>.tar.gz` 或 `-linux-<arch>.deb`，空列表表示只能去发布页（macOS 就是这种）。
-- Windows 写 `.ps1` 等进程退出后覆盖 exe 或跑安装器；Linux 写 `sh` 脚本，便携版覆盖二进制，
+- Windows 写 `.ps1` 等进程退出后覆盖 exe，或带 `/VERYSILENT /SUPPRESSMSGBOXES` 静默跑 Setup；Linux 写 `sh` 脚本，便携版覆盖二进制，
   `.deb` 版走 `pkexec dpkg -i`（没有 pkexec 再试 `sudo -n`），失败就重启旧版本。
 - 「目录能不能写」决定 Linux 走哪条：便携版解压在用户目录，`/usr/bin` 下的只能交给 dpkg。
 - 两条路径都等本进程退出再动手，所以 `exit()` 里写回的 `session.json` 一定已经落盘，重启后按设置恢复标签。

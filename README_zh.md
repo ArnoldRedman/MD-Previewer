@@ -5,7 +5,7 @@
 [![CI](https://github.com/ArnoldRedman/md-preview/actions/workflows/ci.yml/badge.svg)](https://github.com/ArnoldRedman/md-preview/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-MD Previewer 是一个体积小、本地优先的 Markdown 阅读器和快速编辑器，桌面端使用 Rust 与系统 WebView，不内置 Chromium，也不依赖 Electron —— 免安装版约 3.5 MB、安装包约 2.3 MB。
+MD Previewer 是一个体积小、本地优先的 Markdown 阅读器和快速编辑器，桌面端使用 Rust 与系统 WebView，不内置 Chromium，也不依赖 Electron —— 免安装版约 3.5 MB、安装包约 4.3 MB。
 
 ![MD Previewer 图标](docs/icon.png)
 
@@ -62,7 +62,7 @@ dist\MD-Previewer-Setup.exe         当前用户安装包
 dist\SHA256SUMS.txt                 SHA-256 校验值
 ```
 
-安装包不需要管理员权限，默认安装到 `%LOCALAPPDATA%\Programs\MD Previewer`，并创建开始菜单入口、卸载入口、文件右键「以 MD Previewer 编辑」，以及 Markdown 和常见文本（含 `.env`）的“打开方式”。它依赖系统 WebView2，不会把 WebView2 打进安装包。命令行或 CI 可用 `build-windows.cmd --no-pause` 跳过结束暂停。
+安装包是 Inno Setup 向导，不需要管理员权限。默认装到 `%LOCALAPPDATA%\Programs\MD Previewer`，安装目录、桌面快捷方式、以及要加入“打开方式”的格式都在向导里勾选：Markdown（`.md .markdown .mdown .mkd`）、纯文本（`.txt .log`）、配置（`.json .toml .yaml .yml`）和 `.env`。同时创建开始菜单入口、卸载入口和文件右键「以 MD Previewer 编辑」。关联只做登记、不强设默认：系统会继续用原来的默认程序，直到用户在“打开方式”里选 MD Previewer。它依赖系统 WebView2，不会把 WebView2 打进安装包。编译安装包需要 Inno Setup 6（`winget install -e --id JRSoftware.InnoSetup`）；命令行或 CI 可用 `build-windows.cmd --no-pause` 跳过结束暂停。
 
 ## 构建
 

@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SkipInstallerTest
 )
 
@@ -19,7 +19,9 @@ $testRegistryRoot = "HKCU:\Software\MDPreviewerBuildTest"
 $testClassesRoot = Join-Path $testRegistryRoot "Classes"
 $testFileExtsRoot = Join-Path $testRegistryRoot "FileExts"
 $testUninstallRoot = Join-Path $testRegistryRoot "Uninstall"
-$testStartMenu = Join-Path $dist "start-menu-test"
+$testGroupName = "MDPreviewerBuildTest"
+$testStartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$testGroupName"
+$testDesktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) "MD Previewer.lnk"
 
 function Invoke-Cargo([string[]]$Arguments) {
     & $cargo @Arguments
@@ -93,7 +95,7 @@ New-Item -ItemType Directory -Path $payload -Force | Out-Null
 Copy-Item -LiteralPath $releaseExe -Destination $portableExe
 Copy-Item -LiteralPath $releaseExe -Destination (Join-Path $payload "md-previewer.exe")
 Copy-Item -LiteralPath $shellDll -Destination (Join-Path $payload "md-previewer-shell.dll")
-foreach ($file in @("LICENSE", "NOTICE", "install-windows.cmd", "install-windows.ps1", "uninstall-windows.ps1", "association-prune.ps1")) {
+foreach ($file in @("LICENSE", "NOTICE", "association-prune.ps1")) {
     $source = if ($file -in @("LICENSE", "NOTICE")) {
         Join-Path $root $file
     }
@@ -103,93 +105,92 @@ foreach ($file in @("LICENSE", "NOTICE", "install-windows.cmd", "install-windows
     Copy-Item -LiteralPath $source -Destination (Join-Path $payload $file)
 }
 
-$sed = Join-Path $dist "installer.sed"
-$sedContent = @"
-[Version]
-Class=IEXPRESS
-SEDVersion=3
-[Options]
-PackagePurpose=InstallApp
-ShowInstallProgramWindow=1
-HideExtractAnimation=1
-UseLongFileName=1
-InsideCompressed=1
-CAB_FixedSize=0
-CAB_ResvCodeSigning=0
-RebootMode=N
-InstallPrompt=%InstallPrompt%
-DisplayLicense=%DisplayLicense%
-FinishMessage=%FinishMessage%
-TargetName=%TargetName%
-FriendlyName=%FriendlyName%
-AppLaunched=%AppLaunched%
-PostInstallCmd=%PostInstallCmd%
-AdminQuietInstCmd=%AdminQuietInstCmd%
-UserQuietInstCmd=%UserQuietInstCmd%
-SourceFiles=SourceFiles
-[Strings]
-InstallPrompt=Install MD Previewer for the current user?
-DisplayLicense=
-FinishMessage=MD Previewer was installed for the current user.
-TargetName=$installer
-FriendlyName=MD Previewer $version Setup
-AppLaunched=install-windows.cmd
-PostInstallCmd=<None>
-AdminQuietInstCmd=install-windows.cmd quiet
-UserQuietInstCmd=install-windows.cmd quiet
-FILE0=md-previewer.exe
-FILE1=LICENSE
-FILE2=NOTICE
-FILE3=install-windows.cmd
-FILE4=install-windows.ps1
-FILE5=uninstall-windows.ps1
-FILE6=md-previewer-shell.dll
-FILE7=association-prune.ps1
-[SourceFiles]
-SourceFiles0=$payload\
-[SourceFiles0]
-%FILE0%=
-%FILE1%=
-%FILE2%=
-%FILE3%=
-%FILE4%=
-%FILE5%=
-%FILE6%=
-%FILE7%=
-"@
-# IExpress parses .sed as ANSI, and Encoding::Default means ANSI on PowerShell 5.1 but UTF-8 on 7.
-# Pin ASCII and require ASCII-representable paths instead of emitting a silently corrupt installer.
-if ($sedContent -match '[^\u0000-\u007F]') {
-    throw "Installer paths must be ASCII to build the .sed script: $root"
+# 安装向导由 Inno Setup 6 编译（scripts\windows-installer.iss）。安装位置、快捷方式和
+# 按格式勾选的文件关联都长在 .iss 里，这里只负责把版本、载荷和输出路径传进去。
+function Resolve-Iscc {
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:INNO_SETUP_DIR)) {
+        $candidates += (Join-Path $env:INNO_SETUP_DIR "ISCC.exe")
+    }
+    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, $env:LOCALAPPDATA)) {
+        if ([string]::IsNullOrWhiteSpace($base)) {
+            continue
+        }
+        $candidates += (Join-Path $base "Inno Setup 6\ISCC.exe")
+        $candidates += (Join-Path $base "Programs\Inno Setup 6\ISCC.exe")
+    }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+    throw "Inno Setup 6 was not found. Install it with: winget install -e --id JRSoftware.InnoSetup"
 }
-[IO.File]::WriteAllText($sed, $sedContent, [Text.Encoding]::ASCII)
 
-$iexpress = Join-Path $env:SystemRoot "System32\iexpress.exe"
-if (-not (Test-Path -LiteralPath $iexpress)) {
-    throw "Windows IExpress was not found: $iexpress"
+$iscc = Resolve-Iscc
+# 中文向导的翻译文件跟仓库走：Inno 官方包只带英文
+$chineseMessages = Join-Path $root "scripts\languages\ChineseSimplified.isl"
+if (-not (Test-Path -LiteralPath $chineseMessages)) {
+    throw "Installer translation is missing: $chineseMessages"
 }
-Write-Host "[build] Creating IExpress installer"
-$iexpressProcess = Start-Process -FilePath $iexpress -ArgumentList @("/N", "/Q", $sed) -Wait -PassThru
-if ($iexpressProcess.ExitCode -ne 0) {
-    throw "IExpress failed with exit code $($iexpressProcess.ExitCode)"
+
+# 版本、载荷、输出位置和注册表根都走环境变量，避免 /D 参数在带空格的路径上被拆开
+function Compile-Installer([string]$OutputDir, [string]$OutputBaseName, [hashtable]$Overrides) {
+    $env:MD_PREVIEWER_ISCC_VERSION = $version
+    $env:MD_PREVIEWER_ISCC_SOURCE = $payload
+    $env:MD_PREVIEWER_ISCC_ROOT = $root
+    $env:MD_PREVIEWER_ISCC_OUTPUT = $OutputDir
+    $env:MD_PREVIEWER_ISCC_BASENAME = $OutputBaseName
+    $env:MD_PREVIEWER_ISCC_CLASSES = "Software\Classes"
+    $env:MD_PREVIEWER_ISCC_FILEEXTS = "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts"
+    # 1.6.1 的 IExpress 安装器写的那条卸载项，安装时删掉，免得控制面板出现两条
+    $env:MD_PREVIEWER_ISCC_LEGACY_UNINSTALL = "Software\Microsoft\Windows\CurrentVersion\Uninstall\MDPreviewer"
+    $env:MD_PREVIEWER_ISCC_GROUP = "MD Previewer"
+    $env:MD_PREVIEWER_ISCC_CHINESE_MESSAGES = $chineseMessages
+    foreach ($name in $Overrides.Keys) {
+        Set-Item -Path "env:$name" -Value ([string]$Overrides[$name])
+    }
+    & $iscc "/Q" (Join-Path $root "scripts\windows-installer.iss")
+    if ($LASTEXITCODE -ne 0) {
+        throw "ISCC failed with exit code $LASTEXITCODE"
+    }
 }
+
+Write-Host "[build] Creating installer with Inno Setup"
+Compile-Installer $dist "MD-Previewer-Setup" @{}
 if (-not (Test-Path -LiteralPath $installer)) {
     throw "Installer was not created: $installer"
 }
 
 if (-not $SkipInstallerTest) {
     Write-Host "[build] Testing silent install and uninstall"
-    $testEnvironment = @{
-        MD_PREVIEWER_INSTALL_DIR = $testInstall
-        MD_PREVIEWER_CLASSES_ROOT = $testClassesRoot
-        MD_PREVIEWER_UNINSTALL_ROOT = $testUninstallRoot
-        MD_PREVIEWER_START_MENU_DIR = $testStartMenu
-        MD_PREVIEWER_FILE_EXTS_ROOT = $testFileExtsRoot
-        MD_PREVIEWER_INSTALL_QUIET = "1"
+    $testOutput = Join-Path $dist "installer-test-dist"
+    Remove-Item -LiteralPath $testOutput -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $testOutput -Force | Out-Null
+    $testInstaller = Join-Path $testOutput "MD-Previewer-Setup-test.exe"
+    # 测试专用编译：注册表根指向 HKCU\Software\MDPreviewerBuildTest、开始菜单换成独立分组名，
+    # 自测就不会碰到真实安装留下的关联、快捷方式和卸载项
+    Compile-Installer $testOutput "MD-Previewer-Setup-test" @{
+        MD_PREVIEWER_ISCC_CLASSES = "Software\MDPreviewerBuildTest\Classes"
+        MD_PREVIEWER_ISCC_FILEEXTS = "Software\MDPreviewerBuildTest\FileExts"
+        MD_PREVIEWER_ISCC_LEGACY_UNINSTALL = "Software\MDPreviewerBuildTest\Uninstall"
+        MD_PREVIEWER_ISCC_GROUP = "MDPreviewerBuildTest"
+    }
+    # 开发机上可能已经装着一份 MD Previewer：先记下现状，断言只看"这次安装新增了什么"
+    $uninstallRootKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    $uninstallKeysBefore = @(Get-ChildItem -LiteralPath $uninstallRootKey -ErrorAction SilentlyContinue | ForEach-Object { $_.PSChildName })
+    $desktopShortcutFree = -not (Test-Path -LiteralPath $testDesktopShortcut)
+    $testTasks = "startmenu,assoc_markdown,assoc_text,assoc_config,assoc_env"
+    if ($desktopShortcutFree) {
+        $testTasks = "desktopicon," + $testTasks
     }
     try {
-        # Seed the legacy mess first: an entry under another exe name, an old
-        # ProgID, and stale exe names in the OpenWithList candidate list
+        # 先埋旧版本的残留：另一个 exe 名下的 Applications 条目、旧 ProgID、OpenWithList
+        # 里的陈旧 exe 名，以及 1.6.1 那套 IExpress 安装器写下的卸载项
         $legacyApp = Join-Path $testClassesRoot "Applications\MD-Previewer-windows-x64.exe"
         New-Item -Path (Join-Path $legacyApp "shell\open\command") -Force | Out-Null
         New-ItemProperty -Path $legacyApp -Name 'FriendlyAppName' -Value 'MD Previewer' -PropertyType String -Force | Out-Null
@@ -205,8 +206,11 @@ if (-not $SkipInstallerTest) {
         New-ItemProperty -Path $legacyList -Name 'c' -Value 'MD-Previewer-windows-x64.exe' -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $legacyList -Name 'MRUList' -Value 'bca' -PropertyType String -Force | Out-Null
 
-        $installProcess = Start-WithEnvironment $installer "/Q" $testEnvironment
-        Wait-ForExit $installProcess "installer test"
+        $installArguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="{0}" /GROUP="MDPreviewerBuildTest" /MERGETASKS="{1}"' -f $testInstall, $testTasks
+        $installProcess = Start-Process -FilePath $testInstaller -ArgumentList $installArguments -Wait -PassThru
+        if ($installProcess.ExitCode -ne 0) {
+            throw "installer test failed with exit code $($installProcess.ExitCode)"
+        }
         $installedExe = Join-Path $testInstall "md-previewer.exe"
         if (-not (Test-Path -LiteralPath $installedExe)) {
             throw "Installer test did not create $installedExe"
@@ -232,9 +236,13 @@ if (-not $SkipInstallerTest) {
         if ((Get-Item -LiteralPath $testInProc).GetValue("") -ne $installedDll) {
             throw "Installer test registered an unexpected shell extension path"
         }
+        # 勾选的两个格式组（Markdown / 纯文本）都必须真的写进候选列表
         $testEnvOpen = Join-Path $testClassesRoot ".env\OpenWithProgids"
         if ((Get-Item -LiteralPath $testEnvOpen).GetValueNames() -notcontains "MDPreviewer.md") {
             throw "Installer test did not advertise MD Previewer for .env"
+        }
+        if ((Get-Item -LiteralPath $legacyProgIdRef).GetValueNames() -notcontains "MDPreviewer.md") {
+            throw "Installer test did not advertise MD Previewer for .txt"
         }
         # Only one MD Previewer entry may survive: the legacy ones must be gone
         $previewerApps = @(Get-ChildItem -LiteralPath (Join-Path $testClassesRoot "Applications") | Where-Object {
@@ -257,16 +265,28 @@ if (-not $SkipInstallerTest) {
         if (-not (Test-Path -LiteralPath (Join-Path $testStartMenu "MD Previewer.lnk"))) {
             throw "Installer test did not create the Start Menu shortcut"
         }
-        if (-not (Test-Path -LiteralPath $testUninstallRoot)) {
-            throw "Installer test did not create uninstall metadata"
+        if ($desktopShortcutFree -and -not (Test-Path -LiteralPath $testDesktopShortcut)) {
+            throw "Installer test did not create the desktop shortcut"
+        }
+        if (Test-Path -LiteralPath $testUninstallRoot) {
+            throw "Installer test did not remove the IExpress uninstall entry"
+        }
+        $newUninstallKeys = @(Get-ChildItem -LiteralPath $uninstallRootKey -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.PSChildName } | Where-Object { $uninstallKeysBefore -notcontains $_ })
+        if ($newUninstallKeys.Count -ne 1) {
+            throw "Installer test created $($newUninstallKeys.Count) uninstall entries instead of one: $($newUninstallKeys -join ', ')"
         }
 
-        $uninstaller = Join-Path $testInstall "uninstall-windows.ps1"
-        $uninstallArguments = "-NoProfile -ExecutionPolicy Bypass -File $(Quote-ProcessArgument $uninstaller)"
-        $uninstallProcess = Start-WithEnvironment "powershell.exe" $uninstallArguments $testEnvironment
-        Wait-ForExit $uninstallProcess "uninstaller test"
-        # The uninstaller spawns a detached process to delete the install dir, so wait for it to actually go
-        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        $uninstaller = Join-Path $testInstall "unins000.exe"
+        if (-not (Test-Path -LiteralPath $uninstaller)) {
+            throw "Installer test did not create the uninstaller"
+        }
+        $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait -PassThru
+        if ($uninstallProcess.ExitCode -ne 0) {
+            throw "uninstaller test failed with exit code $($uninstallProcess.ExitCode)"
+        }
+        # 卸载器会把自己复制到临时目录再跑，等它真正把安装目录删掉
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
         while (Test-Path -LiteralPath $testInstall) {
             if ([DateTime]::UtcNow -gt $deadline) {
                 throw "Uninstaller test did not remove $testInstall"
@@ -277,8 +297,16 @@ if (-not $SkipInstallerTest) {
             (Test-Path -LiteralPath $testShell) -or
             (Test-Path -LiteralPath $testInProc) -or
             (Test-Path -LiteralPath $testStartMenu) -or
-            (Test-Path -LiteralPath $testUninstallRoot)) {
+            ($desktopShortcutFree -and (Test-Path -LiteralPath $testDesktopShortcut))) {
             throw "Uninstaller test left shell integration behind"
+        }
+        if ((Get-Item -LiteralPath $legacyProgIdRef).GetValueNames() -contains 'MDPreviewer.md') {
+            throw "Uninstaller test left MD Previewer in .txt OpenWithProgids"
+        }
+        $keysLeft = @(Get-ChildItem -LiteralPath $uninstallRootKey -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.PSChildName } | Where-Object { $newUninstallKeys -contains $_ })
+        if ($keysLeft.Count -gt 0) {
+            throw "Uninstaller test left the uninstall metadata behind: $($keysLeft -join ', ')"
         }
         # Uninstall must not leave our names behind in the candidate list or in
         # Applications, or the Open With dialog still lists a row. The list itself
@@ -307,12 +335,15 @@ if (-not $SkipInstallerTest) {
         # Never leave test registry keys or temp dirs behind on a failed assertion; also sweeps older failures
         Remove-Item -LiteralPath $testRegistryRoot -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $testStartMenu -Recurse -Force -ErrorAction SilentlyContinue
+        if ($desktopShortcutFree) {
+            Remove-Item -LiteralPath $testDesktopShortcut -Force -ErrorAction SilentlyContinue
+        }
         Remove-Item -LiteralPath $testInstall -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $testOutput -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
 Remove-Item -LiteralPath $payload -Recurse -Force
-Remove-Item -LiteralPath $sed -Force
 $hashes = @($portableExe, $installer) | ForEach-Object {
     $hash = Get-FileHash -LiteralPath $_ -Algorithm SHA256
     "$($hash.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_))"

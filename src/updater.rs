@@ -392,7 +392,7 @@ $pidToWait = {pid}
 
 try {{
     Wait-Process -Id $pidToWait -Timeout 30 -ErrorAction SilentlyContinue
-    Start-Process -FilePath $downloaded
+    Start-Process -FilePath $downloaded -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
 }} catch {{
     Start-Process -FilePath '{target_s}'
 }} finally {{

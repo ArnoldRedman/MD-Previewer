@@ -10,3 +10,6 @@ mobile/android/build
 mobile/android/app/build
 # 本机 SDK 位置，每台机器不一样
 mobile/android/local.properties
+
+# pi 运行期状态（任务输出、临时文件）
+/.pi/
