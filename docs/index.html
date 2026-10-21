@@ -48,7 +48,7 @@
     </p>
     <ul class="chips">
       <li>Windows 10/11 · Linux</li>
-      <li>安装包约 2 MB</li>
+      <li>安装包约 4 MB</li>
       <li>无 Electron</li>
       <li>无遥测、无账号</li>
       <li>离线渲染公式与图表</li>
@@ -57,7 +57,7 @@
     <div class="cta">
       <a class="button" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">
         下载 Windows 版
-        <small>安装包 · 自动关联 .md 文件</small>
+        <small>安装向导 · 可选目录与文件关联</small>
       </a>
       <a class="button ghost" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">
         免安装版
@@ -176,8 +176,16 @@
   <div class="wrap">
     <p class="eyebrow">更新</p>
     <h2>最近几个版本改了什么</h2>
-    <p class="intro">完整历史一直更新在 <a href="https://github.com/ArnoldRedman/MD-Previewer/releases">GitHub Releases</a>，这里只留最近几版的要点（截至 v1.6.1，2026-10-19）。</p>
+    <p class="intro">完整历史一直更新在 <a href="https://github.com/ArnoldRedman/MD-Previewer/releases">GitHub Releases</a>，这里只留最近几版的要点（截至 v1.6.2，2026-10-21）。</p>
     <div class="grid">
+      <div class="card">
+        <h3>v1.6.2 · 安装时能选目录、快捷方式和文件关联</h3>
+        <ul>
+          <li>安装包换成安装向导：可以改安装位置，勾桌面快捷方式、开始菜单入口</li>
+          <li>「打开方式」按格式勾选：Markdown、纯文本、配置与数据、<code>.env</code>，只登记不抢默认程序</li>
+          <li>中文系统上向导也是中文；应用内更新静默升级，不再弹向导弹窗</li>
+        </ul>
+      </div>
       <div class="card">
         <h3>v1.6.1 · Linux 也能一键更新</h3>
         <ul>
@@ -286,7 +294,7 @@
     <div class="grid">
       <div class="card">
         <h3>1 · 下载</h3>
-        <p>推荐用安装包：装完会把 <code>.md</code> 关联到 MD Previewer，双击文档直接打开，并写入卸载信息。</p>
+        <p>推荐用安装包：向导里可以选安装目录、要不要桌面快捷方式，以及把哪些格式加入“打开方式”（默认含 <code>.md</code>），并写入卸载信息。</p>
       </div>
       <div class="card">
         <h3>2 · 如果出现 SmartScreen 提示</h3>

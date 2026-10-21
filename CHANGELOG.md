@@ -2,6 +2,20 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.6.2
+
+- **Windows 安装向导 (Installer Wizard)**：安装包从 IExpress 的单个确认按钮换成 Inno Setup 向导，之前没法改的东西现在都能选：
+  - **安装位置**可以改，默认仍是 `%LOCALAPPDATA%\Programs\MD Previewer`；仍然只装当前用户、不弹 UAC；
+  - **附加任务**可以勾桌面快捷方式和开始菜单快捷方式（桌面图标默认不勾）；
+  - **文件关联按格式勾选**：Markdown（`.md .markdown .mdown .mkd`）、纯文本（`.txt .log`）、配置与数据（`.json .toml .yaml .yml`）、`.env`，默认全选。只登记到“打开方式”候选，不抢系统默认程序——Windows 10/11 本来就拦程序改默认，强设只会失败或回滚；
+  - 右键「以 MD Previewer 编辑」、卸载项，以及旧版本遗留的重复“打开方式”清理都保留；
+  - 系统语言是中文时向导就是中文（官方 `ChineseSimplified.isl` 随仓库走）。
+- 安装器改由 Inno Setup 6 编译（`scripts/windows-installer.iss`），旧的 `install-windows.ps1` / `install-windows.cmd` / `uninstall-windows.ps1` 删除，安装逻辑只剩一份。
+- 应用内更新改成静默调用安装器（`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`），升级过程不再弹向导。
+- 打包体积：安装包约 2.3 MB → 约 4.3 MB（Inno 引擎自带约 2 MB 存根），免安装版不变。
+- 构建前置：Windows 打包现在需要 Inno Setup 6（`winget install -e --id JRSoftware.InnoSetup`）。
+- 验证：`scripts/build-windows.ps1` 全链路通过——Rust 125 项测试、release 构建、Inno 编译、隔离注册表下的静默安装/卸载自测（描述、CLSID、外壳菜单、快捷方式、旧残留清理、卸载清空全部断言）。
+
 ## 1.6.1
 
 - **Linux 应用内一键更新 (Linux In-App Update)**：以前只有 Windows 能点「立即更新」自动替换，Linux 上点下去会去下载 Windows 的 exe，装也不能装。现在 Linux 和 Windows 走同一条链路：

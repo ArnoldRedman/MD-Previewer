@@ -47,7 +47,7 @@
     </p>
     <ul class="chips">
       <li>Windows 10/11 · Linux</li>
-      <li>~2 MB installer</li>
+      <li>~4 MB installer</li>
       <li>No Electron</li>
       <li>No telemetry, no account</li>
       <li>Offline math and diagrams</li>
@@ -56,7 +56,7 @@
     <div class="cta">
       <a class="button" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">
         Download for Windows
-        <small>Installer · associates .md files</small>
+        <small>Setup wizard · folder and associations</small>
       </a>
       <a class="button ghost" href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">
         Portable build
@@ -175,8 +175,16 @@
   <div class="wrap">
     <p class="eyebrow">What's new</p>
     <h2>What changed in the last few releases</h2>
-    <p class="intro">The full history lives in <a href="https://github.com/ArnoldRedman/MD-Previewer/releases">GitHub Releases</a>. Only the highlights are kept here (as of v1.6.1, 2026-10-19).</p>
+    <p class="intro">The full history lives in <a href="https://github.com/ArnoldRedman/MD-Previewer/releases">GitHub Releases</a>. Only the highlights are kept here (as of v1.6.2, 2026-10-21).</p>
     <div class="grid">
+      <div class="card">
+        <h3>v1.6.2 · choose the folder, shortcut and associations</h3>
+        <ul>
+          <li>The installer is now a real wizard: pick the install folder and whether to add desktop and Start Menu shortcuts</li>
+          <li>“Open with” formats are ticked per group — Markdown, plain text, config and data, <code>.env</code> — registered, never forced as the default app</li>
+          <li>Chinese wizard on Chinese systems; in-app updates install silently instead of showing the wizard</li>
+        </ul>
+      </div>
       <div class="card">
         <h3>v1.6.1 · one-click updates on Linux too</h3>
         <ul>
@@ -285,7 +293,7 @@
     <div class="grid">
       <div class="card">
         <h3>1 · Download</h3>
-        <p>The installer associates <code>.md</code> files with MD Previewer, so a double click opens the document and registers an uninstaller.</p>
+        <p>The installer lets you pick the folder, an optional desktop shortcut, and which formats join the “Open with” list (Markdown included by default), and it registers an uninstaller.</p>
       </div>
       <div class="card">
         <h3>2 · If SmartScreen complains</h3>
