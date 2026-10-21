@@ -2,6 +2,12 @@
 
 This file tracks MD Previewer releases. The upstream MD Preview history remains available at <https://github.com/vorojar/md-preview/releases>.
 
+## 1.6.3
+
+- **修复编码弹层被顶部工具栏盖住**：点标签栏右侧的 `UTF-8` 展开编码菜单时，弹层从标签栏往下展开，正好压在「打开文件夹 / 搜索 / 书签 / 编辑」那一行上，上半截被工具栏遮住，前几个选项点不到。
+  - 原因是标签栏带 `backdrop-filter`，自成层叠上下文，`z-index` 又和工具栏同为 110，弹层自己的 `z-index` 出不了标签栏这一层，同层按 DOM 顺序就被后面的工具栏盖住了。
+  - 现在标签栏层级提到工具栏之上；`scripts/verify-encoding-convert.mjs` 增加了一条 `elementFromPoint` 回归断言，修复前红、修复后绿。
+
 ## 1.6.2
 
 - **Windows 安装向导 (Installer Wizard)**：安装包从 IExpress 的单个确认按钮换成 Inno Setup 向导，之前没法改的东西现在都能选：
