@@ -199,7 +199,9 @@ body.has-tabs { --bar-top: 40px; }
 	.recent-name { color: #555; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.recent-path { color: #aaa; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.tabbar {
-	  display: none; position: sticky; top: 0; z-index: 110; height: 40px;
+	  /* 编码弹层从标签栏往下展开、正好压在 #topbar 上；标签栏自己有 backdrop-filter
+	     层叠上下文，所以层级必须高于 #topbar，否则弹层上半截被工具栏盖住 */
+	  display: none; position: sticky; top: 0; z-index: 120; height: 40px;
 	  box-sizing: border-box; align-items: stretch; gap: 4px; padding: 4px 8px;
 	  border-bottom: 1px solid #e6e6e6; background: rgba(248,248,248,0.96);
 	  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);

@@ -156,6 +156,25 @@ if (popoverBox.x < 0 || popoverBox.x + popoverBox.width > 900 || popoverBox.y + 
 const clipped = await page.$eval('#encoding-popover', (el) => el.scrollWidth > el.clientWidth + 1);
 if (clipped) throw new Error('popover content is clipped horizontally');
 
+console.log('Verifying 2b: Popover is not covered by the sticky toolbar row...');
+// 回归：编码弹层从标签栏往下展开，正好压在 #topbar 上；标签栏有自己的
+// backdrop-filter 层叠上下文，z-index 不够时整块弹层会被工具栏盖住
+const covered = await page.evaluate(() => {
+  const popover = document.querySelector('#encoding-popover');
+  const box = popover.getBoundingClientRect();
+  const probe = (x, y) => {
+    const hit = document.elementFromPoint(x, y);
+    return hit === null || hit === popover || popover.contains(hit);
+  };
+  return {
+    topCenter: probe(box.left + box.width / 2, box.top + 4),
+    topLeft: probe(box.left + 4, box.top + 4),
+  };
+});
+if (!covered.topCenter || !covered.topLeft) {
+  throw new Error(`encoding popover is covered by the toolbar row: ${JSON.stringify(covered)}`);
+}
+
 console.log('Verifying 3: Convert option sends the encoding and full editor text...');
 await page.click('[data-convert-encoding="UTF-8 BOM"]');
 let msgs = await messages();
