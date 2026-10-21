@@ -23,6 +23,14 @@ $testGroupName = "MDPreviewerBuildTest"
 $testStartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$testGroupName"
 $testDesktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) "MD Previewer.lnk"
 
+# 已在运行的 md-previewer 会锁住 target\release 里的 exe，让 cargo 报一句难懂的
+# “failed to remove file ... 拒绝访问”；先查一次，直接告诉要关掉哪个进程
+$runningApp = @(Get-Process md-previewer -ErrorAction SilentlyContinue)
+if ($runningApp.Count -gt 0) {
+    $ids = ($runningApp | ForEach-Object { $_.Id }) -join ", "
+    throw "Close MD Previewer before building; still running: PID $ids"
+}
+
 function Invoke-Cargo([string[]]$Arguments) {
     & $cargo @Arguments
     if ($LASTEXITCODE -ne 0) {
