@@ -24,6 +24,8 @@ jobs:
   build-windows:
     # x64 走 windows-latest，ARM64 走 GitHub 托管的原生 windows-11-arm
     strategy:
+      # 两个架构互不依赖：一边挂了也要看到另一边的结果，别用默认的 fail-fast 互相取消
+      fail-fast: false
       matrix:
         include:
           - runner: windows-latest
