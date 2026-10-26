@@ -64,7 +64,15 @@ jobs:
           cargo build --release
 
   build-linux:
-    runs-on: ubuntu-latest
+    # 同一个 Linux 打包脚本按宿主架构产出 x64 / arm64 资产
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Install WebKitGTK
@@ -80,7 +88,7 @@ jobs:
         run: ./scripts/build-linux.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: md-previewer-linux-x64
+          name: md-previewer-linux-${{ matrix.arch }}
           path: |
             dist/*.tar.gz
             dist/*.deb

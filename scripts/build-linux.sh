@@ -52,7 +52,7 @@ install -m 0644 "$DIST/$ICON_NAME.desktop" "$TAR_STAGE/$ICON_NAME.desktop"
 install -m 0644 assets/linux/md-previewer-256.png "$TAR_STAGE/$ICON_NAME.png"
 install -m 0644 LICENSE "$TAR_STAGE/LICENSE"
 cat > "$TAR_STAGE/README.md" <<EOF
-# $APP_NAME $VERSION (Linux x64)
+# $APP_NAME $VERSION (Linux $RELEASE_ARCH)
 
 无需安装：把 $BIN_NAME 放到任意目录直接运行。
 
