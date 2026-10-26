@@ -635,6 +635,8 @@ pub(crate) fn page_blocks_native_preview_reload_paths() {
         &strings,
         false,
     );
+    // 断言里写的是 LF + 制表符缩进；Windows 检出（autocrlf）下内嵌资源是 CRLF，先统一再比
+    let page = page.replace("\r\n", "\n");
 
     assert!(page.contains("document.addEventListener('contextmenu'"));
     assert!(page.contains("window.ipc.postMessage('refresh')"));
