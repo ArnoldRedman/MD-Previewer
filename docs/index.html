@@ -47,7 +47,7 @@
       不打包浏览器内核，双击即开、秒出正文；渲染全在本地完成，不上传任何文档。
     </p>
     <ul class="chips">
-      <li>Windows 10/11 · Linux</li>
+      <li>Windows 10/11 · Linux · ARM64</li>
       <li>安装包约 4 MB</li>
       <li>无 Electron</li>
       <li>无遥测、无账号</li>
@@ -309,7 +309,7 @@
       </div>
       <div class="card">
         <h3>3 · 不想安装就用绿色版</h3>
-        <p><code>MD-Previewer-windows-x64.exe</code> 是单文件版本，放到任意目录双击就能用，卸载就是删掉它。</p>
+        <p><code>MD-Previewer-windows-x64.exe</code> 是单文件版本，放到任意目录双击就能用，卸载就是删掉它。ARM64 机器用 <code>MD-Previewer-windows-arm64.exe</code>。</p>
       </div>
     </div>
     <p class="note">
@@ -390,24 +390,44 @@
       </thead>
       <tbody>
         <tr>
-          <td>Windows 10/11</td>
+          <td>Windows 10/11 (x64)</td>
           <td>安装包（推荐）</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">MD-Previewer-Setup.exe</a></td>
         </tr>
         <tr>
-          <td>Windows 10/11</td>
+          <td>Windows 11 ARM64</td>
+          <td>安装包</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup-arm64.exe">MD-Previewer-Setup-arm64.exe</a></td>
+        </tr>
+        <tr>
+          <td>Windows 10/11 (x64)</td>
           <td>免安装单文件</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">MD-Previewer-windows-x64.exe</a></td>
         </tr>
         <tr>
-          <td>Linux (deb)</td>
-          <td>Debian / Ubuntu</td>
+          <td>Windows 11 ARM64</td>
+          <td>免安装单文件</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-arm64.exe">MD-Previewer-windows-arm64.exe</a></td>
+        </tr>
+        <tr>
+          <td>Linux (x64)</td>
+          <td>Debian / Ubuntu deb</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-amd64.deb">MD-Previewer-linux-amd64.deb</a></td>
         </tr>
         <tr>
-          <td>Linux</td>
+          <td>Linux ARM64</td>
+          <td>Debian / Ubuntu deb</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-arm64.deb">MD-Previewer-linux-arm64.deb</a></td>
+        </tr>
+        <tr>
+          <td>Linux (x64)</td>
           <td>免安装压缩包</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-x64.tar.gz">MD-Previewer-linux-x64.tar.gz</a></td>
+        </tr>
+        <tr>
+          <td>Linux ARM64</td>
+          <td>免安装压缩包</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-arm64.tar.gz">MD-Previewer-linux-arm64.tar.gz</a></td>
         </tr>
         <tr>
           <td>Android</td>
@@ -431,7 +451,7 @@
         </tr>
       </tbody>
     </table>
-    <p class="note">Windows 版本暂未做代码签名，首次运行可能被 SmartScreen 拦一下，属正常现象。Linux 版需要系统自带 WebKitGTK 4.1（Ubuntu 22.04+、Debian 12+、Fedora 36+ 均已内置），包由 CI 构建，尚未在真机验证渲染效果。</p>
+    <p class="note">Windows 版本暂未做代码签名，首次运行可能被 SmartScreen 拦一下，属正常现象。Linux 版需要系统自带 WebKitGTK 4.1（Ubuntu 22.04+、Debian 12+、Fedora 36+ 均已内置）。ARM64 包由 CI 的 windows-11-arm / ubuntu-24.04-arm runner 构建，Windows ARM64 的静默安装与卸载在 arm64 机器上真实跑过；Linux ARM64 尚未在真机验证渲染效果。</p>
   </div>
 </section>
 

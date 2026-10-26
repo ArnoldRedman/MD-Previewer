@@ -20,10 +20,17 @@ if ([string]::IsNullOrWhiteSpace($Arch)) {
 $dist = Join-Path $root "dist"
 $payload = Join-Path $dist "payload"
 $releaseExe = Join-Path $root "target\release\md-previewer.exe"
-# 资产名带架构：x64 的三个名字保持历史拼写，落地页和热更后缀都按它匹配
-$portableExe = Join-Path $dist "MD-Previewer-windows-$Arch.exe"
-$installerName = if ($Arch -eq "arm64") { "MD-Previewer-Setup-arm64" } else { "MD-Previewer-Setup" }
-$installer = Join-Path $dist "$installerName.exe"
+# 资产名带架构，且写成字面量：scripts/verify-landing-page.mjs 从这里读产物名
+# 去校对落地页链接，x64 的名字保持历史拼写不变
+if ($Arch -eq "arm64") {
+    $portableExe = Join-Path $dist "MD-Previewer-windows-arm64.exe"
+    $installer = Join-Path $dist "MD-Previewer-Setup-arm64.exe"
+}
+else {
+    $portableExe = Join-Path $dist "MD-Previewer-windows-x64.exe"
+    $installer = Join-Path $dist "MD-Previewer-Setup.exe"
+}
+$installerName = [IO.Path]::GetFileNameWithoutExtension($installer)
 $testInstall = Join-Path $dist "installer-test"
 $testRegistryRoot = "HKCU:\Software\MDPreviewerBuildTest"
 $testClassesRoot = Join-Path $testRegistryRoot "Classes"

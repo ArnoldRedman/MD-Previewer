@@ -46,7 +46,7 @@
       It ships no browser engine, opens on double click, and renders everything on your machine.
     </p>
     <ul class="chips">
-      <li>Windows 10/11 · Linux</li>
+      <li>Windows 10/11 · Linux · ARM64</li>
       <li>~4 MB installer</li>
       <li>No Electron</li>
       <li>No telemetry, no account</li>
@@ -308,7 +308,7 @@
       </div>
       <div class="card">
         <h3>3 · Or use the portable build</h3>
-        <p><code>MD-Previewer-windows-x64.exe</code> is a single file that runs from any folder. Uninstalling means deleting it.</p>
+        <p><code>MD-Previewer-windows-x64.exe</code> is a single file that runs from any folder. Uninstalling means deleting it. On ARM64 Windows use <code>MD-Previewer-windows-arm64.exe</code>.</p>
       </div>
     </div>
     <p class="note">
@@ -389,24 +389,44 @@
       </thead>
       <tbody>
         <tr>
-          <td>Windows 10/11</td>
+          <td>Windows 10/11 (x64)</td>
           <td>Installer (recommended)</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup.exe">MD-Previewer-Setup.exe</a></td>
         </tr>
         <tr>
-          <td>Windows 10/11</td>
+          <td>Windows 11 ARM64</td>
+          <td>Installer</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-Setup-arm64.exe">MD-Previewer-Setup-arm64.exe</a></td>
+        </tr>
+        <tr>
+          <td>Windows 10/11 (x64)</td>
           <td>Portable single file</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-x64.exe">MD-Previewer-windows-x64.exe</a></td>
         </tr>
         <tr>
-          <td>Linux (deb)</td>
-          <td>Debian / Ubuntu</td>
+          <td>Windows 11 ARM64</td>
+          <td>Portable single file</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-windows-arm64.exe">MD-Previewer-windows-arm64.exe</a></td>
+        </tr>
+        <tr>
+          <td>Linux (x64)</td>
+          <td>Debian / Ubuntu deb</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-amd64.deb">MD-Previewer-linux-amd64.deb</a></td>
         </tr>
         <tr>
-          <td>Linux</td>
+          <td>Linux ARM64</td>
+          <td>Debian / Ubuntu deb</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-arm64.deb">MD-Previewer-linux-arm64.deb</a></td>
+        </tr>
+        <tr>
+          <td>Linux (x64)</td>
           <td>Portable tarball</td>
           <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-x64.tar.gz">MD-Previewer-linux-x64.tar.gz</a></td>
+        </tr>
+        <tr>
+          <td>Linux ARM64</td>
+          <td>Portable tarball</td>
+          <td><a href="https://github.com/ArnoldRedman/MD-Previewer/releases/latest/download/MD-Previewer-linux-arm64.tar.gz">MD-Previewer-linux-arm64.tar.gz</a></td>
         </tr>
         <tr>
           <td>Android</td>
@@ -430,7 +450,7 @@
         </tr>
       </tbody>
     </table>
-    <p class="note">Windows builds are not code signed yet, so SmartScreen may warn on first launch. That is expected. Linux packages need WebKitGTK 4.1, which Ubuntu 22.04+, Debian 12+ and Fedora 36+ ship by default; they are produced by CI and have not been rendered on real hardware yet.</p>
+    <p class="note">Windows builds are not code signed yet, so SmartScreen may warn on first launch. That is expected. Linux packages need WebKitGTK 4.1, which Ubuntu 22.04+, Debian 12+ and Fedora 36+ ship by default. ARM64 packages are built by the windows-11-arm and ubuntu-24.04-arm CI runners; the Windows ARM64 silent install and uninstall run for real on an arm64 host, while Linux ARM64 has not been rendered on real hardware yet.</p>
   </div>
 </section>
 
