@@ -28,7 +28,13 @@ pub(crate) fn is_allowed_update_url(url: &str) -> bool {
 pub(crate) fn asset_suffixes() -> Vec<&'static str> {
     #[cfg(target_os = "windows")]
     {
-        vec!["-windows-x64.exe", "-Setup.exe"]
+        // 资产名带架构；x64 的安装包沿用历史命名（不带后缀），arm64 用 -arm64 区分。
+        // 认不出的架构同样不给后缀：宁可让人去发布页，也不能把 x64 包装到 arm64 上
+        match std::env::consts::ARCH {
+            "x86_64" => vec!["-windows-x64.exe", "-Setup.exe"],
+            "aarch64" => vec!["-windows-arm64.exe", "-Setup-arm64.exe"],
+            _ => Vec::new(),
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -489,10 +495,26 @@ mod tests {
         assert!(reports.windows(2).all(|pair| pair[0].0 <= pair[1].0));
     }
 
+    /// 后缀必须能匹配到 build-windows.ps1 为当前架构产出的文件名，否则热更会挑不到包
     #[cfg(target_os = "windows")]
     #[test]
-    fn windows_assets_are_the_two_exe_builds() {
-        assert_eq!(asset_suffixes(), vec!["-windows-x64.exe", "-Setup.exe"]);
+    fn windows_assets_match_the_packaged_names() {
+        let expected = if cfg!(target_arch = "aarch64") {
+            [
+                "MD-Previewer-windows-arm64.exe",
+                "MD-Previewer-Setup-arm64.exe",
+            ]
+        } else {
+            ["MD-Previewer-windows-x64.exe", "MD-Previewer-Setup.exe"]
+        };
+        let suffixes = asset_suffixes();
+        assert_eq!(suffixes.len(), expected.len(), "{suffixes:?}");
+        for (suffix, asset) in suffixes.iter().zip(expected) {
+            assert!(
+                asset.ends_with(suffix),
+                "{asset} does not end with {suffix}"
+            );
+        }
     }
 
     /// Linux 上用 sh -n 验一遍生成脚本的语法：字符串拼错了只有真机才会发现

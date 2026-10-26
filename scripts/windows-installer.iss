@@ -37,6 +37,9 @@ DefaultDirName={localappdata}\Programs\MD Previewer
 DefaultGroupName={#GroupName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+; x64 包在 ARM64 Windows 上靠模拟也能装，arm64 包只允许 ARM64，避免把原生包里塞进 x64 机器
+ArchitecturesAllowed={#TargetArch}
+ArchitecturesInstallIn64BitMode={#TargetArch}
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputBaseFilename}
 SetupIconFile={#SourceRoot}\assets\icon.ico

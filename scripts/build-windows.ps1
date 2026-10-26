@@ -1,5 +1,8 @@
 ﻿param(
-    [switch]$SkipInstallerTest
+    [switch]$SkipInstallerTest,
+    # 目标架构：默认取操作系统架构（ARM64 Windows 上即便 PowerShell 跑在 x64 模拟里也报 Arm64）
+    [ValidateSet("x64", "arm64")]
+    [string]$Arch
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,11 +12,18 @@ $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 Set-Location -LiteralPath $root
 $cargo = (Get-Command cargo.exe -ErrorAction Stop).Source
 
+if ([string]::IsNullOrWhiteSpace($Arch)) {
+    $Arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq
+        [System.Runtime.InteropServices.Architecture]::Arm64) { "arm64" } else { "x64" }
+}
+
 $dist = Join-Path $root "dist"
 $payload = Join-Path $dist "payload"
 $releaseExe = Join-Path $root "target\release\md-previewer.exe"
-$portableExe = Join-Path $dist "MD-Previewer-windows-x64.exe"
-$installer = Join-Path $dist "MD-Previewer-Setup.exe"
+# 资产名带架构：x64 的三个名字保持历史拼写，落地页和热更后缀都按它匹配
+$portableExe = Join-Path $dist "MD-Previewer-windows-$Arch.exe"
+$installerName = if ($Arch -eq "arm64") { "MD-Previewer-Setup-arm64" } else { "MD-Previewer-Setup" }
+$installer = Join-Path $dist "$installerName.exe"
 $testInstall = Join-Path $dist "installer-test"
 $testRegistryRoot = "HKCU:\Software\MDPreviewerBuildTest"
 $testClassesRoot = Join-Path $testRegistryRoot "Classes"
@@ -84,6 +94,20 @@ Remove-Item Env:MD_PREVIEWER_SHELL_DLL
 if (-not (Test-Path -LiteralPath $releaseExe)) {
     throw "Release executable was not created: $releaseExe"
 }
+
+# cargo 可能被 x64 模拟 shell 拉起来而产出 x64 二进制；真查一次 PE 机器类型，
+# 别把 x64 包标成 arm64 传上去
+function Assert-PeMachine([string]$Path, [string]$Expected) {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3C)
+    $machine = [System.BitConverter]::ToUInt16($bytes, $peOffset + 4)
+    $want = if ($Expected -eq "arm64") { 0xAA64 } else { 0x8664 }
+    if ($machine -ne $want) {
+        throw "Expected $Expected PE machine 0x$('{0:X}' -f $want), got 0x$('{0:X}' -f $machine): cargo built for the wrong host arch"
+    }
+}
+
+Assert-PeMachine $releaseExe $Arch
 # Read the version from the resource build.rs embeds, so Cargo.toml is parsed in exactly one place (verify.sh)
 $version = (Get-Item -LiteralPath $releaseExe).VersionInfo.ProductVersion
 if ([string]::IsNullOrWhiteSpace($version)) {
@@ -158,6 +182,8 @@ function Compile-Installer([string]$OutputDir, [string]$OutputBaseName, [hashtab
     # 1.6.1 的 IExpress 安装器写的那条卸载项，安装时删掉，免得控制面板出现两条
     $env:MD_PREVIEWER_ISCC_LEGACY_UNINSTALL = "Software\Microsoft\Windows\CurrentVersion\Uninstall\MDPreviewer"
     $env:MD_PREVIEWER_ISCC_GROUP = "MD Previewer"
+    # x64 用 x64compatible（ARM64 Windows 上靠模拟也能装），arm64 只允许 ARM64
+    $env:MD_PREVIEWER_ISCC_ARCH = if ($Arch -eq "arm64") { "arm64" } else { "x64compatible" }
     $env:MD_PREVIEWER_ISCC_CHINESE_MESSAGES = $chineseMessages
     foreach ($name in $Overrides.Keys) {
         Set-Item -Path "env:$name" -Value ([string]$Overrides[$name])
@@ -169,7 +195,7 @@ function Compile-Installer([string]$OutputDir, [string]$OutputBaseName, [hashtab
 }
 
 Write-Host "[build] Creating installer with Inno Setup"
-Compile-Installer $dist "MD-Previewer-Setup" @{}
+Compile-Installer $dist $installerName @{}
 if (-not (Test-Path -LiteralPath $installer)) {
     throw "Installer was not created: $installer"
 }

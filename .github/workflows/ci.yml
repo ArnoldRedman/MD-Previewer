@@ -22,14 +22,23 @@ jobs:
         run: npm run lint
 
   build-windows:
-    runs-on: windows-latest
+    # x64 走 windows-latest，ARM64 走 GitHub 托管的原生 windows-11-arm
+    strategy:
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test and build
-        run: |
-          cargo test
-          cargo build --release
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Test, build and package
+        shell: powershell
+        run: ./scripts/build-windows.ps1 -Arch ${{ matrix.arch }}
       - name: Verify Windows identity and GUI subsystem
         shell: pwsh
         run: |
@@ -50,8 +59,10 @@ jobs:
         run: ./scripts/verify-windows-large-document-startup.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: md-previewer-windows-x64
-          path: target/release/md-previewer.exe
+          name: md-previewer-windows-${{ matrix.arch }}
+          path: |
+            dist/MD-Previewer-windows-${{ matrix.arch }}.exe
+            dist/MD-Previewer-Setup*.exe
 
   build-macos:
     runs-on: macos-latest
