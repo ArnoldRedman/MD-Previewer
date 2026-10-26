@@ -36,8 +36,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
+      - name: Install Inno Setup (if missing)
+        shell: pwsh
+        run: |
+          # 两个 Windows 镜像都已自带 Inno Setup，缺了才装，避免多一步无效的 choco 调用
+          if (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe") { exit 0 }
+          choco install innosetup -y --no-progress
       - name: Test, build and package
         shell: powershell
         run: ./scripts/build-windows.ps1 -Arch ${{ matrix.arch }}

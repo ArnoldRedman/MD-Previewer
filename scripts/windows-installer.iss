@@ -20,6 +20,8 @@
 #define LegacyUninstallSubkey GetEnv("MD_PREVIEWER_ISCC_LEGACY_UNINSTALL")
 #define GroupName GetEnv("MD_PREVIEWER_ISCC_GROUP")
 #define ChineseMessagesFile GetEnv("MD_PREVIEWER_ISCC_CHINESE_MESSAGES")
+; 允许安装的系统架构标识，由 build-windows.ps1 按目标架构传入（x64compatible / arm64）
+#define TargetArch GetEnv("MD_PREVIEWER_ISCC_ARCH")
 ; 右键菜单的 CLSID，必须和 association-prune.ps1、src/platform.rs 里的常量一致
 #define ShellClsid "7E2A9C14-5B6D-4E83-9F10-A1C3D5E7B902"
 ; 带花括号的写法给注册表用：Inno 里 "{{" 展开成一个 "{"
